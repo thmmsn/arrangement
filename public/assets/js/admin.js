@@ -24,7 +24,7 @@ async function load() {
     return;
   }
   try {
-    ({ event, registrations } = await api(`/events/${slug}/admin`, { headers: auth }));
+    ({ event, registrations } = await api(`/admin/events/${slug}`, { headers: auth }));
   } catch (err) {
     app.replaceChildren(h('h1', {}, 'Ingen tilgang'), h('p', {}, err.message));
     return;
@@ -42,7 +42,7 @@ function eventPayload(overrides = {}) {
 }
 
 async function save(payload, message) {
-  ({ event } = await api(`/events/${slug}/admin`, { method: 'PUT', body: payload, headers: auth }));
+  ({ event } = await api(`/admin/events/${slug}`, { method: 'PUT', body: payload, headers: auth }));
   flash = notice('success', message);
   render();
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -153,7 +153,7 @@ function guestsCard() {
 async function removeGuest(registration) {
   if (!confirm(`Fjerne ${registration.name} fra listen? Gjesten får ingen beskjed om dette.`)) return;
   try {
-    await api(`/events/${slug}/admin/registrations/${registration.id}`, { method: 'DELETE', headers: auth });
+    await api(`/admin/events/${slug}/registrations/${registration.id}`, { method: 'DELETE', headers: auth });
     flash = notice('success', `${registration.name} er fjernet.`);
     await load();
   } catch (err) {
@@ -162,7 +162,7 @@ async function removeGuest(registration) {
 }
 
 async function downloadCsv() {
-  const res = await fetch(`/api/events/${slug}/admin/registrations.csv`, { headers: auth });
+  const res = await fetch(`/api/admin/events/${slug}/registrations.csv`, { headers: auth });
   if (!res.ok) return alert('Kunne ikke laste ned filen.');
   const url = URL.createObjectURL(await res.blob());
   const link = h('a', { href: url, download: `pameldte-${slug}.csv` });
@@ -189,7 +189,7 @@ function dangerCard() {
     const answer = prompt(`Dette sletter arrangementet og alle ${event.count} påmeldinger for godt.\nSkriv SLETT for å bekrefte:`);
     if (answer?.trim().toUpperCase() !== 'SLETT') return;
     try {
-      await api(`/events/${slug}/admin`, { method: 'DELETE', headers: auth });
+      await api(`/admin/events/${slug}`, { method: 'DELETE', headers: auth });
       app.replaceChildren(h('h1', {}, 'Arrangementet er slettet'), h('p', {}, 'Arrangementet og alle påmeldingene er fjernet.'));
     } catch (err) {
       alert(err.message);

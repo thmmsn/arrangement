@@ -1,4 +1,6 @@
 import { formatAnswer, formatEventTime } from './format.js';
+import { escapeHtml } from './html.js';
+import { DEFAULT_COLORS } from './theme.js';
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 
@@ -25,42 +27,59 @@ export function createMailer({ apiKey, from, fetchImpl = fetch, logger = console
 
 // ---------- Maler ----------
 
-export function escapeHtml(value) {
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
+export { escapeHtml };
 
-function layout(title, bodyHtml) {
-  return `<!doctype html>
+// Standardtema når ingen er gitt (f.eks. i tester). Appen sender alltid temaet fra .env.
+const DEFAULT_THEME = { colors: DEFAULT_COLORS, siteName: '', logoAbsoluteUrl: '', logoHeight: 44 };
+
+// E-post-HTML må ha stilene inline – e-postklienter ignorerer stilark. Fargene kommer fra temaet
+// og er allerede validert (se theme.js), så de kan trygt settes inn i style-attributter.
+function emailUi(theme = DEFAULT_THEME) {
+  const c = theme.colors;
+  const brand = theme.logoAbsoluteUrl
+    ? `<img src="${escapeHtml(theme.logoAbsoluteUrl)}" alt="${escapeHtml(theme.siteName || '')}" height="${theme.logoHeight}" style="display:block;height:${theme.logoHeight}px;width:auto;margin:0 auto 20px;border:0;">`
+    : theme.siteName
+      ? `<p style="text-align:center;margin:0 0 20px;font-family:Arial,sans-serif;font-size:13px;letter-spacing:2px;text-transform:uppercase;color:${c.accent};">${escapeHtml(theme.siteName)}</p>`
+      : '';
+
+  return {
+    layout(title, bodyHtml) {
+      return `<!doctype html>
 <html lang="nb"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head>
-<body style="margin:0;padding:24px 12px;background:#f5efe4;font-family:Georgia,'Times New Roman',serif;color:#2b2420;">
-  <div style="max-width:560px;margin:0 auto;background:#fffdf8;border:1px solid #e3d9c8;border-radius:6px;padding:32px 28px;">
-    ${bodyHtml}
+<body style="margin:0;padding:24px 12px;background:${c.background};font-family:Georgia,'Times New Roman',serif;color:${c.text};">
+  <div style="max-width:560px;margin:0 auto;">
+    ${brand}
+    <div style="background:${c.surface};border:1px solid ${c.border};border-radius:6px;padding:32px 28px;">
+      ${bodyHtml}
+    </div>
   </div>
 </body></html>`;
-}
-
-function detailsTable(rows) {
-  const html = rows
-    .filter(([, value]) => value)
-    .map(([label, value]) => `<tr>
-      <td style="padding:6px 16px 6px 0;color:#6b5e53;vertical-align:top;white-space:nowrap;font-family:Arial,sans-serif;font-size:14px;">${escapeHtml(label)}</td>
-      <td style="padding:6px 0;font-family:Arial,sans-serif;font-size:14px;">${escapeHtml(value)}</td>
-    </tr>`)
-    .join('');
-  return `<table style="border-collapse:collapse;margin:16px 0;">${html}</table>`;
+    },
+    detailsTable(rows) {
+      const html = rows
+        .filter(([, value]) => value)
+        .map(([label, value]) => `<tr>
+          <td style="padding:6px 16px 6px 0;color:${c.muted};vertical-align:top;white-space:nowrap;font-family:Arial,sans-serif;font-size:14px;">${escapeHtml(label)}</td>
+          <td style="padding:6px 0;font-family:Arial,sans-serif;font-size:14px;">${escapeHtml(value)}</td>
+        </tr>`)
+        .join('');
+      return `<table style="border-collapse:collapse;margin:16px 0;">${html}</table>`;
+    },
+    button(href, label) {
+      return `<p style="margin:24px 0;"><a href="${escapeHtml(href)}" style="display:inline-block;background:${c.accent};color:${c.accentText};text-decoration:none;padding:12px 20px;border-radius:4px;font-family:Arial,sans-serif;font-size:15px;">${escapeHtml(label)}</a></p>`;
+    },
+    /** Lenke i temaets aksentfarge. `labelHtml` må allerede være escapet. */
+    link(href, labelHtml) {
+      return `<a href="${escapeHtml(href)}" style="color:${c.accent};">${labelHtml}</a>`;
+    },
+    small(html) {
+      return p(`<span style="color:${c.muted};font-size:13px;">${html}</span>`);
+    },
+  };
 }
 
 function detailsText(rows) {
   return rows.filter(([, value]) => value).map(([label, value]) => `${label}: ${value}`).join('\n');
-}
-
-function button(href, label) {
-  return `<p style="margin:24px 0;"><a href="${escapeHtml(href)}" style="display:inline-block;background:#8b2e2a;color:#fff;text-decoration:none;padding:12px 20px;border-radius:4px;font-family:Arial,sans-serif;font-size:15px;">${escapeHtml(label)}</a></p>`;
 }
 
 const p = (text) => `<p style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;">${text}</p>`;
@@ -83,11 +102,11 @@ function personRows(event, person) {
 }
 
 // Én person vises som en enkel tabell; flere personer får hver sin overskrift («Person 1», «Person 2» …).
-function personsHtml(event, persons) {
-  if (persons.length === 1) return detailsTable(personRows(event, persons[0]));
+function personsHtml(ui, event, persons) {
+  if (persons.length === 1) return ui.detailsTable(personRows(event, persons[0]));
   return persons.map((person, i) => `
     <h2 style="font-weight:normal;font-size:19px;margin:20px 0 0;">Person ${i + 1}</h2>
-    ${detailsTable(personRows(event, person))}`).join('');
+    ${ui.detailsTable(personRows(event, person))}`).join('');
 }
 
 function personsText(event, persons) {
@@ -104,13 +123,12 @@ function countText(event, count) {
   return event.capacity != null ? `${count} av ${event.capacity} plasser er tatt` : `${count} påmeldte`;
 }
 
-const small = (html) => p(`<span style="color:#6b5e53;font-size:13px;">${html}</span>`);
-
 /**
  * Bekreftelse til den som meldte på. Én e-post for hele påmeldingen, med alle personene.
  * Svar på e-posten går til arrangøren.
  */
-export function guestConfirmation({ event, booking, eventUrl, cancelUrl, timeZone }) {
+export function guestConfirmation({ event, booking, eventUrl, cancelUrl, timeZone, theme }) {
+  const ui = emailUi(theme);
   const { persons, contactName, contactEmail } = booking;
   const several = persons.length > 1;
   const subject = `Påmelding bekreftet: ${event.title}`;
@@ -121,14 +139,14 @@ export function guestConfirmation({ event, booking, eventUrl, cancelUrl, timeZon
   const cancelLead = several ? 'Kan noen av dere ikke komme likevel? Meld av' : 'Kan du ikke komme likevel? Meld deg av';
   const cancelTail = several ? ' – du velger selv hvem' : '';
 
-  const html = layout(subject, `
+  const html = ui.layout(subject, `
     ${h1(event.title)}
     ${p(`Hei ${escapeHtml(contactName)}! ${escapeHtml(intro)}`)}
-    ${detailsTable(eventRows(event, timeZone))}
-    ${personsHtml(event, persons)}
-    ${button(eventUrl, 'Se arrangementet')}
+    ${ui.detailsTable(eventRows(event, timeZone))}
+    ${personsHtml(ui, event, persons)}
+    ${ui.button(eventUrl, 'Se arrangementet')}
     ${p('Har du spørsmål, kan du svare direkte på denne e-posten.')}
-    ${small(`${escapeHtml(cancelLead)} <a href="${escapeHtml(cancelUrl)}" style="color:#8b2e2a;">her</a>${escapeHtml(cancelTail)}, så får noen andre plassen.`)}
+    ${ui.small(`${escapeHtml(cancelLead)} ${ui.link(cancelUrl, 'her')}${escapeHtml(cancelTail)}, så får noen andre plassen.`)}
   `);
   const text = `Hei ${contactName}!
 
@@ -147,7 +165,8 @@ ${cancelLead} her${cancelTail}: ${cancelUrl}`;
 }
 
 /** Varsel til arrangøren om ny påmelding. Svar på e-posten går til den som meldte på. */
-export function organizerNotification({ event, booking, count, adminHint }) {
+export function organizerNotification({ event, booking, count, adminHint, theme }) {
+  const ui = emailUi(theme);
   const { persons, contactName, contactEmail } = booking;
   const extra = persons.length > 1 ? ` +${persons.length - 1}` : '';
   const subject = `Ny påmelding: ${contactName}${extra} – ${event.title}`;
@@ -155,12 +174,12 @@ export function organizerNotification({ event, booking, count, adminHint }) {
     ? `${contactName} (${contactEmail}) har meldt på ${persons.length} personer til ${event.title}.`
     : `${contactName} har meldt seg på ${event.title}.`;
 
-  const html = layout(subject, `
+  const html = ui.layout(subject, `
     ${h1('Ny påmelding')}
     ${p(escapeHtml(intro))}
-    ${personsHtml(event, persons)}
+    ${personsHtml(ui, event, persons)}
     ${p(`Status: ${escapeHtml(countText(event, count))}.`)}
-    ${small(escapeHtml(adminHint))}
+    ${ui.small(escapeHtml(adminHint))}
   `);
   const text = `${intro}
 
@@ -173,17 +192,18 @@ ${adminHint}`;
 }
 
 /** Kvittering til den som meldte på, etter at hele eller deler av påmeldingen er meldt av. */
-export function guestCancellation({ event, booking, cancelled, remaining, eventUrl }) {
+export function guestCancellation({ event, booking, cancelled, remaining, eventUrl, theme }) {
+  const ui = emailUi(theme);
   const subject = `Avmeldt: ${event.title}`;
   const who = cancelled.length === 1 && cancelled[0].name === booking.contactName && !remaining.length
     ? 'Du er nå meldt av.'
     : `Nå er ${nameList(cancelled)} meldt av.`;
   const rest = remaining.length ? `Fortsatt påmeldt: ${nameList(remaining)}.` : '';
-  const html = layout(subject, `
+  const html = ui.layout(subject, `
     ${h1(event.title)}
     ${p(`Hei ${escapeHtml(booking.contactName)}! ${escapeHtml(who)} Takk for at du ga beskjed.`)}
     ${rest ? p(escapeHtml(rest)) : ''}
-    ${p(`Ombestemmer du deg, kan du melde på igjen <a href="${escapeHtml(eventUrl)}" style="color:#8b2e2a;">her</a> så lenge det er ledige plasser.`)}
+    ${p(`Ombestemmer du deg, kan du melde på igjen ${ui.link(eventUrl, 'her')} så lenge det er ledige plasser.`)}
   `);
   const text = `Hei ${booking.contactName}!
 
@@ -194,11 +214,12 @@ Ombestemmer du deg, kan du melde på igjen så lenge det er ledige plasser: ${ev
 }
 
 /** Varsel til arrangøren om avmelding. */
-export function organizerCancellation({ event, booking, cancelled, count }) {
+export function organizerCancellation({ event, booking, cancelled, count, theme }) {
+  const ui = emailUi(theme);
   const names = nameList(cancelled);
   const subject = `Avmelding: ${names} – ${event.title}`;
   const intro = `${booking.contactName} (${booking.contactEmail}) har meldt av ${names} fra ${event.title}.`;
-  const html = layout(subject, `
+  const html = ui.layout(subject, `
     ${h1('Avmelding')}
     ${p(escapeHtml(intro))}
     ${p(`Status: ${escapeHtml(countText(event, count))}.`)}
@@ -210,15 +231,16 @@ Status: ${countText(event, count)}.`;
 }
 
 /** Sendes til arrangøren når arrangementet opprettes – inneholder den hemmelige admin-lenken. */
-export function eventCreated({ event, eventUrl, adminUrl, timeZone }) {
+export function eventCreated({ event, eventUrl, adminUrl, timeZone, theme }) {
+  const ui = emailUi(theme);
   const subject = `Arrangementet er opprettet: ${event.title}`;
-  const html = layout(subject, `
+  const html = ui.layout(subject, `
     ${h1(event.title)}
     ${p('Arrangementet ditt er klart. Del denne lenken med dem som skal kunne melde seg på:')}
-    ${p(`<a href="${escapeHtml(eventUrl)}" style="color:#8b2e2a;">${escapeHtml(eventUrl)}</a>`)}
-    ${detailsTable(eventRows(event, timeZone))}
+    ${p(ui.link(eventUrl, escapeHtml(eventUrl)))}
+    ${ui.detailsTable(eventRows(event, timeZone))}
     ${p('Administrasjonslenken under gir tilgang til listen over påmeldte og lar deg endre arrangementet. <strong>Ikke del den</strong> – alle som har lenken, er administrator.')}
-    ${button(adminUrl, 'Administrer arrangementet')}
+    ${ui.button(adminUrl, 'Administrer arrangementet')}
   `);
   const text = `Arrangementet ${event.title} er klart.
 

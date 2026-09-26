@@ -80,7 +80,7 @@ function eventInput(overrides = {}) {
 }
 
 async function createEvent(overrides) {
-  const res = await call('/api/events', { method: 'POST', body: eventInput(overrides), headers: { 'X-Admin-Password': 'hemmelig' } });
+  const res = await call('/api/admin/events', { method: 'POST', body: eventInput(overrides), headers: { 'X-Admin-Password': 'hemmelig' } });
   assert.equal(res.status, 201, JSON.stringify(res.data));
   const { data: event } = await call(`/api/events/${res.data.slug}`);
   sent = [];
@@ -103,25 +103,25 @@ const admin = (key) => ({ Authorization: `Bearer ${key}` });
 
 describe('opprette arrangement', () => {
   test('krever riktig administratorpassord', async () => {
-    const none = await call('/api/events', { method: 'POST', body: eventInput() });
+    const none = await call('/api/admin/events', { method: 'POST', body: eventInput() });
     assert.equal(none.status, 401);
-    const wrong = await call('/api/events', { method: 'POST', body: eventInput(), headers: { 'X-Admin-Password': 'feil' } });
+    const wrong = await call('/api/admin/events', { method: 'POST', body: eventInput(), headers: { 'X-Admin-Password': 'feil' } });
     assert.equal(wrong.status, 401);
   });
 
   test('gir tilfeldig lenke og admin-lenke, og sender admin-lenken til arrangøren', async () => {
-    const res = await call('/api/events', { method: 'POST', body: eventInput(), headers: { 'X-Admin-Password': 'hemmelig' } });
+    const res = await call('/api/admin/events', { method: 'POST', body: eventInput(), headers: { 'X-Admin-Password': 'hemmelig' } });
     assert.equal(res.status, 201);
     assert.match(res.data.slug, /^[a-z2-9]{12}$/);
     assert.equal(res.data.eventUrl, `https://booking.example.com/${res.data.slug}`);
-    assert.equal(res.data.adminUrl, `https://booking.example.com/${res.data.slug}/admin#${res.data.adminKey}`);
+    assert.equal(res.data.adminUrl, `https://booking.example.com/admin/${res.data.slug}#${res.data.adminKey}`);
     assert.equal(sent.length, 1);
     assert.equal(sent[0].to, 'kari@example.com');
     assert.ok(sent[0].text.includes(res.data.adminUrl));
   });
 
   test('validerer input', async () => {
-    const res = await call('/api/events', {
+    const res = await call('/api/admin/events', {
       method: 'POST',
       body: { title: '', startsAt: 'i morgen', organizerEmail: 'ikke-epost', fields: [{ label: 'Valg', type: 'select', options: [] }] },
       headers: { 'X-Admin-Password': 'hemmelig' },
@@ -131,7 +131,7 @@ describe('opprette arrangement', () => {
   });
 
   test('godtar bare https-bilder', async () => {
-    const res = await call('/api/events', {
+    const res = await call('/api/admin/events', {
       method: 'POST',
       body: eventInput({ imageUrl: 'javascript:alert(1)' }),
       headers: { 'X-Admin-Password': 'hemmelig' },
@@ -222,7 +222,7 @@ describe('påmelding', () => {
 
   test('stengt påmelding og utløpt frist avvises', async () => {
     const { slug, event, adminKey } = await createEvent();
-    const put = await call(`/api/events/${slug}/admin`, { method: 'PUT', body: eventInput({ isOpen: false }), headers: admin(adminKey) });
+    const put = await call(`/api/admin/events/${slug}`, { method: 'PUT', body: eventInput({ isOpen: false }), headers: admin(adminKey) });
     assert.equal(put.status, 200);
     const closed = await register(slug, event);
     assert.equal(closed.status, 409);
@@ -285,11 +285,11 @@ describe('administrasjon', () => {
   test('krever riktig admin-nøkkel for arrangementet', async () => {
     const a = await createEvent();
     const b = await createEvent();
-    assert.equal((await call(`/api/events/${a.slug}/admin`)).status, 401);
-    assert.equal((await call(`/api/events/${a.slug}/admin`, { headers: admin('feil') })).status, 401);
+    assert.equal((await call(`/api/admin/events/${a.slug}`)).status, 401);
+    assert.equal((await call(`/api/admin/events/${a.slug}`, { headers: admin('feil') })).status, 401);
     // Nøkkelen til ett arrangement gir ikke tilgang til et annet.
-    assert.equal((await call(`/api/events/${a.slug}/admin`, { headers: admin(b.adminKey) })).status, 401);
-    assert.equal((await call(`/api/events/${a.slug}/admin`, { headers: admin(a.adminKey) })).status, 200);
+    assert.equal((await call(`/api/admin/events/${a.slug}`, { headers: admin(b.adminKey) })).status, 401);
+    assert.equal((await call(`/api/admin/events/${a.slug}`, { headers: admin(a.adminKey) })).status, 200);
   });
 
   test('lister påmeldte, fjerner gjester og eksporterer CSV', async () => {
@@ -297,11 +297,11 @@ describe('administrasjon', () => {
     await register(slug, event, { name: '=Formel', answers: answersFor(event, { allergi: 'Gluten; laktose' }) });
     await register(slug, event, { name: 'Kari', email: 'kari2@example.com' });
 
-    const list = await call(`/api/events/${slug}/admin`, { headers: admin(adminKey) });
+    const list = await call(`/api/admin/events/${slug}`, { headers: admin(adminKey) });
     assert.equal(list.data.registrations.length, 2);
     assert.equal(list.data.event.organizerEmail, 'kari@example.com');
 
-    const csv = await fetch(`${base}/api/events/${slug}/admin/registrations.csv`, { headers: admin(adminKey) });
+    const csv = await fetch(`${base}/api/admin/events/${slug}/registrations.csv`, { headers: admin(adminKey) });
     assert.equal(csv.status, 200);
     assert.match(csv.headers.get('content-disposition'), /attachment; filename="pameldte-/);
     // Leser rå bytes: response.text() fjerner BOM-en, som Excel trenger for å forstå UTF-8.
@@ -313,7 +313,7 @@ describe('administrasjon', () => {
     assert.match(text, /;"Gluten; laktose";/);
 
     const id = list.data.registrations[0].id;
-    const del = await call(`/api/events/${slug}/admin/registrations/${id}`, { method: 'DELETE', headers: admin(adminKey) });
+    const del = await call(`/api/admin/events/${slug}/registrations/${id}`, { method: 'DELETE', headers: admin(adminKey) });
     assert.equal(del.status, 200);
     assert.equal(del.data.count, 1);
   });
@@ -322,20 +322,20 @@ describe('administrasjon', () => {
     const { slug, event, adminKey } = await createEvent();
     await register(slug, event, { answers: answersFor(event, { allergi: 'Nøtter' }) });
     const fields = [...event.fields, { label: 'Telefon', type: 'tel' }];
-    const put = await call(`/api/events/${slug}/admin`, { method: 'PUT', body: eventInput({ title: 'Nytt navn', fields }), headers: admin(adminKey) });
+    const put = await call(`/api/admin/events/${slug}`, { method: 'PUT', body: eventInput({ title: 'Nytt navn', fields }), headers: admin(adminKey) });
     assert.equal(put.status, 200);
     assert.equal(put.data.event.title, 'Nytt navn');
     assert.equal(put.data.event.fields[0].id, event.fields[0].id);
     assert.equal(put.data.event.fields.length, 4);
 
-    const list = await call(`/api/events/${slug}/admin`, { headers: admin(adminKey) });
+    const list = await call(`/api/admin/events/${slug}`, { headers: admin(adminKey) });
     assert.equal(list.data.registrations[0].answers[event.fields[0].id], 'Nøtter');
   });
 
   test('sletting fjerner arrangementet og påmeldingene', async () => {
     const { slug, event, adminKey } = await createEvent();
     await register(slug, event);
-    assert.equal((await call(`/api/events/${slug}/admin`, { method: 'DELETE', headers: admin(adminKey) })).status, 200);
+    assert.equal((await call(`/api/admin/events/${slug}`, { method: 'DELETE', headers: admin(adminKey) })).status, 200);
     assert.equal((await call(`/api/events/${slug}`)).status, 404);
   });
 });
@@ -358,7 +358,7 @@ describe('påmelding av flere personer', () => {
     assert.deepEqual(sent.map((m) => m.to).sort(), ['kari@example.com', 'ola@example.com']);
     assert.match(sent.find((m) => m.to === 'kari@example.com').subject, /Ola Nordmann \+2/);
 
-    const list = await call(`/api/events/${slug}/admin`, { headers: admin(adminKey) });
+    const list = await call(`/api/admin/events/${slug}`, { headers: admin(adminKey) });
     const rows = list.data.registrations;
     assert.deepEqual(rows.map((r) => [r.name, r.email, r.position, r.contactName]), [
       ['Ola Nordmann', 'ola@example.com', 0, 'Ola Nordmann'],
@@ -423,7 +423,7 @@ describe('påmelding av flere personer', () => {
   test('standard er maks 10 per påmelding, og verdien valideres', async () => {
     const { event } = await createEvent();
     assert.equal(event.maxPerBooking, 10);
-    const bad = await call('/api/events', { method: 'POST', body: eventInput({ maxPerBooking: 0 }), headers: { 'X-Admin-Password': 'hemmelig' } });
+    const bad = await call('/api/admin/events', { method: 'POST', body: eventInput({ maxPerBooking: 0 }), headers: { 'X-Admin-Password': 'hemmelig' } });
     assert.equal(bad.status, 400);
     assert.ok(bad.data.errors.maxPerBooking);
   });
@@ -458,7 +458,7 @@ describe('påmelding av flere personer', () => {
     await register(slug, event, { name: 'Annen', email: 'annen@example.com' });
     await register(slug, event);
     const token = tokenFromMail();
-    const list = await call(`/api/events/${slug}/admin`, { headers: admin(adminKey) });
+    const list = await call(`/api/admin/events/${slug}`, { headers: admin(adminKey) });
     const other = list.data.registrations.find((r) => r.name === 'Annen');
 
     const res = await call(`/api/events/${slug}/cancel`, { method: 'POST', body: { token, ids: [other.id] } });
@@ -472,15 +472,15 @@ describe('påmelding av flere personer', () => {
     const { slug, event, adminKey } = await createEvent();
     await register(slug, event, { guests: [guest(event, 'Kari')] });
     const token = tokenFromMail();
-    const { data } = await call(`/api/events/${slug}/admin`, { headers: admin(adminKey) });
+    const { data } = await call(`/api/admin/events/${slug}`, { headers: admin(adminKey) });
 
     // Fjerner kontaktpersonen: Kari står fortsatt, og lenken virker for henne.
-    await call(`/api/events/${slug}/admin/registrations/${data.registrations[0].id}`, { method: 'DELETE', headers: admin(adminKey) });
+    await call(`/api/admin/events/${slug}/registrations/${data.registrations[0].id}`, { method: 'DELETE', headers: admin(adminKey) });
     const lookup = await call(`/api/events/${slug}/cancel/lookup`, { method: 'POST', body: { token } });
     assert.deepEqual(lookup.data.persons.map((p) => p.name), ['Kari']);
 
     // Fjerner siste person: påmeldingen forsvinner.
-    await call(`/api/events/${slug}/admin/registrations/${data.registrations[1].id}`, { method: 'DELETE', headers: admin(adminKey) });
+    await call(`/api/admin/events/${slug}/registrations/${data.registrations[1].id}`, { method: 'DELETE', headers: admin(adminKey) });
     assert.equal((await call(`/api/events/${slug}/cancel/lookup`, { method: 'POST', body: { token } })).status, 404);
   });
 });

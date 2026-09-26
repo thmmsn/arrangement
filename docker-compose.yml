@@ -1,0 +1,46 @@
+# Produksjon bak Cloudflare Tunnel.
+#
+#   cp .env.example .env     # fyll inn DOMAIN, TUNNEL_TOKEN, RESEND_API_KEY, EMAIL_FROM …
+#   docker compose up -d --build
+#
+# Ingen porter åpnes på serveren: cloudflared kobler seg UT til Cloudflare, og Cloudflare sender
+# trafikken for domenene dine inn gjennom tunnelen. HTTPS håndteres av Cloudflare.
+#
+# I Cloudflare-dashbordet (Zero Trust → Networks → Tunnels → din tunnel → Public Hostname):
+#   booking.domain.com        → HTTP  booking:3000
+#   booking-admin.domain.com  → HTTP  booking:3000   (hvis du bruker eget admin-vertsnavn, ADMIN_HOST)
+#
+# Alle innstillinger ligger i .env. Etter endringer i .env: `docker compose up -d` på nytt.
+
+services:
+  booking:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Overstyrer .env med vilje:
+      # - databasen skal alltid ligge i volumet (ellers forsvinner den ved neste deploy)
+      # - appen kan bare nås gjennom tunnelen, så klientens IP kan trygt leses fra Cloudflares header
+      DATABASE_PATH: /data/booking.db
+      PORT: "3000"
+      CLIENT_IP_HEADER: cf-connecting-ip
+      # Tunnel-tokenet trengs bare av cloudflared, ikke av appen.
+      TUNNEL_TOKEN: ""
+    volumes:
+      - booking-data:/data
+      # Egne filer (logo, favicon, CSS) i ./branding blir tilgjengelige som /assets/custom/…
+      # f.eks. LOGO_URL=/assets/custom/logo.svg
+      - ./branding:/app/branding:ro
+    # Ingen «ports:» – appen skal bare kunne nås via cloudflared.
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?Sett TUNNEL_TOKEN i .env (Zero Trust → Networks → Tunnels)}
+    depends_on:
+      - booking
+
+volumes:
+  booking-data:

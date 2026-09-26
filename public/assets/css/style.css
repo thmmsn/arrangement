@@ -1,7 +1,10 @@
 /*
   Stil inspirert av reinhekla.no: lun, tradisjonell og rolig.
   Lin-farget bakgrunn, mørk brun tekst, dyp bunadsrød som aksent og serif-titler.
-  Endre fargene her for å tilpasse uttrykket.
+
+  Fargene, fontene og hjørneradiusen under er standardverdier. De overstyres av /theme.css,
+  som lages fra miljøvariablene (COLOR_*, FONT_*, RADIUS – se .env.example). Nyanser som
+  --accent-dark og --tint regnes ut fra grunnfargene, så de følger med automatisk.
 */
 :root {
   --bg: #f5efe4;
@@ -10,13 +13,18 @@
   --muted: #6b5e53;
   --line: #e3d9c8;
   --accent: #8b2e2a;
-  --accent-dark: #6f2320;
-  --accent-soft: #f3e3df;
+  --accent-ink: #ffffff; /* tekst på knapper i aksentfarge */
   --green: #3e5a45;
-  --green-soft: #e3ece4;
   --gold: #b8893a;
+  /* Avledede nyanser */
+  --accent-dark: color-mix(in srgb, var(--accent) 80%, black);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  --green-soft: color-mix(in srgb, var(--green) 14%, var(--surface));
+  --tint: color-mix(in srgb, var(--bg) 45%, var(--surface));
+  --input-border: color-mix(in srgb, var(--line) 85%, var(--ink));
   --error: #a3261f;
   --radius: 6px;
+  --radius-sm: calc(var(--radius) * 2 / 3); /* knapper og felter */
   --serif: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
   --sans: 'Source Sans 3', 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
@@ -54,6 +62,23 @@ body {
 .container.wide { max-width: 1100px; }
 
 main { flex: 1; padding: 40px 0 64px; }
+
+/* Topplinje med logo eller nettstedsnavn (LOGO_URL / SITE_NAME) */
+.site-header { padding: 22px 0 0; }
+.site-header + main { padding-top: 28px; }
+.brand {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ink);
+  text-decoration: none;
+  font-family: var(--serif);
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+.brand:hover { color: var(--accent); }
+.brand img { display: block; height: var(--logo-height, 44px); width: auto; max-width: 100%; }
+
+.home-text { white-space: pre-line; }
 
 .site-footer {
   border-top: 1px solid var(--line);
@@ -203,9 +228,9 @@ input[type='url'], input[type='password'], input[type='datetime-local'], select,
   font: inherit;
   font-size: 16px; /* Hindrer at iOS zoomer inn i skjemaet. */
   color: var(--ink);
-  background: #fff;
-  border: 1px solid #cdbfa9;
-  border-radius: 4px;
+  background: var(--surface);
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-sm);
   padding: 10px 12px;
 }
 textarea { min-height: 110px; resize: vertical; }
@@ -243,14 +268,14 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
   font-weight: 600;
   font-size: 16px;
   padding: 12px 22px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--accent);
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
   cursor: pointer;
   text-decoration: none;
 }
-.btn:hover { background: var(--accent-dark); border-color: var(--accent-dark); color: #fff; }
+.btn:hover { background: var(--accent-dark); border-color: var(--accent-dark); color: var(--accent-ink); }
 .btn:disabled { opacity: 0.6; cursor: default; }
 .btn.secondary { background: transparent; color: var(--accent); }
 .btn.secondary:hover { background: var(--accent-soft); color: var(--accent-dark); }
@@ -267,9 +292,17 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
   margin-bottom: 20px;
   border: 1px solid;
 }
-.notice.info { background: #f8f3ea; border-color: var(--line); }
-.notice.success { background: var(--green-soft); border-color: #bfd1c3; color: #243a2a; }
-.notice.error { background: var(--accent-soft); border-color: #e3b9b3; color: #5e1c18; }
+.notice.info { background: var(--tint); border-color: var(--line); }
+.notice.success {
+  background: var(--green-soft);
+  border-color: color-mix(in srgb, var(--green) 30%, var(--surface));
+  color: color-mix(in srgb, var(--green) 55%, var(--ink));
+}
+.notice.error {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--surface));
+  color: color-mix(in srgb, var(--accent) 60%, var(--ink));
+}
 .notice.warning { background: #fbf1dc; border-color: #ead29d; color: #5a4210; }
 
 .success-panel { text-align: center; padding: 12px 0; }
@@ -328,7 +361,7 @@ details.section[open] > summary { margin-bottom: 20px; }
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 14px;
-  background: #fbf7ef;
+  background: var(--tint);
 }
 .field-item .row {
   display: grid;
@@ -363,7 +396,7 @@ legend { font-family: var(--serif); font-size: 1.4rem; font-weight: 600; padding
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 18px 18px 4px;
-  background: #fbf7ef;
+  background: var(--tint);
 }
 /* Kontaktpersonen alene ser ut som et vanlig skjema – rammen kommer først når flere er lagt til. */
 .person.solo { border: none; padding: 0; background: none; }

@@ -38,9 +38,10 @@ export function h(tag, attrs = {}, ...children) {
   return el;
 }
 
-/** Slug fra adressen, f.eks. «k7hq2mxpr9az» fra /k7hq2mxpr9az/admin. */
+/** Slug fra adressen: «k7hq2mxpr9az» fra både /k7hq2mxpr9az, /k7hq2mxpr9az/avmelding og /admin/k7hq2mxpr9az. */
 export function slugFromPath() {
-  return location.pathname.split('/').filter(Boolean)[0]?.toLowerCase() || '';
+  const parts = location.pathname.split('/').filter(Boolean);
+  return (parts[0] === 'admin' ? parts[1] : parts[0])?.toLowerCase() || '';
 }
 
 /** Hemmeligheten etter # i adressen (admin-nøkkel eller avmeldingsnøkkel). */

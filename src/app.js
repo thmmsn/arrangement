@@ -4,13 +4,18 @@ import express from 'express';
 import { CapacityError } from './db.js';
 import { registrationsToCsv } from './csv.js';
 import * as templates from './email.js';
+import { accessTokenFrom, AccessError, createAccessVerifier } from './cfAccess.js';
 import { hashSecret, newSecret, newSlug, secretMatches, SLUG_PATTERN } from './ids.js';
 import { rateLimit } from './rateLimit.js';
+import { loadTheme, themeCspSources, themeCss } from './theme.js';
+import { createViews } from './views.js';
 import { registrationStatus, validateBooking, validateEvent, ValidationError } from './validation.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VIEWS = path.join(ROOT, 'views');
 const ASSETS = path.join(ROOT, 'public', 'assets');
+// Egne filer (logo, favicon, CSS) fra ./branding, tilgjengelige som /assets/custom/<fil>.
+const BRANDING = path.join(ROOT, 'branding');
 
 // Maks antall forespørsler per IP-adresse innenfor tidsvinduet. Kan overstyres via config.rateLimits.
 const DEFAULT_RATE_LIMITS = {
@@ -25,15 +30,24 @@ const STATUS_MESSAGES = {
   full: 'Arrangementet er fullt.',
 };
 
-export function createApp({ repo, mailer, config, logger = console }) {
+export function createApp({ repo, mailer, config, logger = console, accessVerifier = defaultAccessVerifier(config) }) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy);
+  // Skill mellom store og små bokstaver i adressene. Ellers ville /ADMIN/ny og /API/ADMIN/… gitt
+  // samme svar som /admin/… – og en Cloudflare Access-regel på stien «admin» dekker kanskje ikke dem.
+  app.set('case sensitive routing', true);
 
+  const theme = config.theme ?? loadTheme({}, { baseUrl: config.baseUrl }).theme;
+  const page = createViews(VIEWS, theme);
+  const csp = themeCspSources(theme);
+
+  // Med eget admin-vertsnavn peker admin-lenkene dit; ellers til samme domene som resten.
+  const adminBaseUrl = config.adminHost ? `https://${config.adminHost}` : config.baseUrl;
   const eventUrl = (slug) => `${config.baseUrl}/${slug}`;
   // Hemmeligheter legges etter # i lenken. Den delen sendes aldri til serveren av nettleseren,
   // så den havner ikke i serverlogger, proxy-logger eller Referer-headere.
-  const adminUrl = (slug, key) => `${config.baseUrl}/${slug}/admin#${key}`;
+  const adminUrl = (slug, key) => `${adminBaseUrl}/admin/${slug}#${key}`;
   const cancelUrl = (slug, token) => `${config.baseUrl}/${slug}/avmelding#${token}`;
   const adminHint = 'Du finner hele listen over påmeldte via administrasjonslenken du fikk da arrangementet ble opprettet.';
 
@@ -50,8 +64,8 @@ export function createApp({ repo, mailer, config, logger = console }) {
       'Content-Security-Policy': [
         "default-src 'self'",
         "script-src 'self'",
-        "style-src 'self' https://fonts.googleapis.com",
-        'font-src https://fonts.gstatic.com',
+        `style-src ${csp.styles.join(' ')}`,
+        `font-src ${csp.fonts.join(' ')}`,
         "img-src 'self' https: data:",
         "connect-src 'self'",
         "frame-ancestors 'none'",
@@ -62,15 +76,61 @@ export function createApp({ repo, mailer, config, logger = console }) {
     next();
   });
 
+  app.use('/assets/custom', express.static(BRANDING, { maxAge: '1h' }));
   app.use('/assets', express.static(ASSETS, { maxAge: '1h' }));
   app.get('/robots.txt', (req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /\n'));
+  const css = themeCss(theme);
+  app.get('/theme.css', (req, res) => res.type('text/css').set('Cache-Control', 'public, max-age=300').send(css));
+
+  const sendPage = (res, name, status = 200) => res.status(status).type('html').send(page(name));
+
+  // ---------- Admin-porten ----------
+  // Alt som har med administrasjon å gjøre ligger under /admin (sider) og /api/admin (API),
+  // slik at én Cloudflare Access-regel – på et eget vertsnavn eller på disse stiene – dekker alt.
+
+  // Vertsnavnet fra Host-headeren. Bevisst IKKE req.hostname: med «trust proxy» leser den
+  // X-Forwarded-Host, som en klient kan sette selv og dermed late som den kom via admin-domenet.
+  const hostOf = (req) => (req.get('host') || '').toLowerCase().replace(/:\d+$/, '');
+
+  function adminGate(kind) {
+    const deny = (res, status, message) => (kind === 'api'
+      ? res.status(status).set('Cache-Control', 'no-store').json({ error: message })
+      : sendPage(res, String(status), status));
+
+    return async (req, res, next) => {
+      // Med eget admin-vertsnavn finnes ikke admin på det offentlige domenet i det hele tatt.
+      if (config.adminHost && hostOf(req) !== config.adminHost) return deny(res, 404, 'Ukjent adresse.');
+      if (accessVerifier) {
+        try {
+          req.accessUser = await accessVerifier(accessTokenFrom(req));
+        } catch (err) {
+          if (!(err instanceof AccessError)) logger.error('Cloudflare Access-sjekk feilet:', err);
+          return deny(res, 403, 'Ingen tilgang: logg inn via Cloudflare Access.');
+        }
+      }
+      next();
+    };
+  }
 
   // ---------- Sider ----------
 
-  const sendPage = (res, name, status = 200) => res.status(status).sendFile(path.join(VIEWS, `${name}.html`));
-
   app.get('/', (req, res) => sendPage(res, 'index'));
-  app.get('/ny', (req, res) => sendPage(res, 'new'));
+
+  app.get('/admin', adminGate('page'), (req, res) => res.redirect('/admin/ny'));
+  app.get('/admin/ny', adminGate('page'), (req, res) => sendPage(res, 'new'));
+  app.get('/admin/:slug', adminGate('page'), (req, res, next) => {
+    const slug = req.params.slug.toLowerCase();
+    if (!SLUG_PATTERN.test(slug) || !repo.findEvent(slug)) return sendPage(res, '404', 404);
+    sendPage(res, 'admin');
+  });
+
+  // Gamle adresser fra før admin ble samlet under /admin. Nettleseren tar med #nøkkelen videre.
+  app.get('/ny', (req, res) => res.redirect(301, `${config.adminHost ? adminBaseUrl : ''}/admin/ny`));
+  app.get('/:slug/admin', (req, res, next) => {
+    const slug = req.params.slug.toLowerCase();
+    if (!SLUG_PATTERN.test(slug)) return next();
+    res.redirect(301, `${config.adminHost ? adminBaseUrl : ''}/admin/${slug}`);
+  });
 
   const eventPage = (name) => (req, res, next) => {
     const slug = req.params.slug.toLowerCase();
@@ -79,22 +139,26 @@ export function createApp({ repo, mailer, config, logger = console }) {
     sendPage(res, name);
   };
   app.get('/:slug', eventPage('event'));
-  app.get('/:slug/admin', eventPage('admin'));
   app.get('/:slug/avmelding', eventPage('cancel'));
 
   // ---------- API: hjelpefunksjoner ----------
 
-  const api = express.Router();
-  api.use(express.json({ limit: '100kb' }));
-  api.use((req, res, next) => {
+  const noStore = (req, res, next) => {
     res.set('Cache-Control', 'no-store');
     next();
-  });
+  };
+  const api = express.Router({ caseSensitive: true });
+  api.use(express.json({ limit: '100kb' }), noStore);
+  const adminApi = express.Router({ caseSensitive: true });
+  adminApi.use(adminGate('api'), express.json({ limit: '100kb' }), noStore);
 
+  // Klientens IP til rate limiting. Bak Cloudflare Tunnel kommer alle forespørsler fra cloudflared,
+  // så den ekte adressen må hentes fra headeren Cloudflare setter (CLIENT_IP_HEADER).
+  const clientKey = (req) => (config.clientIpHeader && req.get(config.clientIpHeader)) || req.ip;
   const limits = { ...DEFAULT_RATE_LIMITS, ...config.rateLimits };
-  const registerLimiter = rateLimit(limits.register);
-  const cancelLimiter = rateLimit(limits.cancel);
-  const createLimiter = rateLimit(limits.create);
+  const registerLimiter = rateLimit({ ...limits.register, key: clientKey });
+  const cancelLimiter = rateLimit({ ...limits.cancel, key: clientKey });
+  const createLimiter = rateLimit({ ...limits.create, key: clientKey });
 
   function loadEvent(req, res, next) {
     const slug = String(req.params.slug).toLowerCase();
@@ -113,15 +177,17 @@ export function createApp({ repo, mailer, config, logger = console }) {
     next();
   }
 
-  // Oppretting av nye arrangementer krever det globale passordet fra ADMIN_PASSWORD.
-  function requireAdminPassword(req, res, next) {
-    if (!config.adminPassword) {
-      return res.status(403).json({ error: 'Oppretting av arrangementer er slått av (ADMIN_PASSWORD er ikke satt på serveren).' });
+  // Oppretting av nye arrangementer krever ADMIN_PASSWORD. Når Cloudflare Access verifiseres
+  // (adminGate har allerede sluppet forespørselen gjennom), kan passordet droppes.
+  function requireCreator(req, res, next) {
+    if (config.adminPassword) {
+      if (!secretMatches(req.get('x-admin-password') || '', hashSecret(config.adminPassword))) {
+        return res.status(401).json({ error: 'Feil passord.' });
+      }
+      return next();
     }
-    if (!secretMatches(req.get('x-admin-password') || '', hashSecret(config.adminPassword))) {
-      return res.status(401).json({ error: 'Feil passord.' });
-    }
-    next();
+    if (accessVerifier) return next();
+    return res.status(403).json({ error: 'Oppretting av arrangementer er slått av (verken ADMIN_PASSWORD eller Cloudflare Access er satt opp).' });
   }
 
   function publicEvent(event, count) {
@@ -174,6 +240,11 @@ export function createApp({ repo, mailer, config, logger = console }) {
   // ---------- API: offentlig ----------
 
   api.get('/config', (req, res) => res.json({ timeZone: config.timeZone }));
+  adminApi.get('/config', (req, res) => res.json({
+    timeZone: config.timeZone,
+    passwordRequired: Boolean(config.adminPassword),
+    accessEmail: req.accessUser?.email ?? null,
+  }));
 
   api.get('/events/:slug', loadEvent, (req, res) => {
     res.json(publicEvent(req.event, repo.countRegistrations(req.event.id)));
@@ -233,8 +304,9 @@ export function createApp({ repo, mailer, config, logger = console }) {
         eventUrl: eventUrl(event.slug),
         cancelUrl: cancelUrl(event.slug, cancelToken),
         timeZone: config.timeZone,
+        theme,
       }),
-      templates.organizerNotification({ event, booking, count: result.count, adminHint }),
+      templates.organizerNotification({ event, booking, count: result.count, adminHint, theme }),
     ]);
 
     res.status(201).json({
@@ -284,8 +356,8 @@ export function createApp({ repo, mailer, config, logger = console }) {
 
     const count = repo.countRegistrations(event.id);
     await sendEmails([
-      templates.guestCancellation({ event, booking, cancelled, remaining, eventUrl: eventUrl(event.slug) }),
-      templates.organizerCancellation({ event, booking, cancelled, count }),
+      templates.guestCancellation({ event, booking, cancelled, remaining, eventUrl: eventUrl(event.slug), theme }),
+      templates.organizerCancellation({ event, booking, cancelled, count, theme }),
     ]);
     res.json({
       cancelled: cancelled.map(({ name }) => ({ name })),
@@ -296,7 +368,7 @@ export function createApp({ repo, mailer, config, logger = console }) {
 
   // ---------- API: administrasjon ----------
 
-  api.post('/events', createLimiter, requireAdminPassword, async (req, res) => {
+  adminApi.post('/events', createLimiter, requireCreator, async (req, res) => {
     const data = validateEvent(req.body);
     let slug = newSlug();
     while (repo.findEvent(slug)) slug = newSlug(); // Kollisjon er svært usannsynlig, men sjekkes likevel.
@@ -304,12 +376,12 @@ export function createApp({ repo, mailer, config, logger = console }) {
 
     const event = repo.createEvent({ ...data, slug, adminKeyHash: hashSecret(adminKey) });
     const urls = { eventUrl: eventUrl(slug), adminUrl: adminUrl(slug, adminKey) };
-    const [emailSent] = await sendEmails([templates.eventCreated({ event, ...urls, timeZone: config.timeZone })]);
+    const [emailSent] = await sendEmails([templates.eventCreated({ event, ...urls, timeZone: config.timeZone, theme })]);
 
     res.status(201).json({ slug, adminKey, ...urls, emailSent });
   });
 
-  api.get('/events/:slug/admin', loadEvent, requireEventAdmin, (req, res) => {
+  adminApi.get('/events/:slug', loadEvent, requireEventAdmin, (req, res) => {
     const registrations = repo.listRegistrations(req.event.id);
     res.json({
       event: adminEvent(req.event, registrations.length),
@@ -318,19 +390,19 @@ export function createApp({ repo, mailer, config, logger = console }) {
     });
   });
 
-  api.put('/events/:slug/admin', loadEvent, requireEventAdmin, (req, res) => {
+  adminApi.put('/events/:slug', loadEvent, requireEventAdmin, (req, res) => {
     const data = validateEvent(req.body);
     repo.updateEvent(req.event.id, data);
     const event = repo.findEvent(req.event.slug);
     res.json({ event: adminEvent(event, repo.countRegistrations(event.id)) });
   });
 
-  api.delete('/events/:slug/admin', loadEvent, requireEventAdmin, (req, res) => {
+  adminApi.delete('/events/:slug', loadEvent, requireEventAdmin, (req, res) => {
     repo.deleteEvent(req.event.id);
     res.json({ ok: true });
   });
 
-  api.delete('/events/:slug/admin/registrations/:id', loadEvent, requireEventAdmin, (req, res) => {
+  adminApi.delete('/events/:slug/registrations/:id', loadEvent, requireEventAdmin, (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || !repo.deleteRegistration(req.event.id, id)) {
       return res.status(404).json({ error: 'Fant ikke påmeldingen.' });
@@ -338,27 +410,42 @@ export function createApp({ repo, mailer, config, logger = console }) {
     res.json({ ok: true, count: repo.countRegistrations(req.event.id) });
   });
 
-  api.get('/events/:slug/admin/registrations.csv', loadEvent, requireEventAdmin, (req, res) => {
+  adminApi.get('/events/:slug/registrations.csv', loadEvent, requireEventAdmin, (req, res) => {
     const csv = registrationsToCsv(req.event, repo.listRegistrations(req.event.id), config.timeZone);
     res.type('text/csv; charset=utf-8');
     res.attachment(`pameldte-${req.event.slug}.csv`);
     res.send(csv);
   });
 
-  api.use((req, res) => res.status(404).json({ error: 'Ukjent adresse.' }));
-
   // Feil i API-et blir alltid til JSON med en norsk feilmelding.
-  api.use((err, req, res, next) => {
+  const notFound = (req, res) => res.status(404).json({ error: 'Ukjent adresse.' });
+  const apiErrors = (err, req, res, next) => {
     if (err instanceof ValidationError) return res.status(400).json({ error: err.message, errors: err.errors });
     if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Ugyldig JSON.' });
     if (err.type === 'entity.too.large') return res.status(413).json({ error: 'Forespørselen er for stor.' });
     logger.error(err);
     res.status(500).json({ error: 'Noe gikk galt på serveren. Prøv igjen senere.' });
-  });
+  };
+  api.use(notFound, apiErrors);
+  adminApi.use(notFound, apiErrors);
 
+  // /api/admin før /api, slik at admin-forespørsler alltid går gjennom admin-porten.
+  app.use('/api/admin', adminApi);
   app.use('/api', api);
 
   app.use((req, res) => sendPage(res, '404', 404));
 
   return app;
+}
+
+// Access-verifisering slås på når både team-domenet og AUD er satt. Er bare ett av dem satt, er det
+// en feilkonfigurasjon – da nekter appen å starte, i stedet for å stille kjøre uten beskyttelse.
+function defaultAccessVerifier(config) {
+  const team = config.cfAccessTeamDomain;
+  const audiences = config.cfAccessAudiences ?? [];
+  if (!team && !audiences.length) return null;
+  if (!team || !audiences.length) {
+    throw new Error('CF_ACCESS_TEAM_DOMAIN og CF_ACCESS_AUD må settes sammen (eller ingen av dem).');
+  }
+  return createAccessVerifier({ teamDomain: team, audiences });
 }

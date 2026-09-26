@@ -10,22 +10,38 @@ function storedPassword() {
 
 const password = h('input', { id: 'adminPassword', name: 'adminPassword', type: 'password', autocomplete: 'current-password', value: storedPassword() });
 
-const { timeZone } = await api('/config');
+// Admin-oppsettet: tidssone, om passord kreves, og hvem som er logget inn via Cloudflare Access.
+let adminConfig;
+try {
+  adminConfig = await api('/admin/config');
+} catch (err) {
+  root.replaceChildren(notice('error', err.message));
+  throw err;
+}
+const { timeZone, passwordRequired, accessEmail } = adminConfig;
 
 const { form } = createEventForm({
   timeZone,
+  // Innlogget via Access: foreslå den e-postadressen som arrangør.
+  initial: accessEmail ? { organizerEmail: accessEmail } : {},
   submitLabel: 'Opprett arrangement',
   prepend: [
-    h('div', { class: 'card' },
-      h('div', { class: 'form-row', 'data-error-for': 'adminPassword' },
-        h('label', { for: 'adminPassword' }, 'Administratorpassord',
-          h('span', { class: 'hint' }, 'Passordet som er satt i ADMIN_PASSWORD på serveren.')),
-        password)),
-  ],
+    passwordRequired
+      ? h('div', { class: 'card' },
+        h('div', { class: 'form-row', 'data-error-for': 'adminPassword' },
+          h('label', { for: 'adminPassword' }, 'Administratorpassord',
+            h('span', { class: 'hint' }, 'Passordet som er satt i ADMIN_PASSWORD på serveren.')),
+          password))
+      : null,
+    accessEmail ? h('p', { class: 'muted small' }, `Logget inn som ${accessEmail} via Cloudflare Access.`) : null,
+  ].filter(Boolean),
   async onSubmit(payload) {
     try {
-      const result = await api('/events', { method: 'POST', body: payload, headers: { 'X-Admin-Password': password.value } });
-      try { sessionStorage.setItem(STORAGE_KEY, password.value); } catch { /* ikke viktig */ }
+      const headers = passwordRequired ? { 'X-Admin-Password': password.value } : {};
+      const result = await api('/admin/events', { method: 'POST', body: payload, headers });
+      if (passwordRequired) {
+        try { sessionStorage.setItem(STORAGE_KEY, password.value); } catch { /* ikke viktig */ }
+      }
       showResult(result, payload);
     } catch (err) {
       if (err.status === 401) err.errors = { adminPassword: err.message };
@@ -60,7 +76,7 @@ function showResult(result, payload) {
       h('div', { class: 'actions' },
         h('a', { class: 'btn', href: result.eventUrl }, 'Åpne arrangementet'),
         h('a', { class: 'btn secondary', href: result.adminUrl }, 'Gå til administrasjon'),
-        h('a', { class: 'btn secondary', href: '/ny' }, 'Opprett et nytt'),
+        h('a', { class: 'btn secondary', href: '/admin/ny' }, 'Opprett et nytt'),
       ),
     ),
   );

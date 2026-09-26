@@ -44,7 +44,6 @@ function render() {
     event.description ? h('div', { class: 'description' }, linkify(event.description)) : null,
     h('section', { class: 'card', id: 'registration' }, registrationSection()),
   ].filter(Boolean));
-  document.getElementById('footer').textContent = `Påmelding til ${event.title} · ${event.organizerName}`;
 }
 
 function attendance() {

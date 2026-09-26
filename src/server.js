@@ -9,8 +9,15 @@ const repo = createRepository(db);
 const mailer = createMailer({ apiKey: config.resendApiKey, from: config.emailFrom });
 const app = createApp({ repo, mailer, config });
 
-if (!config.adminPassword) {
-  console.warn('ADVARSEL: ADMIN_PASSWORD er ikke satt – ingen kan opprette nye arrangementer.');
+for (const warning of config.warnings) console.warn(`ADVARSEL: ${warning}`);
+if (!config.adminPassword && !(config.cfAccessTeamDomain && config.cfAccessAudiences.length)) {
+  console.warn('ADVARSEL: verken ADMIN_PASSWORD eller Cloudflare Access er satt opp – ingen kan opprette nye arrangementer.');
+}
+if (config.cfAccessTeamDomain) {
+  console.log(`Admin krever Cloudflare Access (${config.cfAccessTeamDomain}).`);
+}
+if (config.adminHost) {
+  console.log(`Admin svarer bare på https://${config.adminHost}/admin`);
 }
 if (!config.resendApiKey) {
   console.warn('ADVARSEL: RESEND_API_KEY er ikke satt – e-poster skrives til konsollen i stedet for å sendes.');

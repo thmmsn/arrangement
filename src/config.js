@@ -1,14 +1,22 @@
 // All konfigurasjon leses fra miljøvariabler (se .env.example).
 
+import { loadTheme } from './theme.js';
+
 export function loadConfig(rawEnv = process.env) {
   const env = unquoteAll(rawEnv);
   const port = Number(env.PORT) || 3000;
+  // Offentlig adresse, brukes til å bygge lenker i e-poster. BASE_URL vinner; ellers bygges den
+  // fra DOMAIN, ellers localhost.
+  const domain = normalizeHost(env.DOMAIN);
+  const baseUrl = (env.BASE_URL || (domain ? `https://${domain}` : `http://localhost:${port}`)).replace(/\/+$/, '');
+  // Utseende (logo, farger, fonter, tekster). Ugyldige verdier ignoreres og havner i `warnings`.
+  const { theme, warnings } = loadTheme(env, { baseUrl });
 
   return {
     port,
-    // Offentlig adresse, brukes til å bygge lenker i e-poster. BASE_URL vinner; ellers bygges den
-    // fra DOMAIN (samme variabel som Caddy bruker i docker-compose), ellers localhost.
-    baseUrl: (env.BASE_URL || (env.DOMAIN ? `https://${env.DOMAIN}` : `http://localhost:${port}`)).replace(/\/+$/, ''),
+    baseUrl,
+    theme,
+    warnings,
     databasePath: env.DATABASE_PATH || 'data/booking.db',
     // Passordet som kreves for å opprette nye arrangementer. Tomt = oppretting er slått av.
     adminPassword: env.ADMIN_PASSWORD || '',
@@ -20,7 +28,24 @@ export function loadConfig(rawEnv = process.env) {
     // Sett til f.eks. 1 når appen kjører bak én reverse proxy (Caddy, nginx, Fly, Railway …),
     // slik at rate limiting ser klientens ekte IP-adresse.
     trustProxy: parseTrustProxy(env.TRUST_PROXY),
+    // Header med klientens ekte IP-adresse, brukt til rate limiting. Med Cloudflare Tunnel:
+    // «cf-connecting-ip». Må bare settes når appen KUN kan nås gjennom Cloudflare, ellers kan
+    // hvem som helst sende headeren selv.
+    clientIpHeader: (env.CLIENT_IP_HEADER || '').toLowerCase(),
+
+    // --- Administrasjon bak Cloudflare Access ---
+    // Eget vertsnavn for admin (f.eks. booking-admin.domain.com). Når det er satt, svarer /admin og
+    // /api/admin bare på dette vertsnavnet, og admin-lenkene i e-postene peker hit.
+    adminHost: normalizeHost(env.ADMIN_HOST),
+    // Når begge er satt, krever /admin og /api/admin et gyldig Cloudflare Access-token.
+    cfAccessTeamDomain: normalizeHost(env.CF_ACCESS_TEAM_DOMAIN),
+    cfAccessAudiences: (env.CF_ACCESS_AUD || '').split(',').map((s) => s.trim()).filter(Boolean),
   };
+}
+
+// Godtar både «admin.domain.com» og «https://admin.domain.com/».
+function normalizeHost(value) {
+  return (value || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
 }
 
 // `docker run --env-file` tar anførselstegn bokstavelig: EMAIL_FROM="Påmelding <a@b.no>" blir til
