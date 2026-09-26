@@ -1,0 +1,20 @@
+{
+  "name": "booking",
+  "version": "1.0.0",
+  "description": "Enkelt påmeldingssystem for arrangementer – ukjente lenker, egendefinerte felter og e-post via Resend.",
+  "private": true,
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=22.9"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "dev": "node --watch --env-file-if-exists=.env src/server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "express": "^5.2.1"
+  }
+}
