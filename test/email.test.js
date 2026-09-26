@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createMailer, guestConfirmation } from '../src/email.js';
+import { createMailer, guestCancellation, guestConfirmation, organizerCancellation, organizerNotification } from '../src/email.js';
 
 test('sender riktig forespørsel til Resend', async () => {
   let request;
@@ -38,15 +38,60 @@ test('uten API-nøkkel logges e-posten i stedet for å sendes', async () => {
   assert.match(logged[0], /Emne/);
 });
 
+const event = {
+  title: 'Kurs',
+  startsAt: '2026-11-14T17:00:00Z',
+  endsAt: null,
+  location: '',
+  organizerName: 'Kari',
+  organizerEmail: 'k@example.com',
+  capacity: 10,
+  fields: [{ id: 'f1', label: 'Allergier', type: 'text' }],
+};
+const urls = { eventUrl: 'https://booking.example.com/abc', cancelUrl: 'https://booking.example.com/abc/avmelding#t', timeZone: 'Europe/Oslo' };
+
 test('brukerinnhold escapes i HTML-e-posten', () => {
   const message = guestConfirmation({
-    event: { title: 'Kurs', startsAt: '2026-11-14T17:00:00Z', endsAt: null, location: '', organizerName: 'Kari', organizerEmail: 'k@example.com', fields: [] },
-    registration: { name: '<script>alert(1)</script>', email: 'ola@example.com', answers: {} },
-    eventUrl: 'https://booking.example.com/abc',
-    cancelUrl: 'https://booking.example.com/abc/avmelding#t',
-    timeZone: 'Europe/Oslo',
+    event,
+    booking: { contactName: '<script>alert(1)</script>', contactEmail: 'ola@example.com', persons: [{ name: '<script>alert(1)</script>', email: 'ola@example.com', answers: {} }] },
+    ...urls,
   });
   assert.ok(!message.html.includes('<script>'));
   assert.ok(message.html.includes('&lt;script&gt;'));
   assert.match(message.text, /lørdag 14\. november 2026 kl\. 18:00/);
+});
+
+const group = {
+  contactName: 'Ola',
+  contactEmail: 'ola@example.com',
+  persons: [
+    { name: 'Ola', email: 'ola@example.com', answers: { f1: '' } },
+    { name: 'Kari', email: '', answers: { f1: 'Nøtter' } },
+    { name: 'Per', email: 'per@example.com', answers: {} },
+  ],
+};
+
+test('bekreftelsen til en gruppe går til kontaktpersonen og lister alle personene', () => {
+  const message = guestConfirmation({ event, booking: group, ...urls });
+  assert.equal(message.to, 'ola@example.com');
+  assert.match(message.text, /Du har meldt på 3 personer: Ola, Kari og Per\./);
+  assert.match(message.text, /Person 2\nNavn: Kari\nAllergier: Nøtter/);
+  assert.match(message.text, /du velger selv hvem: https:\/\/booking\.example\.com\/abc\/avmelding#t/);
+});
+
+test('arrangøren får én e-post for hele gruppen', () => {
+  const message = organizerNotification({ event, booking: group, count: 3, adminHint: '' });
+  assert.equal(message.subject, 'Ny påmelding: Ola +2 – Kurs');
+  assert.equal(message.replyTo, 'ola@example.com');
+  assert.match(message.text, /Ola \(ola@example\.com\) har meldt på 3 personer/);
+  assert.match(message.text, /3 av 10 plasser er tatt/);
+});
+
+test('delvis avmelding forteller hvem som er meldt av og hvem som står igjen', () => {
+  const [ola, kari, per] = group.persons;
+  const guest = guestCancellation({ event, booking: group, cancelled: [kari, per], remaining: [ola], eventUrl: urls.eventUrl });
+  assert.match(guest.text, /Nå er Kari og Per meldt av\./);
+  assert.match(guest.text, /Fortsatt påmeldt: Ola\./);
+  const organizer = organizerCancellation({ event, booking: group, cancelled: [kari, per], count: 1 });
+  assert.equal(organizer.subject, 'Avmelding: Kari og Per – Kurs');
 });

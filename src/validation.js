@@ -6,6 +6,7 @@ import { newFieldId } from './ids.js';
 export const FIELD_TYPES = ['text', 'textarea', 'tel', 'number', 'select', 'checkbox'];
 const MAX_FIELDS = 20;
 const MAX_OPTIONS = 50;
+const MAX_PER_BOOKING = 50;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const FIELD_ID_PATTERN = /^[a-zA-Z0-9_-]{1,40}$/;
 const TEL_PATTERN = /^\+?[0-9 ()-]{5,20}$/;
@@ -71,6 +72,14 @@ export function validateEvent(input) {
     }
   }
 
+  let maxPerBooking = 10;
+  if (body.maxPerBooking !== undefined && body.maxPerBooking !== null && body.maxPerBooking !== '') {
+    maxPerBooking = Number(body.maxPerBooking);
+    if (!Number.isInteger(maxPerBooking) || maxPerBooking < 1 || maxPerBooking > MAX_PER_BOOKING) {
+      errors.maxPerBooking = `Må være et helt tall fra 1 til ${MAX_PER_BOOKING}`;
+    }
+  }
+
   const organizerName = str(body.organizerName);
   if (!organizerName) errors.organizerName = 'Arrangør må fylles ut';
   else if (organizerName.length > 200) errors.organizerName = 'Maks 200 tegn';
@@ -101,6 +110,7 @@ export function validateEvent(input) {
     endsAt: endsAt ? endsAt.toISOString() : null,
     registrationDeadline: registrationDeadline ? registrationDeadline.toISOString() : null,
     capacity,
+    maxPerBooking,
     // Standardverdier: vis antall påmeldte, og påmeldingen er åpen.
     showCount: body.showCount === undefined ? true : Boolean(body.showCount),
     isOpen: body.isOpen === undefined ? true : Boolean(body.isOpen),
@@ -153,23 +163,27 @@ function validateFieldDefinitions(input) {
 
 // ---------- Påmelding ----------
 
-export function validateRegistration(input, fields) {
-  const errors = {};
+// Validerer én person. Feilene legges i `errors` med `prefix` foran nøkkelen, slik at frontend
+// kan vise dem under riktig felt: «name», «field_abc» for kontaktpersonen og «guests.0.name» osv.
+// for personer som er lagt til.
+function validatePerson(input, fields, errors, prefix, { emailRequired }) {
   const body = input && typeof input === 'object' ? input : {};
 
   const name = str(body.name);
-  if (!name) errors.name = 'Navn må fylles ut';
-  else if (name.length > 200) errors.name = 'Navnet kan være maks 200 tegn';
+  if (!name) errors[`${prefix}name`] = 'Navn må fylles ut';
+  else if (name.length > 200) errors[`${prefix}name`] = 'Navnet kan være maks 200 tegn';
 
   const email = str(body.email);
-  if (!isEmail(email)) errors.email = 'Skriv inn en gyldig e-postadresse';
+  if (emailRequired ? !isEmail(email) : email && !isEmail(email)) {
+    errors[`${prefix}email`] = 'Skriv inn en gyldig e-postadresse';
+  }
 
   const rawAnswers = body.answers && typeof body.answers === 'object' ? body.answers : {};
   const answers = {};
 
   // Bare felter som faktisk finnes på arrangementet tas vare på – ukjente nøkler ignoreres.
   for (const field of fields) {
-    const key = `field_${field.id}`;
+    const key = `${prefix}field_${field.id}`;
     const value = rawAnswers[field.id];
 
     if (field.type === 'checkbox') {
@@ -204,8 +218,31 @@ export function validateRegistration(input, fields) {
     answers[field.id] = text;
   }
 
-  if (Object.keys(errors).length) throw new ValidationError(errors);
   return { name, email, answers };
+}
+
+/**
+ * Validerer en påmelding: kontaktpersonen (name, email, answers øverst i body) pluss eventuelle
+ * personer som er lagt til i `guests`. Hver person blir én gjest. Kontaktpersonen må ha e-post,
+ * de andre kan ha det.
+ */
+export function validateBooking(input, fields, maxPerBooking = 1) {
+  const errors = {};
+  const body = input && typeof input === 'object' ? input : {};
+  const rawGuests = Array.isArray(body.guests) ? body.guests : [];
+
+  if (rawGuests.length + 1 > maxPerBooking) {
+    errors.guests = maxPerBooking === 1
+      ? 'Du kan bare melde på deg selv til dette arrangementet.'
+      : `Du kan melde på maks ${maxPerBooking} personer om gangen.`;
+    throw new ValidationError(errors);
+  }
+
+  const contact = validatePerson(body, fields, errors, '', { emailRequired: true });
+  const guests = rawGuests.map((guest, i) => validatePerson(guest, fields, errors, `guests.${i}.`, { emailRequired: false }));
+
+  if (Object.keys(errors).length) throw new ValidationError(errors);
+  return { contact, persons: [contact, ...guests] };
 }
 
 // ---------- Status ----------

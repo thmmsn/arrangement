@@ -4,9 +4,10 @@ Et lite og enkelt alternativ til Hoopla for påmelding til arrangementer:
 
 - **Arrangementer kan bare nås via lenke** – `booking.domain.com/<hash>`. Det finnes ingen oversikt, og søkemotorer blir bedt om å holde seg unna.
 - **Påmelding med navn, e-post og egendefinerte felter** (kort tekst, lang tekst, telefon, tall, nedtrekksliste, avkrysning).
-- **Én påmelding = én gjest.** Skal flere være med, melder man på én om gangen.
+- **Den som melder på kan legge til flere personer** i samme skjema. Hver person er én gjest og tar én plass, og hver person svarer på de egendefinerte feltene (f.eks. allergier). Arrangøren bestemmer hvor mange som kan meldes på om gangen (standard 10, 1 = bare seg selv).
 - **Antall påmeldte vises** på arrangementssiden (kan skrus av), med ledige plasser hvis det er et tak.
-- **E-post via [Resend](https://resend.com)**: bekreftelse til gjesten, varsel til arrangøren, admin-lenke ved opprettelse og kvittering ved avmelding.
+- **E-post via [Resend](https://resend.com)**: én bekreftelse til den som meldte på (med alle personene), ett varsel til arrangøren, admin-lenke ved opprettelse og kvittering ved avmelding.
+- **Avmelding per person**: avmeldingslenken lar deg velge hvem i påmeldingen som skal meldes av.
 - **Admin-side per arrangement** via en hemmelig lenke: liste over påmeldte, CSV-eksport til Excel, redigering, stenging og sletting.
 
 Backend: Node.js, Express og SQLite. Frontend: ren HTML, CSS og JavaScript uten byggesteg.
@@ -19,7 +20,7 @@ Backend: Node.js, Express og SQLite. Frontend: ren HTML, CSS og JavaScript uten 
 |---|---|---|
 | `/<hash>` | Alle som får lenken | Arrangementsside med påmelding |
 | `/<hash>/admin#<nøkkel>` | Arrangøren | Påmeldte, redigering, CSV, stenging, sletting |
-| `/<hash>/avmelding#<nøkkel>` | Gjesten (fra e-posten) | Avmelding |
+| `/<hash>/avmelding#<nøkkel>` | Den som meldte på (fra e-posten) | Avmelding av hele eller deler av påmeldingen |
 | `/ny` | Den som kjenner `ADMIN_PASSWORD` | Opprett nytt arrangement |
 
 `<hash>` er 12 tilfeldige tegn fra et alfabet på 31 tegn (små bokstaver og tall, uten `0 o 1 l i`, som lett forveksles). Antall mulige lenker er
@@ -65,8 +66,8 @@ Svar på e-postene går dit det gir mening (feltet `reply_to`):
 
 | E-post | Til | Svar går til |
 |---|---|---|
-| Bekreftelse på påmelding | Gjesten | Arrangøren |
-| Ny påmelding | Arrangøren | Gjesten |
+| Bekreftelse på påmelding (alle personene) | Den som meldte på | Arrangøren |
+| Ny påmelding (alle personene) | Arrangøren | Den som meldte på |
 | Arrangementet er opprettet (med admin-lenke) | Arrangøren | – |
 | Avmelding (kvittering og varsel) | Gjesten og arrangøren | Hverandre |
 
@@ -134,12 +135,24 @@ sqlite3 data/booking.db ".backup 'backup-$(date +%F).db'"
 - **`Referrer-Policy: no-referrer`**, slik at arrangementets adresse ikke lekker til eksterne nettsteder, f.eks. der forsidebildet ligger.
 - **Content-Security-Policy** tillater bare egne skript, og all brukertekst settes som tekst i DOM-en (aldri `innerHTML`). Tekst i e-postene HTML-escapes.
 - **Avmelding krever et klikk på en knapp.** Mange e-posttjenester åpner lenker automatisk for å sjekke dem for virus, og det skal ikke melde noen av.
-- **Plassene kan ikke overbookes.** Påmeldingen teller og lagrer i én `BEGIN IMMEDIATE`-transaksjon (testet med 10 samtidige påmeldinger til 3 plasser).
+- **Plassene kan ikke overbookes.** Påmeldingen teller og lagrer i én `BEGIN IMMEDIATE`-transaksjon (testet med 10 samtidige påmeldinger til 3 plasser, og 6 samtidige grupper på 2 til 5 plasser). En gruppe får plass samlet eller ikke i det hele tatt – det blir aldri halve påmeldinger.
 - **Spam-vern:** rate limiting per IP (30 påmeldinger per 10 min) og et skjult honningkrukke-felt som roboter fyller ut.
 - **CSV-eksporten** nøytraliserer celler som begynner med `= + - @`, slik at Excel ikke tolker dem som formler.
 - Avmelding og sletting fjerner personopplysningene helt fra databasen.
 
 ---
+
+## Datamodell
+
+```
+events          Arrangementet (tittel, tid, kapasitet, maks per påmelding, felter …)
+ └─ bookings    Én påmelding: kontaktperson (navn + e-post) og avmeldingsnøkkel
+     └─ registrations   Én rad per gjest: navn, valgfri e-post og svar på feltene
+```
+
+Antall påmeldte er antall rader i `registrations`. Hvis alle personene i en påmelding meldes av eller fjernes, slettes også påmeldingen, og avmeldingslenken slutter å virke.
+
+Databasen oppgraderes automatisk ved oppstart (`PRAGMA user_version`). En database fra første versjon, der hver påmelding var én person, migreres uten tap av data, og avmeldingslenker som allerede er sendt ut, virker fortsatt.
 
 ## Prosjektstruktur
 
@@ -165,9 +178,9 @@ test/            Tester (node:test)
 | Metode | Sti | Tilgang |
 |---|---|---|
 | `GET` | `/api/events/:slug` | Offentlig |
-| `POST` | `/api/events/:slug/registrations` | Offentlig |
-| `POST` | `/api/events/:slug/cancel/lookup` | Avmeldingsnøkkel i body |
-| `POST` | `/api/events/:slug/cancel` | Avmeldingsnøkkel i body |
+| `POST` | `/api/events/:slug/registrations` | Offentlig. Body: `{ name, email, answers, guests: [{ name, email?, answers }] }` |
+| `POST` | `/api/events/:slug/cancel/lookup` | Avmeldingsnøkkel i body. Gir personene i påmeldingen |
+| `POST` | `/api/events/:slug/cancel` | Avmeldingsnøkkel i body. `ids` (valgfritt) velger hvem; uten `ids` meldes alle av |
 | `POST` | `/api/events` | `X-Admin-Password` |
 | `GET` / `PUT` / `DELETE` | `/api/events/:slug/admin` | `Authorization: Bearer <admin-nøkkel>` |
 | `DELETE` | `/api/events/:slug/admin/registrations/:id` | `Authorization: Bearer <admin-nøkkel>` |
@@ -183,6 +196,8 @@ Farger og fonter ligger som variabler øverst i `public/assets/css/style.css` (`
 
 - Venteliste når arrangementet er fullt
 - Påminnelse på e-post dagen før
-- Gjest kan endre svarene sine
+- Gjest kan endre svarene sine, eller legge til personer i en eksisterende påmelding
+- Felter som bare spørres én gang per påmelding (f.eks. telefon til kontaktpersonen), ikke per person
+- Egen bekreftelse til personer som er lagt til med e-postadresse
 - Opplasting av forsidebilde (i dag er det en lenke)
 - Betaling (f.eks. Vipps eller Stripe)

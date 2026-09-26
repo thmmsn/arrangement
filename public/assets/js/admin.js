@@ -35,9 +35,9 @@ async function load() {
 
 // Alle feltene arrangementet har, i formatet PUT-endepunktet forventer.
 function eventPayload(overrides = {}) {
-  const { title, description, location, startsAt, endsAt, registrationDeadline, capacity, imageUrl,
+  const { title, description, location, startsAt, endsAt, registrationDeadline, capacity, maxPerBooking, imageUrl,
     showCount, isOpen, organizerName, organizerEmail, fields } = event;
-  return { title, description, location, startsAt, endsAt, registrationDeadline, capacity, imageUrl,
+  return { title, description, location, startsAt, endsAt, registrationDeadline, capacity, maxPerBooking, imageUrl,
     showCount, isOpen, organizerName, organizerEmail, fields, ...overrides };
 }
 
@@ -85,6 +85,7 @@ function overviewCard() {
   return h('section', { class: 'card' },
     h('div', { class: 'stats' },
       stat(event.count, event.count === 1 ? 'påmeldt' : 'påmeldte'),
+      bookingsStat(),
       event.capacity !== null ? stat(event.spotsLeft, `ledige av ${event.capacity}`) : stat('∞', 'ubegrenset antall plasser'),
       h('div', { class: 'stat' },
         h('div', {}, h('span', { class: `badge ${event.status === 'open' ? '' : 'closed'}` }, STATUS_TEXT[event.status])),
@@ -96,6 +97,12 @@ function overviewCard() {
     h('div', { class: 'actions' }, toggle,
       h('span', { class: 'muted small' }, event.showCount ? 'Antall påmeldte vises offentlig.' : 'Antall påmeldte er skjult for gjestene.')),
   );
+}
+
+// Antall påmeldinger (grupper). Én påmelding kan gjelde flere personer.
+function bookingsStat() {
+  const n = new Set(registrations.map((r) => r.bookingId)).size;
+  return stat(n, n === 1 ? 'påmelding' : 'påmeldinger');
 }
 
 function stat(value, name) {
@@ -113,7 +120,9 @@ function guestsCard() {
   csv.addEventListener('click', downloadCsv);
 
   const emails = h('button', { class: 'btn secondary small', type: 'button', disabled: !registrations.length }, 'Kopier alle e-postadresser');
-  emails.addEventListener('click', () => copyToClipboard([...new Set(registrations.map((r) => r.email))].join(', '), emails));
+  // Både e-postene til den som meldte på og eventuelle e-poster til personer som ble lagt til.
+  const allEmails = [...new Set(registrations.flatMap((r) => [r.contactEmail, r.email]).filter(Boolean))];
+  emails.addEventListener('click', () => copyToClipboard(allEmails.join(', '), emails));
 
   const table = registrations.length
     ? h('div', { class: 'table-wrap' },
@@ -122,10 +131,12 @@ function guestsCard() {
           h('th', {}, '#'), h('th', {}, 'Navn'), h('th', {}, 'E-post'),
           event.fields.map((f) => h('th', {}, f.label)),
           h('th', {}, 'Påmeldt'), h('th', {}))),
-        h('tbody', {}, registrations.map((r, i) => h('tr', {},
+        h('tbody', {}, registrations.map((r, i) => h('tr', { class: r.position > 0 ? 'added' : '' },
           h('td', { class: 'num' }, i + 1),
-          h('td', {}, r.name),
-          h('td', {}, h('a', { href: `mailto:${r.email}` }, r.email)),
+          // Personer som er lagt til av en annen, vises rett under og litt innrykket med «meldt på av».
+          h('td', {}, r.name, r.position > 0
+            ? h('span', { class: 'by' }, `meldt på av ${r.contactName}`) : null),
+          h('td', {}, r.email ? h('a', { href: `mailto:${r.email}` }, r.email) : h('span', { class: 'muted' }, '–')),
           event.fields.map((f) => h('td', { class: 'answer' }, answerText(f, r.answers))),
           h('td', { class: 'small muted' }, formatShort(r.createdAt, event.timeZone)),
           h('td', {}, h('button', { class: 'btn danger small', type: 'button', onclick: () => removeGuest(r) }, 'Fjern')),

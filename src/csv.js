@@ -11,12 +11,16 @@ function cell(value) {
 }
 
 export function registrationsToCsv(event, registrations, timeZone) {
-  const header = ['#', 'Påmeldt', 'Navn', 'E-post', ...event.fields.map((f) => f.label)];
+  // «Påmeldt av» er kontaktpersonen for påmeldingen, slik at personer som ble meldt på sammen
+  // kan grupperes/filtreres i Excel. For kontaktpersonen selv er det samme navn som i «Navn».
+  const header = ['#', 'Påmeldt', 'Navn', 'E-post', 'Påmeldt av', 'Kontakt-e-post', ...event.fields.map((f) => f.label)];
   const rows = registrations.map((r, i) => [
     i + 1,
     formatDateTime(r.createdAt, timeZone),
     r.name,
     r.email,
+    r.contactName,
+    r.contactEmail,
     ...event.fields.map((f) => formatAnswer(f, r.answers)),
   ]);
   return '\uFEFF' + [header, ...rows].map((row) => row.map(cell).join(SEPARATOR)).join('\r\n') + '\r\n';

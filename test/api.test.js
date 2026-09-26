@@ -262,7 +262,8 @@ describe('avmelding', () => {
 
     const lookup = await call(`/api/events/${slug}/cancel/lookup`, { method: 'POST', body: { token } });
     assert.equal(lookup.status, 200);
-    assert.equal(lookup.data.name, 'Ola Nordmann');
+    assert.equal(lookup.data.contactName, 'Ola Nordmann');
+    assert.deepEqual(lookup.data.persons.map((p) => p.name), ['Ola Nordmann']);
 
     const cancel = await call(`/api/events/${slug}/cancel`, { method: 'POST', body: { token } });
     assert.equal(cancel.status, 200);
@@ -307,7 +308,7 @@ describe('administrasjon', () => {
     const bytes = Buffer.from(await csv.arrayBuffer());
     assert.deepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
     const text = bytes.subarray(3).toString('utf8');
-    assert.ok(text.startsWith('#;Påmeldt;Navn;E-post;Allergier;Middag;Samtykke\r\n'));
+    assert.ok(text.startsWith('#;Påmeldt;Navn;E-post;Påmeldt av;Kontakt-e-post;Allergier;Middag;Samtykke\r\n'));
     assert.match(text, /;'=Formel;/); // CSV-injection nøytralisert
     assert.match(text, /;"Gluten; laktose";/);
 
@@ -336,5 +337,150 @@ describe('administrasjon', () => {
     await register(slug, event);
     assert.equal((await call(`/api/events/${slug}/admin`, { method: 'DELETE', headers: admin(adminKey) })).status, 200);
     assert.equal((await call(`/api/events/${slug}`)).status, 404);
+  });
+});
+
+describe('påmelding av flere personer', () => {
+  const guest = (event, name, extra = {}) => ({ name, answers: answersFor(event), ...extra });
+  const tokenFromMail = () => sent.find((m) => m.to === 'ola@example.com').text.match(/avmelding#([\w-]+)/)[1];
+
+  test('den som melder på kan legge til personer – hver person er én gjest', async () => {
+    const { slug, event, adminKey } = await createEvent({ capacity: 10 });
+    const res = await register(slug, event, {
+      guests: [guest(event, 'Kari', { email: 'kari@example.com' }), guest(event, 'Per', { answers: answersFor(event, { allergi: 'Nøtter' }) })],
+    });
+    assert.equal(res.status, 201, JSON.stringify(res.data));
+    assert.deepEqual(res.data.booking.persons.map((p) => p.name), ['Ola Nordmann', 'Kari', 'Per']);
+    assert.equal(res.data.event.count, 3);
+    assert.equal(res.data.event.spotsLeft, 7);
+
+    // Én bekreftelse til den som meldte på, og ett varsel til arrangøren – ikke én per person.
+    assert.deepEqual(sent.map((m) => m.to).sort(), ['kari@example.com', 'ola@example.com']);
+    assert.match(sent.find((m) => m.to === 'kari@example.com').subject, /Ola Nordmann \+2/);
+
+    const list = await call(`/api/events/${slug}/admin`, { headers: admin(adminKey) });
+    const rows = list.data.registrations;
+    assert.deepEqual(rows.map((r) => [r.name, r.email, r.position, r.contactName]), [
+      ['Ola Nordmann', 'ola@example.com', 0, 'Ola Nordmann'],
+      ['Kari', 'kari@example.com', 1, 'Ola Nordmann'],
+      ['Per', '', 2, 'Ola Nordmann'],
+    ]);
+    assert.equal(new Set(rows.map((r) => r.bookingId)).size, 1);
+    assert.equal(rows[2].answers[event.fields[0].id], 'Nøtter');
+  });
+
+  test('personer som legges til valideres med egne feltnøkler', async () => {
+    const { slug, event } = await createEvent();
+    const [, middag] = event.fields;
+    const res = await register(slug, event, { guests: [{ name: '', email: 'ugyldig', answers: {} }] });
+    assert.equal(res.status, 400);
+    assert.ok(res.data.errors['guests.0.name']);
+    assert.ok(res.data.errors['guests.0.email']);
+    assert.ok(res.data.errors[`guests.0.field_${middag.id}`]);
+    assert.equal((await call(`/api/events/${slug}`)).data.count, 0);
+  });
+
+  test('hele gruppen får plass, eller ingen', async () => {
+    const { slug, event } = await createEvent({ capacity: 3 });
+    await register(slug, event, { name: 'Først' });
+    const res = await register(slug, event, { guests: [guest(event, 'Kari'), guest(event, 'Per')] });
+    assert.equal(res.status, 409);
+    assert.equal(res.data.status, 'not_enough');
+    assert.equal(res.data.spotsLeft, 2);
+    assert.match(res.data.error, /bare 2 ledige plasser/);
+    assert.equal((await call(`/api/events/${slug}`)).data.count, 1);
+
+    // Med skjult antall røpes ikke hvor mange plasser som er igjen.
+    const hidden = await createEvent({ capacity: 2, showCount: false });
+    const res2 = await register(hidden.slug, hidden.event, { guests: [guest(hidden.event, 'Kari'), guest(hidden.event, 'Per')] });
+    assert.equal(res2.status, 409);
+    assert.equal(res2.data.spotsLeft, undefined);
+    assert.doesNotMatch(res2.data.error, /\d/);
+  });
+
+  test('tar aldri flere enn kapasiteten ved samtidige gruppepåmeldinger', async () => {
+    const { slug, event } = await createEvent({ capacity: 5 });
+    const results = await Promise.all(Array.from({ length: 6 }, (_, i) =>
+      register(slug, event, { name: `Gruppe ${i}`, guests: [guest(event, `Venn ${i}`)] })));
+    assert.equal(results.filter((r) => r.status === 201).length, 2);
+    assert.equal((await call(`/api/events/${slug}`)).data.count, 4);
+  });
+
+  test('arrangøren bestemmer hvor mange som kan meldes på om gangen', async () => {
+    const { slug, event } = await createEvent({ maxPerBooking: 2 });
+    assert.equal(event.maxPerBooking, 2);
+    const tooMany = await register(slug, event, { guests: [guest(event, 'Kari'), guest(event, 'Per')] });
+    assert.equal(tooMany.status, 400);
+    assert.match(tooMany.data.errors.guests, /maks 2 personer/);
+    assert.equal((await register(slug, event, { guests: [guest(event, 'Kari')] })).status, 201);
+
+    const single = await createEvent({ maxPerBooking: 1 });
+    const res = await register(single.slug, single.event, { guests: [guest(single.event, 'Kari')] });
+    assert.equal(res.status, 400);
+    assert.match(res.data.errors.guests, /bare melde på deg selv/);
+  });
+
+  test('standard er maks 10 per påmelding, og verdien valideres', async () => {
+    const { event } = await createEvent();
+    assert.equal(event.maxPerBooking, 10);
+    const bad = await call('/api/events', { method: 'POST', body: eventInput({ maxPerBooking: 0 }), headers: { 'X-Admin-Password': 'hemmelig' } });
+    assert.equal(bad.status, 400);
+    assert.ok(bad.data.errors.maxPerBooking);
+  });
+
+  test('avmeldingslenken lar deg melde av noen av personene, eller alle', async () => {
+    const { slug, event } = await createEvent();
+    await register(slug, event, { guests: [guest(event, 'Kari'), guest(event, 'Per')] });
+    const token = tokenFromMail();
+    sent = [];
+
+    const lookup = await call(`/api/events/${slug}/cancel/lookup`, { method: 'POST', body: { token } });
+    assert.deepEqual(lookup.data.persons.map((p) => p.name), ['Ola Nordmann', 'Kari', 'Per']);
+    const [, kari, per] = lookup.data.persons;
+
+    const partial = await call(`/api/events/${slug}/cancel`, { method: 'POST', body: { token, ids: [kari.id, per.id] } });
+    assert.equal(partial.status, 200);
+    assert.deepEqual(partial.data.cancelled.map((p) => p.name), ['Kari', 'Per']);
+    assert.deepEqual(partial.data.remaining.map((p) => p.name), ['Ola Nordmann']);
+    assert.equal(partial.data.event.count, 1);
+    assert.match(sent.find((m) => m.to === 'kari@example.com').subject, /Avmelding: Kari og Per/);
+
+    // Lenken virker fortsatt for den som er igjen. Uten ids meldes resten av.
+    const rest = await call(`/api/events/${slug}/cancel`, { method: 'POST', body: { token } });
+    assert.equal(rest.status, 200);
+    assert.equal(rest.data.event.count, 0);
+    // Når alle er meldt av, er påmeldingen borte og lenken slutter å virke.
+    assert.equal((await call(`/api/events/${slug}/cancel/lookup`, { method: 'POST', body: { token } })).status, 404);
+  });
+
+  test('avmeldingslenken kan ikke melde av personer fra andres påmeldinger', async () => {
+    const { slug, event, adminKey } = await createEvent();
+    await register(slug, event, { name: 'Annen', email: 'annen@example.com' });
+    await register(slug, event);
+    const token = tokenFromMail();
+    const list = await call(`/api/events/${slug}/admin`, { headers: admin(adminKey) });
+    const other = list.data.registrations.find((r) => r.name === 'Annen');
+
+    const res = await call(`/api/events/${slug}/cancel`, { method: 'POST', body: { token, ids: [other.id] } });
+    assert.equal(res.status, 400);
+    assert.equal((await call(`/api/events/${slug}`)).data.count, 2);
+    const bad = await call(`/api/events/${slug}/cancel`, { method: 'POST', body: { token, ids: ['1'] } });
+    assert.equal(bad.status, 400);
+  });
+
+  test('admin kan fjerne én person fra en gruppe', async () => {
+    const { slug, event, adminKey } = await createEvent();
+    await register(slug, event, { guests: [guest(event, 'Kari')] });
+    const token = tokenFromMail();
+    const { data } = await call(`/api/events/${slug}/admin`, { headers: admin(adminKey) });
+
+    // Fjerner kontaktpersonen: Kari står fortsatt, og lenken virker for henne.
+    await call(`/api/events/${slug}/admin/registrations/${data.registrations[0].id}`, { method: 'DELETE', headers: admin(adminKey) });
+    const lookup = await call(`/api/events/${slug}/cancel/lookup`, { method: 'POST', body: { token } });
+    assert.deepEqual(lookup.data.persons.map((p) => p.name), ['Kari']);
+
+    // Fjerner siste person: påmeldingen forsvinner.
+    await call(`/api/events/${slug}/admin/registrations/${data.registrations[1].id}`, { method: 'DELETE', headers: admin(adminKey) });
+    assert.equal((await call(`/api/events/${slug}/cancel/lookup`, { method: 'POST', body: { token } })).status, 404);
   });
 });

@@ -74,89 +74,139 @@ function eventRows(event, timeZone) {
   ];
 }
 
-function answerRows(event, registration) {
-  return event.fields.map((field) => [field.label, formatAnswer(field, registration.answers)]);
+function personRows(event, person) {
+  return [
+    ['Navn', person.name],
+    ['E-post', person.email],
+    ...event.fields.map((field) => [field.label, formatAnswer(field, person.answers)]),
+  ];
+}
+
+// Én person vises som en enkel tabell; flere personer får hver sin overskrift («Person 1», «Person 2» …).
+function personsHtml(event, persons) {
+  if (persons.length === 1) return detailsTable(personRows(event, persons[0]));
+  return persons.map((person, i) => `
+    <h2 style="font-weight:normal;font-size:19px;margin:20px 0 0;">Person ${i + 1}</h2>
+    ${detailsTable(personRows(event, person))}`).join('');
+}
+
+function personsText(event, persons) {
+  if (persons.length === 1) return detailsText(personRows(event, persons[0]));
+  return persons.map((person, i) => `Person ${i + 1}\n${detailsText(personRows(event, person))}`).join('\n\n');
+}
+
+/** «Ola», «Ola og Kari», «Ola, Kari og Per». */
+export function nameList(persons) {
+  return new Intl.ListFormat('nb', { type: 'conjunction' }).format(persons.map((p) => p.name));
 }
 
 function countText(event, count) {
   return event.capacity != null ? `${count} av ${event.capacity} plasser er tatt` : `${count} påmeldte`;
 }
 
-/** Bekreftelse til gjesten etter påmelding. Svar på e-posten går til arrangøren. */
-export function guestConfirmation({ event, registration, eventUrl, cancelUrl, timeZone }) {
+const small = (html) => p(`<span style="color:#6b5e53;font-size:13px;">${html}</span>`);
+
+/**
+ * Bekreftelse til den som meldte på. Én e-post for hele påmeldingen, med alle personene.
+ * Svar på e-posten går til arrangøren.
+ */
+export function guestConfirmation({ event, booking, eventUrl, cancelUrl, timeZone }) {
+  const { persons, contactName, contactEmail } = booking;
+  const several = persons.length > 1;
   const subject = `Påmelding bekreftet: ${event.title}`;
-  const rows = [...eventRows(event, timeZone), ['Navn', registration.name], ...answerRows(event, registration)];
+  const intro = several
+    ? `Du har meldt på ${persons.length} personer: ${nameList(persons)}.`
+    : 'Du er påmeldt.';
+  // «Kan du ikke komme likevel? Meld deg av her» – ved flere personer kan man velge hvem som meldes av.
+  const cancelLead = several ? 'Kan noen av dere ikke komme likevel? Meld av' : 'Kan du ikke komme likevel? Meld deg av';
+  const cancelTail = several ? ' – du velger selv hvem' : '';
+
   const html = layout(subject, `
     ${h1(event.title)}
-    ${p(`Hei ${escapeHtml(registration.name)}! Du er påmeldt. Her er detaljene:`)}
-    ${detailsTable(rows)}
+    ${p(`Hei ${escapeHtml(contactName)}! ${escapeHtml(intro)}`)}
+    ${detailsTable(eventRows(event, timeZone))}
+    ${personsHtml(event, persons)}
     ${button(eventUrl, 'Se arrangementet')}
-    ${p(`Har du spørsmål, kan du svare direkte på denne e-posten.`)}
-    ${p(`<span style="color:#6b5e53;font-size:13px;">Kan du ikke komme likevel? <a href="${escapeHtml(cancelUrl)}" style="color:#8b2e2a;">Meld deg av her</a>, så får noen andre plassen.</span>`)}
+    ${p('Har du spørsmål, kan du svare direkte på denne e-posten.')}
+    ${small(`${escapeHtml(cancelLead)} <a href="${escapeHtml(cancelUrl)}" style="color:#8b2e2a;">her</a>${escapeHtml(cancelTail)}, så får noen andre plassen.`)}
   `);
-  const text = `Hei ${registration.name}!
+  const text = `Hei ${contactName}!
 
-Du er påmeldt ${event.title}.
+${intro}
 
-${detailsText(rows)}
+${detailsText(eventRows(event, timeZone))}
+
+${personsText(event, persons)}
 
 Se arrangementet: ${eventUrl}
 
 Har du spørsmål, kan du svare direkte på denne e-posten.
 
-Kan du ikke komme likevel? Meld deg av her: ${cancelUrl}`;
-  return { to: registration.email, subject, html, text, replyTo: event.organizerEmail };
+${cancelLead} her${cancelTail}: ${cancelUrl}`;
+  return { to: contactEmail, subject, html, text, replyTo: event.organizerEmail };
 }
 
-/** Varsel til arrangøren om ny påmelding. Svar på e-posten går til gjesten. */
-export function organizerNotification({ event, registration, count, adminHint, timeZone }) {
-  const subject = `Ny påmelding: ${registration.name} – ${event.title}`;
-  const rows = [['Navn', registration.name], ['E-post', registration.email], ...answerRows(event, registration)];
+/** Varsel til arrangøren om ny påmelding. Svar på e-posten går til den som meldte på. */
+export function organizerNotification({ event, booking, count, adminHint }) {
+  const { persons, contactName, contactEmail } = booking;
+  const extra = persons.length > 1 ? ` +${persons.length - 1}` : '';
+  const subject = `Ny påmelding: ${contactName}${extra} – ${event.title}`;
+  const intro = persons.length > 1
+    ? `${contactName} (${contactEmail}) har meldt på ${persons.length} personer til ${event.title}.`
+    : `${contactName} har meldt seg på ${event.title}.`;
+
   const html = layout(subject, `
     ${h1('Ny påmelding')}
-    ${p(`<strong>${escapeHtml(registration.name)}</strong> har meldt seg på <strong>${escapeHtml(event.title)}</strong>.`)}
-    ${detailsTable(rows)}
+    ${p(escapeHtml(intro))}
+    ${personsHtml(event, persons)}
     ${p(`Status: ${escapeHtml(countText(event, count))}.`)}
-    ${p(`<span style="color:#6b5e53;font-size:13px;">${escapeHtml(adminHint)}</span>`)}
+    ${small(escapeHtml(adminHint))}
   `);
-  const text = `${registration.name} har meldt seg på ${event.title}.
+  const text = `${intro}
 
-${detailsText(rows)}
+${personsText(event, persons)}
 
 Status: ${countText(event, count)}.
 
 ${adminHint}`;
-  return { to: event.organizerEmail, subject, html, text, replyTo: registration.email };
+  return { to: event.organizerEmail, subject, html, text, replyTo: contactEmail };
 }
 
-/** Kvittering til gjesten etter avmelding. */
-export function guestCancellation({ event, registration, eventUrl }) {
+/** Kvittering til den som meldte på, etter at hele eller deler av påmeldingen er meldt av. */
+export function guestCancellation({ event, booking, cancelled, remaining, eventUrl }) {
   const subject = `Avmeldt: ${event.title}`;
+  const who = cancelled.length === 1 && cancelled[0].name === booking.contactName && !remaining.length
+    ? 'Du er nå meldt av.'
+    : `Nå er ${nameList(cancelled)} meldt av.`;
+  const rest = remaining.length ? `Fortsatt påmeldt: ${nameList(remaining)}.` : '';
   const html = layout(subject, `
     ${h1(event.title)}
-    ${p(`Hei ${escapeHtml(registration.name)}! Du er nå meldt av. Takk for at du ga beskjed.`)}
-    ${p(`Ombestemmer du deg, kan du melde deg på igjen <a href="${escapeHtml(eventUrl)}" style="color:#8b2e2a;">her</a> så lenge det er ledige plasser.`)}
+    ${p(`Hei ${escapeHtml(booking.contactName)}! ${escapeHtml(who)} Takk for at du ga beskjed.`)}
+    ${rest ? p(escapeHtml(rest)) : ''}
+    ${p(`Ombestemmer du deg, kan du melde på igjen <a href="${escapeHtml(eventUrl)}" style="color:#8b2e2a;">her</a> så lenge det er ledige plasser.`)}
   `);
-  const text = `Hei ${registration.name}!
+  const text = `Hei ${booking.contactName}!
 
-Du er nå meldt av ${event.title}. Takk for at du ga beskjed.
-
-Ombestemmer du deg, kan du melde deg på igjen så lenge det er ledige plasser: ${eventUrl}`;
-  return { to: registration.email, subject, html, text, replyTo: event.organizerEmail };
+${who} Takk for at du ga beskjed.
+${rest ? `\n${rest}\n` : ''}
+Ombestemmer du deg, kan du melde på igjen så lenge det er ledige plasser: ${eventUrl}`;
+  return { to: booking.contactEmail, subject, html, text, replyTo: event.organizerEmail };
 }
 
 /** Varsel til arrangøren om avmelding. */
-export function organizerCancellation({ event, registration, count }) {
-  const subject = `Avmelding: ${registration.name} – ${event.title}`;
+export function organizerCancellation({ event, booking, cancelled, count }) {
+  const names = nameList(cancelled);
+  const subject = `Avmelding: ${names} – ${event.title}`;
+  const intro = `${booking.contactName} (${booking.contactEmail}) har meldt av ${names} fra ${event.title}.`;
   const html = layout(subject, `
     ${h1('Avmelding')}
-    ${p(`<strong>${escapeHtml(registration.name)}</strong> (${escapeHtml(registration.email)}) har meldt seg av <strong>${escapeHtml(event.title)}</strong>.`)}
+    ${p(escapeHtml(intro))}
     ${p(`Status: ${escapeHtml(countText(event, count))}.`)}
   `);
-  const text = `${registration.name} (${registration.email}) har meldt seg av ${event.title}.
+  const text = `${intro}
 
 Status: ${countText(event, count)}.`;
-  return { to: event.organizerEmail, subject, html, text, replyTo: registration.email };
+  return { to: event.organizerEmail, subject, html, text, replyTo: booking.contactEmail };
 }
 
 /** Sendes til arrangøren når arrangementet opprettes – inneholder den hemmelige admin-lenken. */

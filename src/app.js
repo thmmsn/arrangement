@@ -6,7 +6,7 @@ import { registrationsToCsv } from './csv.js';
 import * as templates from './email.js';
 import { hashSecret, newSecret, newSlug, secretMatches, SLUG_PATTERN } from './ids.js';
 import { rateLimit } from './rateLimit.js';
-import { registrationStatus, validateEvent, validateRegistration, ValidationError } from './validation.js';
+import { registrationStatus, validateBooking, validateEvent, ValidationError } from './validation.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VIEWS = path.join(ROOT, 'views');
@@ -138,6 +138,7 @@ export function createApp({ repo, mailer, config, logger = console }) {
       organizerName: event.organizerName,
       imageUrl: event.imageUrl,
       fields: event.fields,
+      maxPerBooking: event.maxPerBooking,
       timeZone: config.timeZone,
       status: registrationStatus(event, count),
       // Arrangøren kan skjule antallet. Da skjules også kapasiteten, siden den sammen med
@@ -178,77 +179,119 @@ export function createApp({ repo, mailer, config, logger = console }) {
     res.json(publicEvent(req.event, repo.countRegistrations(req.event.id)));
   });
 
+  // Feilmelding når hele gruppen ikke får plass. Antallet ledige plasser nevnes bare hvis arrangøren
+  // viser antall påmeldte offentlig.
+  function notEnoughSpots(event, spotsLeft) {
+    if (spotsLeft <= 0) return { error: STATUS_MESSAGES.full, status: 'full' };
+    const error = event.showCount
+      ? `Det er bare ${spotsLeft} ${spotsLeft === 1 ? 'ledig plass' : 'ledige plasser'} igjen. Fjern noen personer og prøv igjen.`
+      : 'Det er ikke nok ledige plasser til alle. Prøv med færre personer.';
+    return { error, status: 'not_enough', ...(event.showCount && { spotsLeft }) };
+  }
+
+  // En påmelding består av kontaktpersonen (name, email, answers) og eventuelle personer
+  // som er lagt til (guests). Hver person blir én gjest og tar én plass.
   api.post('/events/:slug/registrations', registerLimiter, loadEvent, async (req, res) => {
     const { event } = req;
 
     // Honningkrukke: et skjult felt som mennesker ikke ser, men som roboter gjerne fyller ut.
     // Vi later som alt gikk bra, slik at roboten ikke lærer noe.
     if (req.body?.website) {
-      return res.status(201).json({ registration: { name: '', email: '' }, emailSent: true, event: publicEvent(event, repo.countRegistrations(event.id)) });
+      return res.status(201).json({
+        booking: { contactName: '', contactEmail: '', persons: [] },
+        emailSent: true,
+        event: publicEvent(event, repo.countRegistrations(event.id)),
+      });
     }
 
-    // Rask sjekk før validering, så gjesten får «fullt»/«stengt» i stedet for feltfeil.
-    // Selve plassen reserveres likevel trygt inne i transaksjonen i repo.register().
-    const status = registrationStatus(event, repo.countRegistrations(event.id));
+    // Raske sjekker før validering, så gjesten får «fullt»/«stengt» i stedet for feltfeil.
+    // Selve plassene reserveres likevel trygt inne i transaksjonen i repo.register().
+    const count = repo.countRegistrations(event.id);
+    const status = registrationStatus(event, count);
     if (status !== 'open') return res.status(409).json({ error: STATUS_MESSAGES[status], status });
+    const requested = 1 + (Array.isArray(req.body?.guests) ? req.body.guests.length : 0);
+    if (event.capacity != null && count + requested > event.capacity) {
+      return res.status(409).json(notEnoughSpots(event, event.capacity - count));
+    }
 
-    const data = validateRegistration(req.body, event.fields);
+    const { contact, persons } = validateBooking(req.body, event.fields, event.maxPerBooking);
     const cancelToken = newSecret(18);
+    const booking = { contactName: contact.name, contactEmail: contact.email, persons };
 
     let result;
     try {
-      result = repo.register(event, { ...data, cancelTokenHash: hashSecret(cancelToken) });
+      result = repo.register(event, { ...booking, cancelTokenHash: hashSecret(cancelToken) });
     } catch (err) {
-      if (err instanceof CapacityError) return res.status(409).json({ error: STATUS_MESSAGES.full, status: 'full' });
+      if (err instanceof CapacityError) return res.status(409).json(notEnoughSpots(event, err.spotsLeft));
       throw err;
     }
 
-    const registration = { ...data, id: result.id };
     const [guestSent] = await sendEmails([
       templates.guestConfirmation({
         event,
-        registration,
+        booking,
         eventUrl: eventUrl(event.slug),
         cancelUrl: cancelUrl(event.slug, cancelToken),
         timeZone: config.timeZone,
       }),
-      templates.organizerNotification({ event, registration, count: result.count, adminHint, timeZone: config.timeZone }),
+      templates.organizerNotification({ event, booking, count: result.count, adminHint }),
     ]);
 
     res.status(201).json({
-      registration: { name: data.name, email: data.email },
+      booking: { contactName: contact.name, contactEmail: contact.email, persons: persons.map(({ name }) => ({ name })) },
       emailSent: guestSent,
       event: publicEvent(event, result.count),
     });
   });
 
-  function findByToken(req) {
+  function findBooking(req) {
     const token = req.body?.token;
-    return typeof token === 'string' && token ? repo.findRegistrationByToken(req.event.id, hashSecret(token)) : null;
+    return typeof token === 'string' && token ? repo.findBookingByToken(req.event.id, hashSecret(token)) : null;
   }
-  const notFoundCancel = 'Fant ingen påmelding for denne lenken. Kanskje du allerede er meldt av?';
+  const notFoundCancel = 'Fant ingen påmelding for denne lenken. Kanskje den allerede er meldt av?';
 
   // Viser hvem avmeldingslenken gjelder før gjesten bekrefter. Avmeldingen skjer først ved POST
   // til /cancel – mange e-posttjenester åpner lenker automatisk for å sjekke dem for virus,
   // og det skal ikke melde noen av.
   api.post('/events/:slug/cancel/lookup', cancelLimiter, loadEvent, (req, res) => {
-    const registration = findByToken(req);
-    if (!registration) return res.status(404).json({ error: notFoundCancel });
-    res.json({ name: registration.name, event: publicEvent(req.event, repo.countRegistrations(req.event.id)) });
+    const booking = findBooking(req);
+    if (!booking) return res.status(404).json({ error: notFoundCancel });
+    res.json({
+      contactName: booking.contactName,
+      persons: booking.persons.map(({ id, name }) => ({ id, name })),
+      event: publicEvent(req.event, repo.countRegistrations(req.event.id)),
+    });
   });
 
+  // body: { token, ids? } – uten ids meldes hele påmeldingen av, ellers bare de valgte personene.
   api.post('/events/:slug/cancel', cancelLimiter, loadEvent, async (req, res) => {
     const { event } = req;
-    const registration = findByToken(req);
-    if (!registration) return res.status(404).json({ error: notFoundCancel });
+    const booking = findBooking(req);
+    if (!booking) return res.status(404).json({ error: notFoundCancel });
 
-    repo.deleteRegistration(event.id, registration.id);
+    let ids = booking.persons.map((p) => p.id);
+    if (req.body.ids !== undefined) {
+      if (!Array.isArray(req.body.ids) || !req.body.ids.every(Number.isInteger)) {
+        return res.status(400).json({ error: 'Ugyldig valg av personer.' });
+      }
+      ids = req.body.ids.filter((id) => ids.includes(id)); // Bare personer i denne påmeldingen.
+      if (!ids.length) return res.status(400).json({ error: 'Velg hvem som skal meldes av.' });
+    }
+
+    const cancelled = repo.deleteFromBooking(event.id, booking.id, ids);
+    if (!cancelled.length) return res.status(404).json({ error: notFoundCancel });
+    const remaining = booking.persons.filter((p) => !cancelled.some((c) => c.id === p.id));
+
     const count = repo.countRegistrations(event.id);
     await sendEmails([
-      templates.guestCancellation({ event, registration, eventUrl: eventUrl(event.slug) }),
-      templates.organizerCancellation({ event, registration, count }),
+      templates.guestCancellation({ event, booking, cancelled, remaining, eventUrl: eventUrl(event.slug) }),
+      templates.organizerCancellation({ event, booking, cancelled, count }),
     ]);
-    res.json({ ok: true, event: publicEvent(event, count) });
+    res.json({
+      cancelled: cancelled.map(({ name }) => ({ name })),
+      remaining: remaining.map(({ id, name }) => ({ id, name })),
+      event: publicEvent(event, count),
+    });
   });
 
   // ---------- API: administrasjon ----------
@@ -270,7 +313,8 @@ export function createApp({ repo, mailer, config, logger = console }) {
     const registrations = repo.listRegistrations(req.event.id);
     res.json({
       event: adminEvent(req.event, registrations.length),
-      registrations: registrations.map(({ id, name, email, answers, createdAt }) => ({ id, name, email, answers, createdAt })),
+      registrations: registrations.map(({ id, bookingId, position, name, email, answers, createdAt, contactName, contactEmail }) =>
+        ({ id, bookingId, position, name, email, answers, createdAt, contactName, contactEmail })),
     });
   });
 
