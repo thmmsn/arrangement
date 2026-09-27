@@ -1,26 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { after, test } from 'node:test';
-import { createApp } from '../src/app.js';
+import { test } from 'node:test';
 import { loadConfig } from '../src/config.js';
-import { createRepository, openDatabase } from '../src/db.js';
 import { guestConfirmation } from '../src/email.js';
 import { googleFontsUrl, loadTheme, themeCss } from '../src/theme.js';
-
-const servers = [];
-after(() => servers.forEach((s) => s.close()));
-
-async function start(env) {
-  const config = { ...loadConfig({ BASE_URL: 'https://booking.example.com', ...env }), rateLimits: {} };
-  const server = createApp({ repo: createRepository(openDatabase(':memory:')), mailer: { send: async () => ({}) }, config }).listen(0);
-  await new Promise((resolve) => server.once('listening', resolve));
-  servers.push(server);
-  const base = `http://localhost:${server.address().port}`;
-  return async (path) => {
-    const res = await fetch(base + path);
-    return { status: res.status, headers: res.headers, text: await res.text() };
-  };
-}
+import { createEvent, startApp } from './helpers.js';
 
 // Leser en .env-fil slik `docker run --env-file` gjør: bokstavelig, uten å tolke anførselstegn
 // eller kommentarer på slutten av linjen. Den strengeste av måtene appen kan startes på.
@@ -47,7 +31,7 @@ test('standardtemaet gir det opprinnelige uttrykket', () => {
   assert.doesNotMatch(css, /--accent:/, 'standardfargene ligger i style.css og skal ikke overstyres');
 });
 
-test('farger, fonter og radius fra miljøvariabler havner i theme.css', () => {
+test('farger, fonter og radius fra miljøvariabler havner i temastilarket', () => {
   const { theme, warnings } = loadTheme({
     COLOR_ACCENT: '#1f4e79',
     COLOR_BACKGROUND: 'white',
@@ -88,57 +72,72 @@ test('ugyldige verdier ignoreres med advarsel – ingen CSS- eller HTML-injeksjo
   assert.equal(theme.showBand, true);
 });
 
-test('navn, logo, tekster og bunntekst flettes inn i sidene – escapet', async () => {
-  const get = await start({
-    SITE_NAME: 'Reinhekla <påmelding>',
+// Hjelper: åpner arrangementssiden og henter nettstedets temastilark som siden lenker til.
+async function eventPageWithCss(env) {
+  const app = await startApp({ ADMIN_PASSWORD: 'hemmelig', ...env });
+  const { slug } = await createEvent(app);
+  const page = await app.request({ path: `/${slug}` });
+  assert.equal(page.status, 200);
+  const href = /<link rel="stylesheet" href="(\/assets\/theme\/[0-9a-f]{20}\.css)">/.exec(page.text)?.[1];
+  assert.ok(href, 'siden lenker til temastilarket');
+  const css = await app.request({ path: href });
+  return { app, page, css };
+}
+
+test('navn, logo, favicon og bunntekst flettes inn i arrangementssiden – escapet', async () => {
+  const { page, css } = await eventPageWithCss({
+    SITE_NAME: 'Eksempel <påmelding>',
     LOGO_URL: '/assets/custom/logo.svg',
     FAVICON_URL: 'https://cdn.example.com/favicon.png',
-    HOME_TITLE: 'Hei & velkommen',
-    HOME_TEXT: 'Linje én',
+    FOOTER_TEXT: 'Bunntekst & mer',
     PRIVACY_URL: 'https://example.com/personvern',
+    COLOR_ACCENT: '#1f4e79',
   });
-  const home = await get('/');
-  assert.match(home.text, /<title>Reinhekla &lt;påmelding&gt;<\/title>/);
-  assert.match(home.text, /<img src="\/assets\/custom\/logo\.svg" alt="Reinhekla &lt;påmelding&gt;">/);
-  assert.match(home.text, /<link rel="icon" href="https:\/\/cdn\.example\.com\/favicon\.png">/);
-  assert.match(home.text, /<h1>Hei &amp; velkommen<\/h1>/);
-  assert.match(home.text, /<a href="https:\/\/example\.com\/personvern"[^>]*>Personvern<\/a>/);
-  assert.doesNotMatch(home.text, /<!--|\{\{/, 'alle plassholdere er fylt inn');
+  assert.match(page.text, /<html lang="nb">/);
+  assert.match(page.text, /<title>Eksempel &lt;påmelding&gt;<\/title>/);
+  assert.match(page.text, /<img src="\/assets\/custom\/logo\.svg" alt="Eksempel &lt;påmelding&gt;">/);
+  assert.match(page.text, /<link rel="icon" href="https:\/\/cdn\.example\.com\/favicon\.png">/);
+  assert.match(page.text, /Bunntekst &amp; mer · <a href="https:\/\/example\.com\/personvern"[^>]*>Personvern<\/a>/);
+  assert.match(page.text, /Laster arrangementet …/);
+  assert.doesNotMatch(page.text, /<!--|\{\{/, 'alle plassholdere er fylt inn');
 
-  const css = await get('/theme.css');
   assert.equal(css.status, 200);
-  assert.match(css.headers.get('content-type'), /text\/css/);
+  assert.match(css.headers['content-type'], /text\/css/);
+  assert.match(css.text, /--accent: #1f4e79;/);
 });
 
 test('uten Google Fonts slipper Content-Security-Policy heller ikke Google inn', async () => {
-  const withGoogle = await start({});
-  assert.match((await withGoogle('/')).headers.get('content-security-policy'), /fonts\.googleapis\.com/);
+  const withGoogle = await eventPageWithCss({});
+  assert.match(withGoogle.page.headers['content-security-policy'], /fonts\.googleapis\.com/);
+  assert.match(withGoogle.page.text, /fonts\.googleapis\.com/);
+  assert.match(withGoogle.css.text, /@import/);
 
-  const without = await start({ GOOGLE_FONTS: 'false' });
-  const page = await without('/');
-  assert.doesNotMatch(page.headers.get('content-security-policy'), /google/);
-  assert.doesNotMatch(page.text, /fonts\.googleapis/);
-  assert.doesNotMatch((await without('/theme.css')).text, /@import/);
+  const without = await eventPageWithCss({ GOOGLE_FONTS: 'false' });
+  assert.doesNotMatch(without.page.headers['content-security-policy'], /google/);
+  assert.doesNotMatch(without.page.text, /fonts\.googleapis/);
+  assert.equal(without.css.status, 200);
+  assert.doesNotMatch(without.css.text, /@import/);
 });
 
 test('eget stilark på et annet domene tillates i Content-Security-Policy', async () => {
-  const get = await start({ CUSTOM_CSS_URL: 'https://cdn.example.com/stil.css' });
-  const page = await get('/');
-  assert.match(page.headers.get('content-security-policy'), /style-src 'self' https:\/\/fonts\.googleapis\.com https:\/\/cdn\.example\.com/);
+  const { page } = await eventPageWithCss({ CUSTOM_CSS_URL: 'https://cdn.example.com/stil.css' });
+  assert.match(page.headers['content-security-policy'], /style-src 'self' https:\/\/fonts\.googleapis\.com https:\/\/cdn\.example\.com/);
   assert.match(page.text, /<link rel="stylesheet" href="https:\/\/cdn\.example\.com\/stil\.css">/);
 });
 
 test('e-postene bruker temaets farger, logo (med full adresse) og navn', () => {
-  const { theme } = loadTheme({ COLOR_ACCENT: '#1f4e79', COLOR_ACCENT_TEXT: '#000', LOGO_URL: '/assets/custom/logo.png', SITE_NAME: 'Reinhekla' }, { baseUrl: 'https://booking.example.com' });
+  const { mainSite: site } = loadConfig({
+    DOMAIN: 'booking.example.com', COLOR_ACCENT: '#1f4e79', COLOR_ACCENT_TEXT: '#000', LOGO_URL: '/assets/custom/logo.png', SITE_NAME: 'Eksempel',
+  });
   const message = guestConfirmation({
     event: { title: 'Kurs', startsAt: '2026-11-14T17:00:00Z', location: '', organizerName: 'Kari', organizerEmail: 'k@example.com', fields: [] },
     booking: { contactName: 'Ola', contactEmail: 'ola@example.com', persons: [{ name: 'Ola', email: 'ola@example.com', answers: {} }] },
     eventUrl: 'https://booking.example.com/abc',
     cancelUrl: 'https://booking.example.com/abc/avmelding#t',
     timeZone: 'Europe/Oslo',
-    theme,
+    site,
   });
-  assert.match(message.html, /<img src="https:\/\/booking\.example\.com\/assets\/custom\/logo\.png" alt="Reinhekla"/);
+  assert.match(message.html, /<img src="https:\/\/booking\.example\.com\/assets\/custom\/logo\.png" alt="Eksempel"/);
   assert.match(message.html, /background:#1f4e79;color:#000;/);
   assert.doesNotMatch(message.html, /#8b2e2a/);
 });

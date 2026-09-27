@@ -1,6 +1,7 @@
 // Enkel rate limiting i minnet (fast tidsvindu per IP-adresse).
 // Holder for én serverprosess. Kjører du flere instanser, bør dette flyttes til f.eks. Redis.
 // `key` avgjør hvem som telles sammen – standard er IP-adressen Express har funnet (req.ip).
+// `message` kan være en funksjon av forespørselen, slik at feilmeldingen kommer på riktig språk.
 export function rateLimit({ windowMs, max, key = (req) => req.ip, message = 'For mange forespørsler. Vent litt og prøv igjen.' }) {
   const hits = new Map(); // nøkkel (IP) -> { count, resetAt }
 
@@ -22,7 +23,7 @@ export function rateLimit({ windowMs, max, key = (req) => req.ip, message = 'For
     entry.count += 1;
     if (entry.count > max) {
       res.set('Retry-After', String(Math.ceil((entry.resetAt - now) / 1000)));
-      return res.status(429).json({ error: message });
+      return res.status(429).json({ error: typeof message === 'function' ? message(req) : message });
     }
     next();
   };

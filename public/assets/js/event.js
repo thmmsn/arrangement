@@ -1,14 +1,10 @@
-import { api, clearFieldErrors, formatDay, formatEventTime, formatShort, h, linkify, notice, showFieldErrors, slugFromPath } from './common.js';
+import {
+  api, clearFieldErrors, formatDay, formatEventTime, formatShort, h, linkify, nameList, notice, showFieldErrors, slugFromPath, t,
+} from './common.js';
 
 const app = document.getElementById('app');
 const slug = slugFromPath();
 const REFRESH_MS = 30_000;
-
-const STATUS_TEXT = {
-  closed: 'Påmeldingen er stengt.',
-  deadline_passed: 'Påmeldingsfristen har gått ut.',
-  full: 'Arrangementet er fullt.',
-};
 
 let event;
 
@@ -16,7 +12,7 @@ async function load() {
   try {
     event = await api(`/events/${slug}`);
   } catch (err) {
-    app.replaceChildren(h('h1', {}, 'Fant ikke arrangementet'), h('p', {}, err.message));
+    app.replaceChildren(h('h1', {}, t('event.notFound')), h('p', {}, err.message));
     return;
   }
   document.title = event.title;
@@ -33,11 +29,11 @@ function render() {
     h('p', { class: 'kicker' }, formatDay(event.startsAt, tz)),
     h('h1', {}, event.title),
     h('dl', { class: 'meta' },
-      h('dt', {}, 'Når'), h('dd', {}, formatEventTime(event.startsAt, event.endsAt, tz)),
-      event.location ? [h('dt', {}, 'Hvor'), h('dd', {}, event.location)] : null,
-      h('dt', {}, 'Arrangør'), h('dd', {}, event.organizerName),
+      h('dt', {}, t('event.when')), h('dd', {}, formatEventTime(event.startsAt, event.endsAt, tz)),
+      event.location ? [h('dt', {}, t('event.where')), h('dd', {}, event.location)] : null,
+      h('dt', {}, t('event.organizer')), h('dd', {}, event.organizerName),
       event.registrationDeadline
-        ? [h('dt', {}, 'Frist'), h('dd', {}, `Påmelding innen ${formatShort(event.registrationDeadline, tz)}`)]
+        ? [h('dt', {}, t('event.deadline')), h('dd', {}, t('event.deadlineText', { date: formatShort(event.registrationDeadline, tz) }))]
         : null,
     ),
     h('div', { id: 'attendance' }, attendance()),
@@ -48,16 +44,16 @@ function render() {
 
 function attendance() {
   const open = event.status === 'open';
-  const badge = h('span', { class: `badge ${open ? '' : 'closed'}` }, open ? 'Påmelding åpen' : statusLabel());
+  const badge = h('span', { class: `badge ${open ? '' : 'closed'}` }, t(`event.badge.${event.status}`));
 
   if (event.count === null) return h('div', { class: 'attendance' }, badge);
 
   const parts = [
     h('span', { class: 'number' }, event.count),
-    h('span', { class: 'label' }, event.count === 1 ? 'påmeldt' : 'påmeldte'),
+    h('span', { class: 'label' }, t('event.registered', { count: event.count })),
   ];
   if (event.capacity !== null) {
-    parts.push(h('span', { class: 'label' }, `· ${event.spotsLeft} av ${event.capacity} plasser ledige`));
+    parts.push(h('span', { class: 'label' }, t('event.spotsLeft', { left: event.spotsLeft, capacity: event.capacity })));
   }
   parts.push(badge);
   if (event.capacity !== null) {
@@ -67,10 +63,6 @@ function attendance() {
     parts.push(h('div', { class: 'progress', role: 'presentation' }, bar));
   }
   return h('div', { class: 'attendance' }, parts);
-}
-
-function statusLabel() {
-  return { closed: 'Stengt', deadline_passed: 'Frist utløpt', full: 'Fullt' }[event.status] || '';
 }
 
 async function refreshAttendance() {
@@ -96,17 +88,13 @@ function updateAttendance() {
 
 function registrationSection() {
   if (event.status !== 'open') {
-    return [h('h2', {}, 'Påmelding'), notice('info', STATUS_TEXT[event.status])];
+    return [h('h2', {}, t('event.headingClosed')), notice('info', t(`status.${event.status}`))];
   }
-  return [h('h2', {}, 'Meld deg på'), registrationForm()];
+  return [h('h2', {}, t('event.headingOpen')), registrationForm()];
 }
 
 function requiredMark() {
   return h('span', { class: 'required-mark', 'aria-hidden': 'true' }, '*');
-}
-
-function nameList(names) {
-  return new Intl.ListFormat('nb', { type: 'conjunction' }).format(names);
 }
 
 let uid = 0; // Gir hvert felt en unik id, slik at <label for> virker for alle personene.
@@ -135,7 +123,7 @@ function fieldInput(field) {
       break;
     case 'select':
       input = h('select', common,
-        h('option', { value: '' }, 'Velg …'),
+        h('option', { value: '' }, t('form.selectPlaceholder')),
         field.options.map((o) => h('option', { value: o }, o)));
       break;
     case 'number':
@@ -160,17 +148,17 @@ function personBlock({ contact, onRemove }) {
   const nameId = `f${++uid}`;
   const emailId = `f${++uid}`;
   const heading = h('h3', { class: 'person-title' });
-  const remove = contact ? null : h('button', { class: 'btn danger small', type: 'button', onclick: onRemove }, 'Fjern');
+  const remove = contact ? null : h('button', { class: 'btn danger small', type: 'button', onclick: onRemove }, t('common.remove'));
 
   const el = h('div', { class: contact ? 'person contact' : 'person' },
     h('div', { class: 'person-head' }, heading, remove),
     row('name',
-      h('label', { for: nameId }, 'Navn', requiredMark()),
+      h('label', { for: nameId }, t('form.name'), requiredMark()),
       h('input', { id: nameId, 'data-name': true, type: 'text', autocomplete: contact ? 'name' : 'off', required: true, maxLength: 200 })),
     row('email',
       contact
-        ? h('label', { for: emailId }, 'E-post', requiredMark(), h('span', { class: 'hint' }, 'Bekreftelsen sendes hit.'))
-        : h('label', { for: emailId }, 'E-post', h('span', { class: 'hint' }, 'Valgfritt. Bekreftelsen for alle sendes til deg.')),
+        ? h('label', { for: emailId }, t('form.email'), requiredMark(), h('span', { class: 'hint' }, t('form.emailHintContact')))
+        : h('label', { for: emailId }, t('form.email'), h('span', { class: 'hint' }, t('form.emailHintGuest'))),
       h('input', { id: emailId, 'data-email': true, type: 'email', autocomplete: contact ? 'email' : 'off', required: contact, maxLength: 254 })),
     event.fields.map(fieldInput),
   );
@@ -179,7 +167,7 @@ function personBlock({ contact, onRemove }) {
     el,
     /** Oppdaterer overskrift og feilnøkler når personer legges til eller fjernes. */
     setIndex(index, total) {
-      heading.textContent = contact ? 'Person 1 – deg' : `Person ${index + 1}`;
+      heading.textContent = contact ? t('form.personYou') : t('form.person', { n: index + 1 });
       el.classList.toggle('solo', contact && total === 1); // Én person trenger ingen overskrift.
       const prefix = contact ? '' : `guests.${index - 1}.`;
       el.querySelectorAll('[data-key]').forEach((r) => { r.dataset.errorFor = prefix + r.dataset.key; });
@@ -205,7 +193,7 @@ function registrationForm() {
   const status = h('div');
   const submit = h('button', { class: 'btn block', type: 'submit' });
   const people = h('div', { class: 'people' });
-  const addButton = h('button', { class: 'btn secondary', type: 'button' }, '+ Legg til person');
+  const addButton = h('button', { class: 'btn secondary', type: 'button' }, t('form.addPerson'));
   const addHint = h('span', { class: 'muted small' });
 
   const contact = personBlock({ contact: true });
@@ -214,14 +202,14 @@ function registrationForm() {
   function refresh() {
     const total = 1 + guests.length;
     [contact, ...guests].forEach((person, i) => person.setIndex(i, total));
-    submit.textContent = total === 1 ? 'Meld meg på' : `Meld på ${total} personer`;
+    submit.textContent = total === 1 ? t('form.submitOne') : t('form.submitMany', { count: total });
 
     // Grensen er det minste av «maks per påmelding» og ledige plasser (hvis antallet er kjent).
     const limit = Math.min(event.maxPerBooking, event.spotsLeft ?? Infinity);
     addButton.disabled = total >= limit;
     addHint.textContent = total < limit ? ''
-      : total >= event.maxPerBooking ? `Maks ${event.maxPerBooking} personer per påmelding.`
-        : 'Ingen flere ledige plasser.';
+      : total >= event.maxPerBooking ? t('form.addHintMax', { max: event.maxPerBooking })
+        : t('form.addHintNoSpots');
   }
   onEventChange = refresh;
 
@@ -252,11 +240,11 @@ function registrationForm() {
     canAdd
       ? h('div', { class: 'add-person', 'data-error-for': 'guests' },
         h('div', { class: 'actions' }, addButton, addHint),
-        h('p', { class: 'muted small' }, 'Skal flere være med? Legg dem til her, så får alle plass på samme påmelding.'))
+        h('p', { class: 'muted small' }, t('form.addInfo')))
       : null,
     // Honningkrukke mot roboter – skjult for mennesker og skjermlesere.
     h('div', { class: 'hp', 'aria-hidden': 'true' },
-      h('label', { for: 'website' }, 'Ikke fyll ut dette feltet'),
+      h('label', { for: 'website' }, t('form.honeypot')),
       h('input', { id: 'website', name: 'website', type: 'text', tabIndex: -1, autocomplete: 'off' })),
     submit,
   );
@@ -268,7 +256,7 @@ function registrationForm() {
 
     const label = submit.textContent;
     submit.disabled = true;
-    submit.textContent = 'Melder på …';
+    submit.textContent = t('form.submitting');
     try {
       const result = await api(`/events/${slug}/registrations`, {
         method: 'POST',
@@ -303,14 +291,14 @@ function showSuccess({ booking, emailSent }) {
   section.replaceChildren(
     h('div', { class: 'success-panel' },
       h('div', { class: 'check', 'aria-hidden': 'true' }, '✓'),
-      h('h2', {}, `Takk, ${booking.contactName}!`),
-      h('p', {}, names.length > 1 ? `Dere er påmeldt: ${nameList(names)}.` : 'Du er påmeldt.'),
+      h('h2', {}, t('form.thanks', { name: booking.contactName })),
+      h('p', {}, names.length > 1 ? t('form.registeredMany', { names: nameList(names) }) : t('form.registeredOne')),
       emailSent
-        ? h('p', { class: 'muted' }, `Vi har sendt en bekreftelse til ${booking.contactEmail}. Finner du den ikke, sjekk søppelposten.`)
-        : notice('warning', 'Påmeldingen er registrert, men vi fikk ikke sendt bekreftelse på e-post. Arrangøren har likevel fått beskjed.'),
+        ? h('p', { class: 'muted' }, t('form.emailSent', { email: booking.contactEmail }))
+        : notice('warning', t('form.emailFailed')),
       event.status === 'open'
         ? h('button', { class: 'btn secondary', type: 'button', onclick: () => section.replaceChildren(...registrationSection()) },
-          'Ny påmelding')
+          t('form.newBooking'))
         : null,
     ),
   );

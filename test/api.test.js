@@ -66,7 +66,7 @@ function eventInput(overrides = {}) {
   return {
     title: 'Bunadskurs',
     description: 'Hyggelig kveld',
-    location: 'Fannremsgården',
+    location: 'Grendehuset',
     startsAt: inOneMonth(),
     organizerName: 'Kari Arrangør',
     organizerEmail: 'kari@example.com',

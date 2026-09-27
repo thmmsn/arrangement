@@ -4,7 +4,7 @@
 
 import { escapeHtml } from './html.js';
 
-// Standardverdiene gir det lune, reinhekla-inspirerte uttrykket.
+// Standardverdiene gir et lunt, tradisjonelt uttrykk med varme jordfarger.
 export const DEFAULT_COLORS = {
   accent: '#8b2e2a', // knapper, lenker, overskrift-detaljer
   accentText: '#ffffff', // tekst på knapper i aksentfargen
@@ -40,9 +40,26 @@ const COLOR_PATTERN = /^(#[0-9a-f]{3,8}|[a-z]{3,30}|(rgb|rgba|hsl|hsla|oklch|okl
 // Fontnavn slik Google Fonts skriver dem, valgfritt med vekter: «Playfair Display:wght@400;700».
 const FONT_PATTERN = /^([\p{L}\p{N} ]{1,60})(?::([a-z0-9@;,.]{1,60}))?$/iu;
 
-export function loadTheme(env, { baseUrl }) {
+// Alle miljøvariablene temaet leses fra. Et ekstra nettsted kan sette hver av dem med prefiks
+// (SITE_COM_LOGO_URL …); det som ikke er satt, arves fra hovednettstedet (se sites.js).
+export const THEME_ENV_KEYS = [
+  'SITE_NAME', 'LOGO_URL', 'LOGO_HEIGHT', 'FAVICON_URL', 'CUSTOM_CSS_URL',
+  ...Object.keys(COLOR_ENV),
+  'FONT_HEADING', 'FONT_BODY', 'GOOGLE_FONTS', 'RADIUS', 'SHOW_BAND',
+  'FOOTER_TEXT', 'PRIVACY_URL',
+];
+// Tekst skrevet på ett språk arves ikke til et nettsted med et annet språk.
+export const LANGUAGE_BOUND_KEYS = ['FOOTER_TEXT'];
+
+/**
+ * @param {object} env        Miljøvariablene (for et ekstra nettsted: allerede slått sammen med arv)
+ * @param {object} opts
+ * @param {string} opts.baseUrl  Nettstedets adresse, brukes til full logoadresse i e-poster
+ * @param {(key: string) => string} [opts.nameOf]  Navnet variabelen faktisk heter, til advarsler
+ */
+export function loadTheme(env, { baseUrl, nameOf = (key) => key }) {
   const warnings = [];
-  const warn = (name, value, why) => warnings.push(`${name}=${JSON.stringify(value)} ignoreres: ${why}`);
+  const warn = (name, value, why) => warnings.push(`${nameOf(name)}=${JSON.stringify(value)} ignoreres: ${why}`);
   const text = (name, max = 500) => {
     const value = (env[name] || '').trim();
     if (value.length > max) {
@@ -119,9 +136,6 @@ export function loadTheme(env, { baseUrl }) {
     googleFonts: flag('GOOGLE_FONTS', true),
     radius: number('RADIUS', 0, 40),
     showBand: flag('SHOW_BAND', true),
-    homeTitle: text('HOME_TITLE', 200) || 'Velkommen',
-    homeText: text('HOME_TEXT', 2000)
-      || 'Arrangementene her har ingen offentlig oversikt – de kan bare nås via lenken du har fått fra arrangøren.',
     footerText: text('FOOTER_TEXT', 300),
     privacyUrl: url('PRIVACY_URL'),
   };
@@ -158,48 +172,58 @@ export function themeCss(theme) {
 
 // ---------- Deler som flettes inn i HTML-sidene ----------
 
-export function themeHead(theme) {
+/** Stilark, fonter og favicon. `cssHref` er adressen til nettstedets genererte temastilark. */
+export function themeHead(theme, { cssHref }) {
   return [
     theme.googleFonts ? '<link rel="preconnect" href="https://fonts.googleapis.com">' : '',
     theme.googleFonts ? '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' : '',
     '<link rel="stylesheet" href="/assets/css/style.css">',
-    '<link rel="stylesheet" href="/theme.css">',
+    `<link rel="stylesheet" href="${escapeHtml(cssHref)}">`,
     theme.customCssUrl ? `<link rel="stylesheet" href="${escapeHtml(theme.customCssUrl)}">` : '',
     theme.faviconUrl ? `<link rel="icon" href="${escapeHtml(theme.faviconUrl)}">` : '',
   ].filter(Boolean).join('\n  ');
 }
 
-export function siteHeader(theme, { wide = false } = {}) {
+/**
+ * Båndet og logo/navn øverst. Logoen er ikke en lenke: det finnes ingen forside å lenke til –
+ * nettstedet skal ikke vise noe som helst uten en gyldig arrangementslenke.
+ */
+export function siteHeader(theme, { wide = false, t }) {
   const band = '<div class="band" aria-hidden="true"></div>';
   // Logo hvis den er satt, ellers nettstedsnavnet, ellers ingen topplinje (bare båndet).
   const brand = theme.logoUrl
-    ? `<img src="${escapeHtml(theme.logoUrl)}" alt="${escapeHtml(theme.siteName || 'Logo')}">`
+    ? `<img src="${escapeHtml(theme.logoUrl)}" alt="${escapeHtml(theme.siteName || t('common.logoAlt'))}">`
     : theme.siteName ? `<span>${escapeHtml(theme.siteName)}</span>` : '';
   if (!brand) return band;
   return `${band}
   <header class="site-header">
-    <div class="container${wide ? ' wide' : ''}"><a class="brand" href="/">${brand}</a></div>
+    <div class="container${wide ? ' wide' : ''}"><div class="brand">${brand}</div></div>
   </header>`;
 }
 
-export function siteFooter(theme) {
+export function siteFooter(theme, { t }) {
   const text = theme.footerText || theme.siteName;
   const privacy = theme.privacyUrl
-    ? `<a href="${escapeHtml(theme.privacyUrl)}" target="_blank" rel="noopener">Personvern</a>` : '';
+    ? `<a href="${escapeHtml(theme.privacyUrl)}" target="_blank" rel="noopener">${escapeHtml(t('common.privacy'))}</a>` : '';
   if (!text && !privacy) return '';
   return `<footer class="site-footer">
     <div class="container">${[text ? escapeHtml(text) : '', privacy].filter(Boolean).join(' · ')}</div>
   </footer>`;
 }
 
-/** Ekstra kilder Content-Security-Policy må tillate for temaet. */
-export function themeCspSources(theme) {
-  const styles = ["'self'"];
-  const fonts = [];
-  if (theme.googleFonts) {
-    styles.push('https://fonts.googleapis.com');
-    fonts.push('https://fonts.gstatic.com');
+/**
+ * Kilder Content-Security-Policy må tillate. Samme policy brukes for alle nettstedene, så den er
+ * unionen av det temaene trenger (admin-sidene bruker hovednettstedets tema uansett domene).
+ */
+export function themeCspSources(themes) {
+  const styles = new Set(["'self'"]);
+  const fonts = new Set();
+  for (const theme of themes) {
+    if (theme.googleFonts) {
+      styles.add('https://fonts.googleapis.com');
+      fonts.add('https://fonts.gstatic.com');
+    }
+    if (/^https:\/\//i.test(theme.customCssUrl)) styles.add(new URL(theme.customCssUrl).origin);
   }
-  if (/^https:\/\//i.test(theme.customCssUrl)) styles.push(new URL(theme.customCssUrl).origin);
-  return { styles, fonts: fonts.length ? fonts : ["'self'"] };
+  return { styles: [...styles], fonts: fonts.size ? [...fonts] : ["'self'"] };
 }

@@ -1,27 +1,27 @@
-import { api, formatEventTime, h, notice, secretFromHash, slugFromPath } from './common.js';
+import { api, formatEventTime, h, nameList, notice, secretFromHash, slugFromPath, t } from './common.js';
 
 const app = document.getElementById('app');
 const slug = slugFromPath();
 const token = secretFromHash();
 
-const nameList = (persons) => new Intl.ListFormat('nb', { type: 'conjunction' }).format(persons.map((p) => p.name));
+const names = (persons) => nameList(persons.map((p) => p.name));
 
 async function load() {
   let info;
   try {
-    if (!token) throw new Error('Lenken mangler avmeldingskoden. Bruk lenken fra bekreftelses-e-posten.');
+    if (!token) throw new Error(t('cancel.missingToken'));
     info = await api(`/events/${slug}/cancel/lookup`, { method: 'POST', body: { token } });
   } catch (err) {
-    app.replaceChildren(h('p', { class: 'kicker' }, 'Avmelding'), h('h1', {}, 'Fant ikke påmeldingen'), h('p', {}, err.message),
-      h('p', {}, h('a', { href: `/${slug}` }, 'Gå til arrangementet')));
+    app.replaceChildren(h('p', { class: 'kicker' }, t('cancel.title')), h('h1', {}, t('cancel.notFound')), h('p', {}, err.message),
+      h('p', {}, h('a', { href: `/${slug}` }, t('cancel.toEvent'))));
     return;
   }
 
   const { event } = info;
-  document.title = `Avmelding: ${event.title}`;
+  document.title = t('cancel.documentTitle', { title: event.title });
   const card = h('section', { class: 'card' });
   app.replaceChildren(
-    h('p', { class: 'kicker' }, 'Avmelding'),
+    h('p', { class: 'kicker' }, t('cancel.title')),
     h('h1', {}, event.title),
     h('p', { class: 'muted' }, formatEventTime(event.startsAt, event.endsAt, event.timeZone), event.location ? ` · ${event.location}` : ''),
     card,
@@ -43,7 +43,9 @@ function renderChoice(card, contactName, persons, message = null) {
   const button = h('button', { class: 'btn', type: 'button' });
   const updateButton = () => {
     const n = boxes.filter((b) => b.box.checked).length;
-    button.textContent = !several ? 'Ja, meld meg av' : n === persons.length ? 'Meld av alle' : `Meld av ${n} ${n === 1 ? 'person' : 'personer'}`;
+    button.textContent = !several ? t('cancel.buttonSelf')
+      : n === persons.length ? t('cancel.buttonAll')
+        : t('cancel.buttonSome', { count: n });
     button.disabled = n === 0;
   };
   boxes.forEach((b) => b.box.addEventListener('change', updateButton));
@@ -57,13 +59,13 @@ function renderChoice(card, contactName, persons, message = null) {
       if (result.remaining.length) {
         // Noen står fortsatt på listen – vis dem, så resten også kan meldes av senere.
         renderChoice(card, contactName, result.remaining,
-          notice('success', `${nameList(result.cancelled)} er meldt av. Arrangøren har fått melding.`));
+          notice('success', t('cancel.partialDone', { names: names(result.cancelled) })));
       } else {
         card.replaceChildren(
-          h('h2', {}, several ? 'Alle er meldt av'
-            : persons[0].name === contactName ? 'Du er meldt av' : `${persons[0].name} er meldt av`),
-          h('p', {}, 'Takk for at du ga beskjed. Arrangøren har fått melding.'),
-          h('a', { class: 'btn secondary', href: `/${slug}` }, 'Tilbake til arrangementet'));
+          h('h2', {}, several ? t('cancel.allDone')
+            : persons[0].name === contactName ? t('cancel.selfDone') : t('cancel.otherDone', { name: persons[0].name })),
+          h('p', {}, t('cancel.thanks')),
+          h('a', { class: 'btn secondary', href: `/${slug}` }, t('cancel.back')));
       }
     } catch (err) {
       status.replaceChildren(notice('error', err.message));
@@ -77,14 +79,15 @@ function renderChoice(card, contactName, persons, message = null) {
     status,
     several
       ? [
-        h('p', {}, `Hei ${contactName}! Hvem skal meldes av?`),
+        h('p', {}, t('cancel.whoQuestion', { name: contactName })),
         h('div', { class: 'choice-list' },
           boxes.map(({ person, box }) => h('label', { class: 'checkbox' }, box, h('span', {}, person.name)))),
       ]
       : h('p', {}, persons[0].name === contactName
-        ? `Hei ${contactName}! Vil du melde deg av dette arrangementet?`
-        : `Hei ${contactName}! Vil du melde av ${persons[0].name}?`),
-    h('div', { class: 'actions' }, button, h('a', { class: 'btn secondary', href: `/${slug}` }, several ? 'Avbryt' : 'Nei, behold plassen')),
+        ? t('cancel.confirmSelf', { name: contactName })
+        : t('cancel.confirmOther', { name: contactName, person: persons[0].name })),
+    h('div', { class: 'actions' }, button,
+      h('a', { class: 'btn secondary', href: `/${slug}` }, several ? t('cancel.abort') : t('cancel.keepSpot'))),
   ].flat().filter(Boolean));
 }
 

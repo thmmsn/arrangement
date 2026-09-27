@@ -54,3 +54,37 @@ test('versjon 1-database migreres til påmeldinger med flere personer', () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Versjon 3 knytter arrangementer til et nettsted. Eksisterende arrangementer skal havne på hovednettstedet.
+test('versjon 2-database migreres: eksisterende arrangementer havner på hovednettstedet', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'booking-migrering-'));
+  const path = join(dir, 'booking.db');
+  try {
+    const old = new Database(path);
+    old.exec(MIGRATIONS[0]);
+    old.exec(MIGRATIONS[1]);
+    old.pragma('user_version = 2');
+    const now = '2026-09-01T10:00:00.000Z';
+    old.prepare(`INSERT INTO events (id, slug, admin_key_hash, title, starts_at, organizer_name, organizer_email, max_per_booking, created_at, updated_at)
+      VALUES (1, 'abcdefghjkmn', 'x', 'Før nettsteder', '2026-12-01T17:00:00.000Z', 'Kari', 'kari@example.com', 4, ?, ?)`).run(now, now);
+    old.prepare(`INSERT INTO bookings (id, event_id, contact_name, contact_email, cancel_token_hash, created_at)
+      VALUES (1, 1, 'Ola', 'ola@example.com', ?, ?)`).run(hashSecret('nokkel'), now);
+    old.prepare(`INSERT INTO registrations (event_id, booking_id, position, name, email, answers, created_at)
+      VALUES (1, 1, 0, 'Ola', 'ola@example.com', '{}', ?)`).run(now);
+    old.close();
+
+    const db = openDatabase(path);
+    assert.equal(db.pragma('user_version', { simple: true }), MIGRATIONS.length);
+    assert.equal(MIGRATIONS.length, 3);
+    const repo = createRepository(db);
+    const event = repo.findEvent('abcdefghjkmn');
+    assert.equal(event.site, 'main');
+    assert.equal(event.maxPerBooking, 4);
+    assert.equal(repo.countRegistrations(1), 1);
+    assert.ok(repo.findBookingByToken(1, hashSecret('nokkel')), 'avmeldingslenken virker fortsatt');
+    assert.deepEqual(repo.countEventsBySite(), { main: 1 });
+    db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

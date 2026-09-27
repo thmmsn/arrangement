@@ -133,10 +133,19 @@ describe('ADMIN_HOST: admin bare på eget vertsnavn', () => {
     assert.equal(create.status, 404);
   });
 
-  test('uten ADMIN_HOST sendes gamle lenker til /admin på samme domene', async () => {
+  test('uten ADMIN_HOST sendes gamle admin-lenker til /admin på samme domene – bare for arrangementer som finnes', async () => {
     const port = await start({ adminPassword: 'hemmelig' });
-    assert.equal((await request(port, { path: '/ny' })).headers.location, '/admin/ny');
-    assert.equal((await request(port, { path: '/abcdefghjkmn/admin' })).headers.location, '/admin/abcdefghjkmn');
+    const created = await request(port, { method: 'POST', path: '/api/admin/events', headers: { 'x-admin-password': 'hemmelig' }, body: eventBody });
+    const legacy = await request(port, { path: `/${created.json.slug}/admin` });
+    assert.equal(legacy.status, 301);
+    assert.equal(legacy.headers.location, `/admin/${created.json.slug}`);
+
+    // Ukjente arrangementer og den gamle /ny-adressen avslører ingenting.
+    for (const path of ['/abcdefghjkmn/admin', '/ny']) {
+      const res = await request(port, { path });
+      assert.equal(res.status, 404, path);
+      assert.equal(res.text, 'Not Found', path);
+    }
   });
 });
 

@@ -1,6 +1,12 @@
 // Felles hjelpefunksjoner for alle sidene. Ingen rammeverk og ingen byggesteg – bare moderne JavaScript.
+import * as dates from '../i18n/format.js';
+import { translator } from '../i18n/index.js';
 
-/** Kaller API-et og kaster en feil med norsk melding (og eventuelle feltfeil) hvis noe går galt. */
+// Språket bestemmes av serveren (<html lang="…">): nettstedets språk på arrangementssidene,
+// hovednettstedets språk på admin-sidene. All tekst hentes fra ordboken i /assets/i18n/.
+export const t = translator(document.documentElement.lang);
+
+/** Kaller API-et og kaster en feil med meldingen fra serveren (og eventuelle feltfeil) hvis noe går galt. */
 export async function api(path, { method = 'GET', body, headers = {} } = {}) {
   const res = await fetch(`/api${path}`, {
     method,
@@ -9,7 +15,7 @@ export async function api(path, { method = 'GET', body, headers = {} } = {}) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = new Error(data.error || `Noe gikk galt (${res.status})`);
+    const err = new Error(data.error || t('common.genericError', { status: res.status }));
     err.status = res.status;
     err.errors = data.errors || {};
     err.data = data;
@@ -49,30 +55,14 @@ export function secretFromHash() {
   return decodeURIComponent(location.hash.slice(1));
 }
 
-// ---------- Datoer ----------
+// ---------- Datoer og lister (på sidens språk) ----------
 
-function fmt(timeZone, options) {
-  return new Intl.DateTimeFormat('nb-NO', { timeZone, ...options });
-}
-
-export function formatDay(iso, timeZone) {
-  return fmt(timeZone, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(iso));
-}
-
-export function formatTime(iso, timeZone) {
-  return fmt(timeZone, { hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
-}
-
-export function formatEventTime(startsAt, endsAt, timeZone) {
-  const start = `${formatDay(startsAt, timeZone)} kl. ${formatTime(startsAt, timeZone)}`;
-  if (!endsAt) return start;
-  if (formatDay(startsAt, timeZone) === formatDay(endsAt, timeZone)) return `${start}–${formatTime(endsAt, timeZone)}`;
-  return `${start} – ${formatDay(endsAt, timeZone)} kl. ${formatTime(endsAt, timeZone)}`;
-}
-
-export function formatShort(iso, timeZone) {
-  return fmt(timeZone, { dateStyle: 'short', timeStyle: 'short' }).format(new Date(iso));
-}
+export const formatDay = (iso, timeZone) => dates.formatDay(iso, timeZone, t);
+export const formatTime = (iso, timeZone) => dates.formatTime(iso, timeZone, t);
+export const formatEventTime = (startsAt, endsAt, timeZone) => dates.formatEventTime(startsAt, endsAt, timeZone, t);
+export const formatShort = (iso, timeZone) => dates.formatShort(iso, timeZone, t);
+export const formatAnswer = (field, answers) => dates.formatAnswer(field, answers, t);
+export const nameList = (names) => dates.nameList(names, t);
 
 // <input type="datetime-local"> har ingen tidssone. Vi tolker alltid verdien i arrangementets
 // tidssone (f.eks. Europe/Oslo), slik at tidene blir riktige selv om arrangøren sitter i utlandet.
@@ -164,9 +154,9 @@ export async function copyToClipboard(text, button) {
   try {
     await navigator.clipboard.writeText(text);
     const original = button.textContent;
-    button.textContent = 'Kopiert!';
+    button.textContent = t('common.copied');
     setTimeout(() => { button.textContent = original; }, 1500);
   } catch {
-    prompt('Kopier teksten:', text);
+    prompt(t('common.copyPrompt'), text);
   }
 }

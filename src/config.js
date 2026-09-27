@@ -1,28 +1,28 @@
 // All konfigurasjon leses fra miljøvariabler (se .env.example).
 
-import { loadTheme } from './theme.js';
+import { loadSites, normalizeHost } from './sites.js';
 
 export function loadConfig(rawEnv = process.env) {
   const env = unquoteAll(rawEnv);
   const port = Number(env.PORT) || 3000;
-  // Offentlig adresse, brukes til å bygge lenker i e-poster. BASE_URL vinner; ellers bygges den
-  // fra DOMAIN, ellers localhost.
-  const domain = normalizeHost(env.DOMAIN);
-  const baseUrl = (env.BASE_URL || (domain ? `https://${domain}` : `http://localhost:${port}`)).replace(/\/+$/, '');
-  // Utseende (logo, farger, fonter, tekster). Ugyldige verdier ignoreres og havner i `warnings`.
-  const { theme, warnings } = loadTheme(env, { baseUrl });
+  // Nettstedene: hovednettstedet fra DOMAIN/BASE_URL/tema-variablene, pluss eventuelle SITE_<ID>_*.
+  // Ugyldige verdier ignoreres og havner i `warnings`; alvorlige feil kaster SiteConfigError.
+  const { sites, mainSite, warnings } = loadSites(env, { port });
 
   return {
     port,
-    baseUrl,
-    theme,
+    sites,
+    mainSite,
+    // Hovednettstedets verdier, for kode som bare trenger «nettstedet» (logger, enkle oppsett).
+    baseUrl: mainSite.baseUrl,
+    theme: mainSite.theme,
+    emailFrom: mainSite.emailFrom,
     warnings,
     databasePath: env.DATABASE_PATH || 'data/booking.db',
     // Passordet som kreves for å opprette nye arrangementer. Tomt = oppretting er slått av.
     adminPassword: env.ADMIN_PASSWORD || '',
     // Uten nøkkel skrives e-postene til konsollen i stedet for å sendes (nyttig i utvikling).
     resendApiKey: env.RESEND_API_KEY || '',
-    emailFrom: env.EMAIL_FROM || 'Påmelding <booking@example.com>',
     // Tidssonen arrangementstider vises i, uavhengig av hvor gjesten befinner seg.
     timeZone: env.TIME_ZONE || 'Europe/Oslo',
     // Sett til f.eks. 1 når appen kjører bak én reverse proxy (Caddy, nginx, Fly, Railway …),
@@ -41,11 +41,6 @@ export function loadConfig(rawEnv = process.env) {
     cfAccessTeamDomain: normalizeHost(env.CF_ACCESS_TEAM_DOMAIN),
     cfAccessAudiences: (env.CF_ACCESS_AUD || '').split(',').map((s) => s.trim()).filter(Boolean),
   };
-}
-
-// Godtar både «admin.domain.com» og «https://admin.domain.com/».
-function normalizeHost(value) {
-  return (value || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
 }
 
 // `docker run --env-file` tar anførselstegn bokstavelig: EMAIL_FROM="Påmelding <a@b.no>" blir til

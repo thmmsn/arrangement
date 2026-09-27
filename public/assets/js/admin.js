@@ -1,4 +1,6 @@
-import { api, copyToClipboard, formatEventTime, formatShort, h, notice, secretFromHash, slugFromPath } from './common.js';
+import {
+  api, copyToClipboard, formatAnswer, formatEventTime, formatShort, h, notice, secretFromHash, slugFromPath, t,
+} from './common.js';
 import { createEventForm } from './event-form.js';
 
 const app = document.getElementById('app');
@@ -6,38 +8,36 @@ const slug = slugFromPath();
 const key = secretFromHash();
 const auth = { Authorization: `Bearer ${key}` };
 
-const STATUS_TEXT = {
-  open: 'Påmeldingen er åpen',
-  closed: 'Påmeldingen er stengt',
-  deadline_passed: 'Påmeldingsfristen er ute',
-  full: 'Arrangementet er fullt',
-};
-
 let event;
 let registrations;
+let sites = [];
 let flash = null; // Melding som vises øverst etter en handling.
 
 async function load() {
   if (!key) {
-    app.replaceChildren(h('h1', {}, 'Mangler nøkkel'),
-      h('p', {}, 'Åpne administrasjonslenken nøyaktig slik du fikk den – den slutter med # og en lang kode.'));
+    app.replaceChildren(h('h1', {}, t('admin.missingKeyTitle')), h('p', {}, t('admin.missingKeyText')));
     return;
   }
   try {
-    ({ event, registrations } = await api(`/admin/events/${slug}`, { headers: auth }));
+    const [data, config] = await Promise.all([
+      api(`/admin/events/${slug}`, { headers: auth }),
+      api('/admin/config'),
+    ]);
+    ({ event, registrations } = data);
+    ({ sites } = config);
   } catch (err) {
-    app.replaceChildren(h('h1', {}, 'Ingen tilgang'), h('p', {}, err.message));
+    app.replaceChildren(h('h1', {}, t('admin.noAccess')), h('p', {}, err.message));
     return;
   }
-  document.title = `Admin: ${event.title}`;
+  document.title = t('admin.eventTitle', { title: event.title });
   render();
 }
 
 // Alle feltene arrangementet har, i formatet PUT-endepunktet forventer.
 function eventPayload(overrides = {}) {
-  const { title, description, location, startsAt, endsAt, registrationDeadline, capacity, maxPerBooking, imageUrl,
+  const { site, title, description, location, startsAt, endsAt, registrationDeadline, capacity, maxPerBooking, imageUrl,
     showCount, isOpen, organizerName, organizerEmail, fields } = event;
-  return { title, description, location, startsAt, endsAt, registrationDeadline, capacity, maxPerBooking, imageUrl,
+  return { site, title, description, location, startsAt, endsAt, registrationDeadline, capacity, maxPerBooking, imageUrl,
     showCount, isOpen, organizerName, organizerEmail, fields, ...overrides };
 }
 
@@ -52,7 +52,7 @@ function render() {
   const tz = event.timeZone;
   app.replaceChildren(...[
     flash,
-    h('p', { class: 'kicker' }, 'Administrasjon'),
+    h('p', { class: 'kicker' }, t('admin.kicker')),
     h('h1', {}, event.title),
     h('p', { class: 'muted' }, formatEventTime(event.startsAt, event.endsAt, tz), event.location ? ` · ${event.location}` : ''),
     overviewCard(),
@@ -65,61 +65,62 @@ function render() {
 
 function overviewCard() {
   const url = event.url;
-  const copy = h('button', { class: 'btn secondary small', type: 'button' }, 'Kopier');
+  const copy = h('button', { class: 'btn secondary small', type: 'button' }, t('common.copy'));
   copy.addEventListener('click', () => copyToClipboard(url, copy));
-  const field = h('input', { type: 'text', value: url, readOnly: true, 'aria-label': 'Påmeldingslenke' });
+  const field = h('input', { type: 'text', value: url, readOnly: true, 'aria-label': t('admin.link') });
   field.addEventListener('focus', () => field.select());
 
   const toggle = h('button', { class: `btn small ${event.isOpen ? 'danger' : ''}`, type: 'button' },
-    event.isOpen ? 'Steng påmeldingen' : 'Åpne påmeldingen');
+    event.isOpen ? t('admin.closeRegistration') : t('admin.openRegistration'));
   toggle.addEventListener('click', async () => {
     toggle.disabled = true;
     try {
-      await save(eventPayload({ isOpen: !event.isOpen }), event.isOpen ? 'Påmeldingen er stengt.' : 'Påmeldingen er åpnet.');
+      await save(eventPayload({ isOpen: !event.isOpen }), event.isOpen ? t('admin.closedDone') : t('admin.openedDone'));
     } catch (err) {
       alert(err.message);
       toggle.disabled = false;
     }
   });
 
+  const site = sites.find((s) => s.id === event.site);
   return h('section', { class: 'card' },
     h('div', { class: 'stats' },
-      stat(event.count, event.count === 1 ? 'påmeldt' : 'påmeldte'),
+      stat(event.count, t('admin.registered', { count: event.count })),
       bookingsStat(),
-      event.capacity !== null ? stat(event.spotsLeft, `ledige av ${event.capacity}`) : stat('∞', 'ubegrenset antall plasser'),
+      event.capacity !== null
+        ? stat(event.spotsLeft, t('admin.spotsLeftOf', { capacity: event.capacity }))
+        : stat('∞', t('admin.unlimited')),
       h('div', { class: 'stat' },
-        h('div', {}, h('span', { class: `badge ${event.status === 'open' ? '' : 'closed'}` }, STATUS_TEXT[event.status])),
-        h('div', { class: 'name' }, event.registrationDeadline ? `Frist: ${formatShort(event.registrationDeadline, event.timeZone)}` : 'Stenger ved start')),
+        h('div', {}, h('span', { class: `badge ${event.status === 'open' ? '' : 'closed'}` }, t(`admin.state.${event.status}`))),
+        h('div', { class: 'name' }, event.registrationDeadline
+          ? t('admin.deadline', { date: formatShort(event.registrationDeadline, event.timeZone) })
+          : t('admin.closesAtStart'))),
     ),
+    sites.length > 1 && site ? h('p', { class: 'muted small' }, t('admin.site', { site: site.label })) : null,
     h('div', { class: 'form-row' },
-      h('span', { class: 'label' }, 'Påmeldingslenke', h('span', { class: 'hint' }, 'Del denne. Arrangementet kan bare nås via denne lenken.')),
-      h('div', { class: 'linkbox' }, field, copy, h('a', { class: 'btn secondary small', href: url, target: '_blank', rel: 'noopener' }, 'Åpne'))),
+      h('span', { class: 'label' }, t('admin.link'), h('span', { class: 'hint' }, t('admin.linkHint'))),
+      h('div', { class: 'linkbox' }, field, copy,
+        h('a', { class: 'btn secondary small', href: url, target: '_blank', rel: 'noopener' }, t('common.open')))),
     h('div', { class: 'actions' }, toggle,
-      h('span', { class: 'muted small' }, event.showCount ? 'Antall påmeldte vises offentlig.' : 'Antall påmeldte er skjult for gjestene.')),
+      h('span', { class: 'muted small' }, event.showCount ? t('admin.countPublic') : t('admin.countHidden'))),
   );
 }
 
 // Antall påmeldinger (grupper). Én påmelding kan gjelde flere personer.
 function bookingsStat() {
   const n = new Set(registrations.map((r) => r.bookingId)).size;
-  return stat(n, n === 1 ? 'påmelding' : 'påmeldinger');
+  return stat(n, t('admin.bookings', { count: n }));
 }
 
 function stat(value, name) {
   return h('div', { class: 'stat' }, h('div', { class: 'value' }, value), h('div', { class: 'name' }, name));
 }
 
-function answerText(field, answers) {
-  const value = answers?.[field.id];
-  if (field.type === 'checkbox') return value === true ? 'Ja' : value === false ? 'Nei' : '';
-  return value ?? '';
-}
-
 function guestsCard() {
-  const csv = h('button', { class: 'btn secondary small', type: 'button', disabled: !registrations.length }, 'Last ned som CSV (Excel)');
+  const csv = h('button', { class: 'btn secondary small', type: 'button', disabled: !registrations.length }, t('admin.csv'));
   csv.addEventListener('click', downloadCsv);
 
-  const emails = h('button', { class: 'btn secondary small', type: 'button', disabled: !registrations.length }, 'Kopier alle e-postadresser');
+  const emails = h('button', { class: 'btn secondary small', type: 'button', disabled: !registrations.length }, t('admin.copyEmails'));
   // Både e-postene til den som meldte på og eventuelle e-poster til personer som ble lagt til.
   const allEmails = [...new Set(registrations.flatMap((r) => [r.contactEmail, r.email]).filter(Boolean))];
   emails.addEventListener('click', () => copyToClipboard(allEmails.join(', '), emails));
@@ -128,33 +129,33 @@ function guestsCard() {
     ? h('div', { class: 'table-wrap' },
       h('table', {},
         h('thead', {}, h('tr', {},
-          h('th', {}, '#'), h('th', {}, 'Navn'), h('th', {}, 'E-post'),
+          h('th', {}, '#'), h('th', {}, t('admin.columnName')), h('th', {}, t('admin.columnEmail')),
           event.fields.map((f) => h('th', {}, f.label)),
-          h('th', {}, 'Påmeldt'), h('th', {}))),
+          h('th', {}, t('admin.columnRegistered')), h('th', {}))),
         h('tbody', {}, registrations.map((r, i) => h('tr', { class: r.position > 0 ? 'added' : '' },
           h('td', { class: 'num' }, i + 1),
           // Personer som er lagt til av en annen, vises rett under og litt innrykket med «meldt på av».
           h('td', {}, r.name, r.position > 0
-            ? h('span', { class: 'by' }, `meldt på av ${r.contactName}`) : null),
+            ? h('span', { class: 'by' }, t('admin.addedBy', { name: r.contactName })) : null),
           h('td', {}, r.email ? h('a', { href: `mailto:${r.email}` }, r.email) : h('span', { class: 'muted' }, '–')),
-          event.fields.map((f) => h('td', { class: 'answer' }, answerText(f, r.answers))),
+          event.fields.map((f) => h('td', { class: 'answer' }, formatAnswer(f, r.answers))),
           h('td', { class: 'small muted' }, formatShort(r.createdAt, event.timeZone)),
-          h('td', {}, h('button', { class: 'btn danger small', type: 'button', onclick: () => removeGuest(r) }, 'Fjern')),
+          h('td', {}, h('button', { class: 'btn danger small', type: 'button', onclick: () => removeGuest(r) }, t('common.remove'))),
         )))))
-    : h('p', { class: 'muted' }, 'Ingen påmeldte ennå.');
+    : h('p', { class: 'muted' }, t('admin.noGuests'));
 
   return h('section', { class: 'card' },
-    h('h2', {}, `Påmeldte (${registrations.length})`),
+    h('h2', {}, t('admin.guestsHeading', { count: registrations.length })),
     h('div', { class: 'actions' }, csv, emails),
     table,
   );
 }
 
 async function removeGuest(registration) {
-  if (!confirm(`Fjerne ${registration.name} fra listen? Gjesten får ingen beskjed om dette.`)) return;
+  if (!confirm(t('admin.removeConfirm', { name: registration.name }))) return;
   try {
     await api(`/admin/events/${slug}/registrations/${registration.id}`, { method: 'DELETE', headers: auth });
-    flash = notice('success', `${registration.name} er fjernet.`);
+    flash = notice('success', t('admin.removed', { name: registration.name }));
     await load();
   } catch (err) {
     alert(err.message);
@@ -163,9 +164,11 @@ async function removeGuest(registration) {
 
 async function downloadCsv() {
   const res = await fetch(`/api/admin/events/${slug}/registrations.csv`, { headers: auth });
-  if (!res.ok) return alert('Kunne ikke laste ned filen.');
+  if (!res.ok) return alert(t('admin.downloadFailed'));
+  // Filnavnet kommer fra serveren (Content-Disposition), på admin-språket.
+  const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '')?.[1] || `${slug}.csv`;
   const url = URL.createObjectURL(await res.blob());
-  const link = h('a', { href: url, download: `pameldte-${slug}.csv` });
+  const link = h('a', { href: url, download: name });
   document.body.append(link);
   link.click();
   link.remove();
@@ -176,28 +179,30 @@ function editCard() {
   const { form } = createEventForm({
     initial: event,
     timeZone: event.timeZone,
+    sites,
     editing: true,
-    submitLabel: 'Lagre endringer',
-    onSubmit: (payload) => save(payload, 'Endringene er lagret.'),
+    submitLabel: t('admin.save'),
+    onSubmit: (payload) => save(payload, t('admin.saved')),
   });
-  return h('details', { class: 'card section' }, h('summary', {}, 'Rediger arrangementet'), form);
+  return h('details', { class: 'card section' }, h('summary', {}, t('admin.edit')), form);
 }
 
 function dangerCard() {
-  const button = h('button', { class: 'btn danger', type: 'button' }, 'Slett arrangementet');
+  const button = h('button', { class: 'btn danger', type: 'button' }, t('admin.deleteButton'));
   button.addEventListener('click', async () => {
-    const answer = prompt(`Dette sletter arrangementet og alle ${event.count} påmeldinger for godt.\nSkriv SLETT for å bekrefte:`);
-    if (answer?.trim().toUpperCase() !== 'SLETT') return;
+    const word = t('admin.deleteWord');
+    const answer = prompt(t('admin.deletePrompt', { count: event.count, word }));
+    if (answer?.trim().toUpperCase() !== word) return;
     try {
       await api(`/admin/events/${slug}`, { method: 'DELETE', headers: auth });
-      app.replaceChildren(h('h1', {}, 'Arrangementet er slettet'), h('p', {}, 'Arrangementet og alle påmeldingene er fjernet.'));
+      app.replaceChildren(h('h1', {}, t('admin.deletedTitle')), h('p', {}, t('admin.deletedText')));
     } catch (err) {
       alert(err.message);
     }
   });
   return h('section', { class: 'card' },
-    h('h3', {}, 'Slett arrangement'),
-    h('p', { class: 'muted small' }, 'Sletter arrangementet og alle påmeldinger permanent. Lenkene slutter å virke.'),
+    h('h3', {}, t('admin.deleteHeading')),
+    h('p', { class: 'muted small' }, t('admin.deleteText')),
     button);
 }
 

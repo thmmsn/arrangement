@@ -11,11 +11,20 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const FIELD_ID_PATTERN = /^[a-zA-Z0-9_-]{1,40}$/;
 const TEL_PATTERN = /^\+?[0-9 ()-]{5,20}$/;
 
+// Feilmeldinger er ordboksnøkler med verdier ({ key, vars }), ikke ferdig tekst. De oversettes
+// først når svaret sendes, til språket for nettstedet (gjester) eller hovednettstedet (admin).
+const msg = (key, vars) => ({ key, vars });
+
 export class ValidationError extends Error {
   constructor(errors) {
-    super('Noen felter er ikke fylt ut riktig');
-    this.errors = errors; // { feltnavn: 'melding' }
+    super('validation.summary');
+    this.errors = errors; // { feltnavn: { key, vars } }
   }
+}
+
+/** { felt: { key, vars } } → { felt: 'oversatt tekst' } */
+export function translateErrors(errors, t) {
+  return Object.fromEntries(Object.entries(errors).map(([field, e]) => [field, t(`validation.${e.key}`, e.vars)]));
 }
 
 function str(value) {
@@ -34,41 +43,46 @@ function parseDate(value) {
 
 // ---------- Arrangement ----------
 
-export function validateEvent(input) {
+/**
+ * @param {object} input
+ * @param {object} [opts]
+ * @param {string[]} [opts.siteIds]  Gyldige nettsteder; det første er standard når «site» mangler.
+ */
+export function validateEvent(input, { siteIds = ['main'] } = {}) {
   const errors = {};
   const body = input && typeof input === 'object' ? input : {};
 
   const title = str(body.title);
-  if (!title) errors.title = 'Tittel må fylles ut';
-  else if (title.length > 200) errors.title = 'Tittelen kan være maks 200 tegn';
+  if (!title) errors.title = msg('titleRequired');
+  else if (title.length > 200) errors.title = msg('titleTooLong', { max: 200 });
 
   const description = str(body.description);
-  if (description.length > 10_000) errors.description = 'Beskrivelsen kan være maks 10 000 tegn';
+  if (description.length > 10_000) errors.description = msg('descriptionTooLong', { max: 10_000 });
 
   const location = str(body.location);
-  if (location.length > 300) errors.location = 'Stedet kan være maks 300 tegn';
+  if (location.length > 300) errors.location = msg('locationTooLong', { max: 300 });
 
   const startsAt = parseDate(body.startsAt);
-  if (!startsAt) errors.startsAt = 'Starttidspunkt må fylles ut';
+  if (!startsAt) errors.startsAt = msg('startsAtRequired');
 
   let endsAt = null;
   if (body.endsAt) {
     endsAt = parseDate(body.endsAt);
-    if (!endsAt) errors.endsAt = 'Ugyldig sluttidspunkt';
-    else if (startsAt && endsAt < startsAt) errors.endsAt = 'Sluttidspunkt kan ikke være før start';
+    if (!endsAt) errors.endsAt = msg('endsAtInvalid');
+    else if (startsAt && endsAt < startsAt) errors.endsAt = msg('endsBeforeStart');
   }
 
   let registrationDeadline = null;
   if (body.registrationDeadline) {
     registrationDeadline = parseDate(body.registrationDeadline);
-    if (!registrationDeadline) errors.registrationDeadline = 'Ugyldig påmeldingsfrist';
+    if (!registrationDeadline) errors.registrationDeadline = msg('deadlineInvalid');
   }
 
   let capacity = null;
   if (body.capacity !== undefined && body.capacity !== null && body.capacity !== '') {
     capacity = Number(body.capacity);
     if (!Number.isInteger(capacity) || capacity < 1 || capacity > 1_000_000) {
-      errors.capacity = 'Antall plasser må være et helt tall større enn 0 (eller tomt for ubegrenset)';
+      errors.capacity = msg('capacityInvalid');
     }
   }
 
@@ -76,16 +90,20 @@ export function validateEvent(input) {
   if (body.maxPerBooking !== undefined && body.maxPerBooking !== null && body.maxPerBooking !== '') {
     maxPerBooking = Number(body.maxPerBooking);
     if (!Number.isInteger(maxPerBooking) || maxPerBooking < 1 || maxPerBooking > MAX_PER_BOOKING) {
-      errors.maxPerBooking = `Må være et helt tall fra 1 til ${MAX_PER_BOOKING}`;
+      errors.maxPerBooking = msg('maxPerBookingInvalid', { max: MAX_PER_BOOKING });
     }
   }
 
+  // Nettstedet bestemmer domene, språk og utseende for arrangementet.
+  const site = str(body.site) || siteIds[0];
+  if (!siteIds.includes(site)) errors.site = msg('siteUnknown');
+
   const organizerName = str(body.organizerName);
-  if (!organizerName) errors.organizerName = 'Arrangør må fylles ut';
-  else if (organizerName.length > 200) errors.organizerName = 'Maks 200 tegn';
+  if (!organizerName) errors.organizerName = msg('organizerNameRequired');
+  else if (organizerName.length > 200) errors.organizerName = msg('maxChars', { max: 200 });
 
   const organizerEmail = str(body.organizerEmail);
-  if (!isEmail(organizerEmail)) errors.organizerEmail = 'Gyldig e-postadresse for arrangør må fylles ut';
+  if (!isEmail(organizerEmail)) errors.organizerEmail = msg('organizerEmailRequired');
 
   let imageUrl = null;
   if (str(body.imageUrl)) {
@@ -93,7 +111,7 @@ export function validateEvent(input) {
     let parsed;
     try { parsed = new URL(imageUrl); } catch { /* håndteres under */ }
     if (!parsed || parsed.protocol !== 'https:' || imageUrl.length > 2000) {
-      errors.imageUrl = 'Bildelenken må være en https://-adresse';
+      errors.imageUrl = msg('imageUrlHttps');
     }
   }
 
@@ -111,6 +129,7 @@ export function validateEvent(input) {
     registrationDeadline: registrationDeadline ? registrationDeadline.toISOString() : null,
     capacity,
     maxPerBooking,
+    site,
     // Standardverdier: vis antall påmeldte, og påmeldingen er åpen.
     showCount: body.showCount === undefined ? true : Boolean(body.showCount),
     isOpen: body.isOpen === undefined ? true : Boolean(body.isOpen),
@@ -123,8 +142,8 @@ export function validateEvent(input) {
 
 function validateFieldDefinitions(input) {
   if (input === undefined || input === null) return { fields: [] };
-  if (!Array.isArray(input)) return { fields: [], errors: 'Feltene må være en liste' };
-  if (input.length > MAX_FIELDS) return { fields: [], errors: `Maks ${MAX_FIELDS} egendefinerte felter` };
+  if (!Array.isArray(input)) return { fields: [], errors: msg('fieldsNotList') };
+  if (input.length > MAX_FIELDS) return { fields: [], errors: msg('tooManyFields', { max: MAX_FIELDS }) };
 
   const fields = [];
   const seenIds = new Set();
@@ -133,9 +152,9 @@ function validateFieldDefinitions(input) {
     const n = index + 1;
     const field = raw && typeof raw === 'object' ? raw : {};
     const label = str(field.label);
-    if (!label) return { fields: [], errors: `Felt ${n} mangler navn` };
-    if (label.length > 200) return { fields: [], errors: `Navnet på felt ${n} er for langt (maks 200 tegn)` };
-    if (!FIELD_TYPES.includes(field.type)) return { fields: [], errors: `Felt ${n} har ukjent type` };
+    if (!label) return { fields: [], errors: msg('fieldMissingLabel', { n }) };
+    if (label.length > 200) return { fields: [], errors: msg('fieldLabelTooLong', { n, max: 200 }) };
+    if (!FIELD_TYPES.includes(field.type)) return { fields: [], errors: msg('fieldUnknownType', { n }) };
 
     // Beholder eksisterende id ved redigering, slik at svar som allerede er gitt fortsatt hører til feltet.
     let id = typeof field.id === 'string' && FIELD_ID_PATTERN.test(field.id) ? field.id : newFieldId();
@@ -149,9 +168,9 @@ function validateFieldDefinitions(input) {
         .map(str)
         .filter(Boolean);
       const unique = [...new Set(options)];
-      if (unique.length === 0) return { fields: [], errors: `Nedtrekkslisten «${label}» trenger minst ett valg` };
-      if (unique.length > MAX_OPTIONS) return { fields: [], errors: `«${label}» kan ha maks ${MAX_OPTIONS} valg` };
-      if (unique.some((o) => o.length > 200)) return { fields: [], errors: `Et valg i «${label}» er for langt` };
+      if (unique.length === 0) return { fields: [], errors: msg('selectNeedsOption', { label }) };
+      if (unique.length > MAX_OPTIONS) return { fields: [], errors: msg('tooManyOptions', { label, max: MAX_OPTIONS }) };
+      if (unique.some((o) => o.length > 200)) return { fields: [], errors: msg('optionTooLong', { label }) };
       clean.options = unique;
     }
 
@@ -170,12 +189,12 @@ function validatePerson(input, fields, errors, prefix, { emailRequired }) {
   const body = input && typeof input === 'object' ? input : {};
 
   const name = str(body.name);
-  if (!name) errors[`${prefix}name`] = 'Navn må fylles ut';
-  else if (name.length > 200) errors[`${prefix}name`] = 'Navnet kan være maks 200 tegn';
+  if (!name) errors[`${prefix}name`] = msg('nameRequired');
+  else if (name.length > 200) errors[`${prefix}name`] = msg('nameTooLong', { max: 200 });
 
   const email = str(body.email);
   if (emailRequired ? !isEmail(email) : email && !isEmail(email)) {
-    errors[`${prefix}email`] = 'Skriv inn en gyldig e-postadresse';
+    errors[`${prefix}email`] = msg('emailInvalid');
   }
 
   const rawAnswers = body.answers && typeof body.answers === 'object' ? body.answers : {};
@@ -188,32 +207,32 @@ function validatePerson(input, fields, errors, prefix, { emailRequired }) {
 
     if (field.type === 'checkbox') {
       const checked = value === true || value === 'true' || value === 'on';
-      if (field.required && !checked) errors[key] = 'Du må krysse av her';
+      if (field.required && !checked) errors[key] = msg('mustCheck');
       answers[field.id] = checked;
       continue;
     }
 
     const text = typeof value === 'number' ? String(value) : str(value);
     if (!text) {
-      if (field.required) errors[key] = 'Må fylles ut';
+      if (field.required) errors[key] = msg('required');
       continue;
     }
 
     switch (field.type) {
       case 'select':
-        if (!field.options.includes(text)) errors[key] = 'Velg et av alternativene';
+        if (!field.options.includes(text)) errors[key] = msg('chooseOption');
         break;
       case 'number':
-        if (!/^-?\d+([.,]\d+)?$/.test(text)) errors[key] = 'Må være et tall';
+        if (!/^-?\d+([.,]\d+)?$/.test(text)) errors[key] = msg('mustBeNumber');
         break;
       case 'tel':
-        if (!TEL_PATTERN.test(text)) errors[key] = 'Ugyldig telefonnummer';
+        if (!TEL_PATTERN.test(text)) errors[key] = msg('invalidPhone');
         break;
       case 'textarea':
-        if (text.length > 4000) errors[key] = 'Maks 4000 tegn';
+        if (text.length > 4000) errors[key] = msg('maxChars', { max: 4000 });
         break;
       default:
-        if (text.length > 1000) errors[key] = 'Maks 1000 tegn';
+        if (text.length > 1000) errors[key] = msg('maxChars', { max: 1000 });
     }
     answers[field.id] = text;
   }
@@ -233,8 +252,8 @@ export function validateBooking(input, fields, maxPerBooking = 1) {
 
   if (rawGuests.length + 1 > maxPerBooking) {
     errors.guests = maxPerBooking === 1
-      ? 'Du kan bare melde på deg selv til dette arrangementet.'
-      : `Du kan melde på maks ${maxPerBooking} personer om gangen.`;
+      ? msg('onlyYourself')
+      : msg('maxPersons', { max: maxPerBooking });
     throw new ValidationError(errors);
   }
 

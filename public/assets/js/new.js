@@ -1,4 +1,4 @@
-import { api, copyToClipboard, h, notice } from './common.js';
+import { api, copyToClipboard, h, notice, t } from './common.js';
 import { createEventForm } from './event-form.js';
 
 const root = document.getElementById('form-root');
@@ -10,7 +10,7 @@ function storedPassword() {
 
 const password = h('input', { id: 'adminPassword', name: 'adminPassword', type: 'password', autocomplete: 'current-password', value: storedPassword() });
 
-// Admin-oppsettet: tidssone, om passord kreves, og hvem som er logget inn via Cloudflare Access.
+// Admin-oppsettet: tidssone, nettsteder, om passord kreves, og hvem som er logget inn via Cloudflare Access.
 let adminConfig;
 try {
   adminConfig = await api('/admin/config');
@@ -18,22 +18,23 @@ try {
   root.replaceChildren(notice('error', err.message));
   throw err;
 }
-const { timeZone, passwordRequired, accessEmail } = adminConfig;
+const { timeZone, passwordRequired, accessEmail, sites } = adminConfig;
 
 const { form } = createEventForm({
   timeZone,
+  sites,
   // Innlogget via Access: foreslå den e-postadressen som arrangør.
   initial: accessEmail ? { organizerEmail: accessEmail } : {},
-  submitLabel: 'Opprett arrangement',
+  submitLabel: t('create.submit'),
   prepend: [
     passwordRequired
       ? h('div', { class: 'card' },
         h('div', { class: 'form-row', 'data-error-for': 'adminPassword' },
-          h('label', { for: 'adminPassword' }, 'Administratorpassord',
-            h('span', { class: 'hint' }, 'Passordet som er satt i ADMIN_PASSWORD på serveren.')),
+          h('label', { for: 'adminPassword' }, t('create.passwordLabel'),
+            h('span', { class: 'hint' }, t('create.passwordHint'))),
           password))
       : null,
-    accessEmail ? h('p', { class: 'muted small' }, `Logget inn som ${accessEmail} via Cloudflare Access.`) : null,
+    accessEmail ? h('p', { class: 'muted small' }, t('create.loggedInAs', { email: accessEmail })) : null,
   ].filter(Boolean),
   async onSubmit(payload) {
     try {
@@ -54,7 +55,7 @@ root.append(form);
 function linkBox(label, url, hint) {
   const field = h('input', { type: 'text', value: url, readOnly: true, 'aria-label': label });
   field.addEventListener('focus', () => field.select());
-  const copy = h('button', { class: 'btn secondary small', type: 'button' }, 'Kopier');
+  const copy = h('button', { class: 'btn secondary small', type: 'button' }, t('common.copy'));
   copy.addEventListener('click', () => copyToClipboard(url, copy));
   return h('div', { class: 'form-row' },
     h('span', { class: 'label' }, label, hint ? h('span', { class: 'hint' }, hint) : null),
@@ -62,21 +63,21 @@ function linkBox(label, url, hint) {
 }
 
 function showResult(result, payload) {
-  document.querySelector('h1').textContent = 'Arrangementet er klart';
+  document.querySelector('h1').textContent = t('create.ready');
   document.querySelector('#app > p.muted')?.remove();
   root.replaceChildren(
     h('div', { class: 'card' },
       h('h2', {}, payload.title),
-      linkBox('Påmeldingslenke', result.eventUrl, 'Del denne med dem som skal kunne melde seg på.'),
-      linkBox('Administrasjonslenke', result.adminUrl, 'Gir tilgang til listen over påmeldte og redigering. Ikke del den!'),
+      linkBox(t('create.eventLink'), result.eventUrl, t('create.eventLinkHint')),
+      linkBox(t('create.adminLink'), result.adminUrl, t('create.adminLinkHint')),
       notice('warning',
-        h('strong', {}, 'Ta vare på administrasjonslenken. '),
-        'Den vises bare denne ene gangen, og kan ikke gjenopprettes.',
-        result.emailSent ? ` Vi har også sendt den til ${payload.organizerEmail}.` : ' E-posten med lenken kunne ikke sendes, så kopier den nå.'),
+        h('strong', {}, `${t('create.keepWarning')} `),
+        t('create.keepWarningText'),
+        ` ${result.emailSent ? t('create.emailSentTo', { email: payload.organizerEmail }) : t('create.emailFailed')}`),
       h('div', { class: 'actions' },
-        h('a', { class: 'btn', href: result.eventUrl }, 'Åpne arrangementet'),
-        h('a', { class: 'btn secondary', href: result.adminUrl }, 'Gå til administrasjon'),
-        h('a', { class: 'btn secondary', href: '/admin/ny' }, 'Opprett et nytt'),
+        h('a', { class: 'btn', href: result.eventUrl }, t('create.openEvent')),
+        h('a', { class: 'btn secondary', href: result.adminUrl }, t('create.goAdmin')),
+        h('a', { class: 'btn secondary', href: '/admin/ny' }, t('create.createAnother')),
       ),
     ),
   );

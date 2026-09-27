@@ -80,6 +80,12 @@ export const MIGRATIONS = [
   -- Hvor mange personer én påmelding kan gjelde. 1 = bare seg selv.
   ALTER TABLE events ADD COLUMN max_per_booking INTEGER NOT NULL DEFAULT 10;
   `,
+
+  // 3: Flere nettsteder (domener) med felles database. Hvert arrangement hører til ett nettsted,
+  // som bestemmer domene, språk og utseende. Eksisterende arrangementer havner på hovednettstedet.
+  `
+  ALTER TABLE events ADD COLUMN site TEXT NOT NULL DEFAULT 'main';
+  `,
 ];
 
 export function openDatabase(path) {
@@ -116,18 +122,19 @@ export function createRepository(db) {
     insertEvent: db.prepare(`
       INSERT INTO events (slug, admin_key_hash, title, description, location, starts_at, ends_at,
         registration_deadline, capacity, max_per_booking, show_count, is_open, organizer_name,
-        organizer_email, image_url, fields, created_at, updated_at)
+        organizer_email, image_url, fields, site, created_at, updated_at)
       VALUES (@slug, @adminKeyHash, @title, @description, @location, @startsAt, @endsAt,
         @registrationDeadline, @capacity, @maxPerBooking, @showCount, @isOpen, @organizerName,
-        @organizerEmail, @imageUrl, @fields, @now, @now)`),
+        @organizerEmail, @imageUrl, @fields, @site, @now, @now)`),
     updateEvent: db.prepare(`
       UPDATE events SET title = @title, description = @description, location = @location,
         starts_at = @startsAt, ends_at = @endsAt, registration_deadline = @registrationDeadline,
         capacity = @capacity, max_per_booking = @maxPerBooking, show_count = @showCount,
         is_open = @isOpen, organizer_name = @organizerName, organizer_email = @organizerEmail,
-        image_url = @imageUrl, fields = @fields, updated_at = @now
+        image_url = @imageUrl, fields = @fields, site = @site, updated_at = @now
       WHERE id = @id`),
     deleteEvent: db.prepare('DELETE FROM events WHERE id = ?'),
+    eventsPerSite: db.prepare('SELECT site, COUNT(*) AS n FROM events GROUP BY site'),
     countRegistrations: db.prepare('SELECT COUNT(*) AS n FROM registrations WHERE event_id = ?'),
     listRegistrations: db.prepare(`
       SELECT r.*, b.contact_name, b.contact_email
@@ -212,6 +219,10 @@ export function createRepository(db) {
     deleteEvent(id) {
       stmt.deleteEvent.run(id);
     },
+    /** { nettsted: antall arrangementer } – brukes til å varsle om arrangementer på ukjente nettsteder. */
+    countEventsBySite() {
+      return Object.fromEntries(stmt.eventsPerSite.all().map((r) => [r.site, r.n]));
+    },
     countRegistrations(eventId) {
       return stmt.countRegistrations.get(eventId).n;
     },
@@ -260,6 +271,7 @@ function mapEvent(row) {
     registrationDeadline: row.registration_deadline,
     capacity: row.capacity,
     maxPerBooking: row.max_per_booking,
+    site: row.site,
     showCount: row.show_count === 1,
     isOpen: row.is_open === 1,
     organizerName: row.organizer_name,

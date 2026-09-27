@@ -10,6 +10,8 @@ Et lite og enkelt alternativ til Hoopla for påmelding til arrangementer:
 - **Avmelding per person**: avmeldingslenken lar deg velge hvem i påmeldingen som skal meldes av.
 - **All administrasjon under `/admin`** – enkelt å skjule bak Cloudflare Access, på eget subdomene eller egen sti.
 - **Utseendet styres med miljøvariabler**: navn, logo, farger, fonter, hjørneradius og tekster.
+- **Flere domener, én database og én admin**: hvert domene er et *nettsted* med eget språk (norsk eller engelsk), tema, avsender og base-URL.
+- **Helt lukket uten lenke**: forsiden og alle ukjente adresser svarer bare `404 Not Found` – uten logo, navn eller språk.
 
 Backend: Node.js, Express og SQLite. Frontend: ren HTML, CSS og JavaScript uten byggesteg.
 Produksjon: `docker compose` med Cloudflare Tunnel – ingen åpne porter på serveren.
@@ -25,7 +27,9 @@ Produksjon: `docker compose` med Cloudflare Tunnel – ingen åpne porter på se
 | `/admin/ny` | Administrator | Opprett nytt arrangement |
 | `/admin/<hash>#<nøkkel>` | Arrangøren (lenke i e-posten) | Påmeldte, redigering, CSV, stenging, sletting |
 
-Gamle adresser fra før admin ble samlet (`/ny` og `/<hash>/admin#<nøkkel>`) sendes automatisk videre.
+Alt annet – også forsiden `/` – svarer med det samme nakne `404 Not Found` (ren tekst, uten logo, navn eller språk). Det gjelder også ugyldige lenker, både for sider og API. Uten en gyldig hash kan man dermed ikke se hvilket nettsted eller system som ligger på domenet. Statiske filer (CSS og JavaScript) må være tilgjengelige for at arrangementssidene skal virke, men de inneholder ingen data. Temastilarket har et navn som er en hash av innholdet, så det kan ikke gjettes.
+
+Gamle admin-lenker (`/<hash>/admin#<nøkkel>`) sendes videre til `/admin/<hash>` – men bare for arrangementer som finnes.
 
 ### Hvor vanskelig er lenkene å gjette?
 
@@ -54,6 +58,15 @@ npm run dev               # starter på http://localhost:3000 og laster på nytt
 1. Gå til <http://localhost:3000/admin/ny>, skriv inn `ADMIN_PASSWORD` og opprett et arrangement.
 2. Du får en påmeldingslenke og en administrasjonslenke.
 3. Uten `RESEND_API_KEY` skrives e-postene til terminalen, så du ser nøyaktig hva som ville blitt sendt (inkludert avmeldingslenken).
+
+Vil du prøve to nettsteder lokalt, kan du bruke `localhost` og `127.0.0.1` som to «domener»:
+
+```ini
+BASE_URL=http://localhost:3000
+SITE_EN_DOMAIN=127.0.0.1
+SITE_EN_BASE_URL=http://127.0.0.1:3000
+SITE_EN_LANG=en
+```
 
 Kjør testene:
 
@@ -88,6 +101,7 @@ server
    | Hostname | Service |
    |---|---|
    | `booking.domain.com` | `HTTP` → `booking:3000` |
+   | `booking.domain.net` *(ett per ekstra nettsted, se [Flere nettsteder](#flere-nettsteder))* | `HTTP` → `booking:3000` |
    | `booking-admin.domain.com` *(hvis du bruker eget admin-vertsnavn)* | `HTTP` → `booking:3000` |
 
    `booking` er navnet på app-containeren i `docker-compose.yml`, så cloudflared finner den direkte.
@@ -116,6 +130,8 @@ All administrasjon ligger under `/admin` (sider) og `/api/admin` (API). Resten �
 3. **Zero Trust → Access → Applications → Add an application → Self-hosted**, domene `booking-admin.domain.com` (hele), og en policy som slipper inn deg (og eventuelle arrangører), f.eks. *Emails* med innlogging via engangskode.
 
 > Bruk ett nivå under domenet (`booking-admin.domain.com`), ikke `admin.booking.domain.com` – Cloudflares gratis sertifikat dekker bare ett nivå.
+
+Med flere nettsteder er A det klart beste valget: ellers finnes `/admin` på hvert eneste offentlige domene, og hvert domene trenger sin egen Access-regel. Uten `ADMIN_HOST` skriver appen en advarsel ved oppstart.
 
 **B. Samme domene, egne stier:** Lag én Access-applikasjon for `booking.domain.com` med **to** stier: `admin` og `api/admin`. Glemmer du `api/admin`, er selve dataene ubeskyttet av Access – derfor anbefales C i tillegg.
 
@@ -153,6 +169,62 @@ Appen er en vanlig Node-server (`npm start`) og kan kjøres bak hvilken som hels
 
 ---
 
+## Flere nettsteder
+
+Samme app, database og admin kan betjene flere offentlige domener samtidig. Hvert domene er et **nettsted** med eget språk, tema, avsenderadresse og egen base-URL. Hvert arrangement hører til ett nettsted.
+
+### Oppsett – eksempel med to domener
+
+```ini
+# Hovednettstedet: dagens variabler, uendret
+DOMAIN=booking.domain.com
+SITE_LANG=nb
+SITE_NAME=Påmelding
+LOGO_URL=/assets/custom/logo.svg
+EMAIL_FROM=Påmelding <booking@domain.com>
+COLOR_ACCENT=#8b2e2a
+
+# Et ekstra nettsted med prefikset SITE_NET_
+SITE_NET_DOMAIN=booking.domain.net
+SITE_NET_LANG=en
+SITE_NET_SITE_NAME=Registration
+SITE_NET_LOGO_URL=/assets/custom/logo-en.svg
+SITE_NET_EMAIL_FROM=Registration <booking@domain.net>
+# SITE_NET_COLOR_ACCENT er ikke satt → arves fra hovednettstedet (#8b2e2a)
+
+# Anbefalt: admin på eget vertsnavn, så /admin ikke finnes på noen av de offentlige domenene
+ADMIN_HOST=booking-admin.domain.com
+```
+
+- **Hovednettstedet** kommer fra de vanlige variablene (`DOMAIN`, `BASE_URL`, `EMAIL_FROM`, `SITE_LANG` og temavariablene). Eksisterende installasjoner fortsetter å virke uten endringer, og de får ID-en `main`.
+- **Et ekstra nettsted** defineres med prefikset `SITE_<ID>_` og finnes så snart `SITE_<ID>_DOMAIN` er satt. ID-en kan bare inneholde A–Z og 0–9. Det kan sette `DOMAIN`, `BASE_URL`, `LANG`, `EMAIL_FROM` og alle temavariablene.
+- **Arv:** Det nettstedet ikke setter selv, arves fra hovednettstedet. Unntaket er `FOOTER_TEXT`, som bare arves når språket er det samme – en norsk bunntekst skal ikke havne på et engelsk nettsted.
+- **Språk:** `nb` (norsk bokmål, standard) eller `en` (engelsk). Hovednettstedets språk heter `SITE_LANG`, ikke `LANG`, fordi `LANG` er en standard miljøvariabel i Linux som ofte allerede er satt (f.eks. `en_US.UTF-8`).
+- Legg hvert domene til under *Public Hostname* i Cloudflare-tunnelen, og verifiser avsenderdomenet i Resend.
+
+Oppsettet sjekkes ved oppstart. To nettsteder med samme domene, en `SITE_<ID>_BASE_URL` som peker på et annet domene enn `SITE_<ID>_DOMAIN` (det ville gitt en evig løkke av omdirigeringer), eller prefikset `SITE_MAIN_` stopper oppstarten med en tydelig feilmelding. Ukjente eller ugyldige verdier gir en advarsel i loggen.
+
+### Slik virker det
+
+| | |
+|---|---|
+| **Valg av nettsted** | Ut fra `Host`-headeren – aldri `X-Forwarded-Host`, som en klient kan sette selv. Et ukjent vertsnavn får hovednettstedet. |
+| **Opprette arrangementer** | Nettstedet velges i skjemaet (vises når det finnes mer enn ett) og kan endres ved redigering. De ferdige feltene («Telefon», «Allergier» …) får etiketter på nettstedets språk. |
+| **Feil domene** | Åpnes et arrangement – eller avmeldingssiden – på feil domene, sendes nettleseren med `301` til riktig domene, med samme sti. `#nøkkelen` i avmeldingslenker følger med. |
+| **Språk på sidene** | Arrangementssiden, påmeldingen, feilmeldingene og avmeldingen er på nettstedets språk, og `<html lang>` følger nettstedet. Datoer formateres etter språket («lørdag 26. oktober 2030 kl. 18:00» / «Saturday, 26 October 2030 at 18:00»). |
+| **E-post** | Alle lenker og logoer bygges fra arrangementets nettsted, aldri fra `DOMAIN`. Avsenderen er nettstedets `EMAIL_FROM`, og teksten er på nettstedets språk. |
+| **Admin** | Adminsidene, admin-API-et og CSV-eksporten bruker hovednettstedets språk og tema, uansett domene. Admin-lenken peker til `ADMIN_HOST` hvis den er satt, ellers til arrangementets domene. |
+
+Databasen oppgraderes automatisk: eksisterende arrangementer havner på hovednettstedet. Fjerner du et nettsted fra oppsettet, vises arrangementene dets på hovednettstedet, og appen varsler om dem ved oppstart.
+
+### Språk og ordbøker
+
+All tekst ligger i én ordbok per språk: `public/assets/i18n/nb.js` og `en.js`. Både nettleseren og serveren (sider, skript, e-poster, feilmeldinger og CSV) bruker de samme filene. Flertall håndteres med `Intl.PluralRules` (`{ one: '… påmeldt', other: '… påmeldte' }`).
+
+En test sjekker at alle språk har nøyaktig de samme nøklene og plassholderne, og at hver tekstnøkkel koden bruker, finnes. Et nytt språk legges til ved å kopiere `en.js`, oversette den og registrere den i `public/assets/i18n/index.js`.
+
+---
+
 ## Sette opp Resend
 
 1. Opprett konto på <https://resend.com>.
@@ -175,7 +247,7 @@ Hvis Resend feiler, blir påmeldingen likevel lagret. Feilen logges, og gjesten 
 
 ## Utseende
 
-Alt settes i `.env` – se `.env.example` for hele lista med forklaringer. Ugyldige verdier (f.eks. en farge med skrivefeil) ignoreres, og appen skriver en advarsel i loggen ved oppstart.
+Alt settes i `.env` – se `.env.example` for hele lista med forklaringer. Ugyldige verdier (f.eks. en farge med skrivefeil) ignoreres, og appen skriver en advarsel i loggen ved oppstart. Med [flere nettsteder](#flere-nettsteder) kan hver variabel settes per nettsted med prefiks, f.eks. `SITE_NET_COLOR_ACCENT`.
 
 | Variabel | Hva |
 |---|---|
@@ -190,7 +262,6 @@ Alt settes i `.env` – se `.env.example` for hele lista med forklaringer. Ugyld
 | `GOOGLE_FONTS` | `false` = ikke hent fonter fra Google (personvern) |
 | `RADIUS` | Hjørneradius i piksler (0 = skarpe hjørner) |
 | `SHOW_BAND` | Det vevde båndet øverst (`true`/`false`) |
-| `HOME_TITLE`, `HOME_TEXT` | Forsiden |
 | `FOOTER_TEXT`, `PRIVACY_URL` | Bunntekst og lenke til personvernerklæring |
 | `CUSTOM_CSS_URL` | Eget stilark for alt annet |
 
@@ -203,8 +274,9 @@ Nyanser som hover-farger og lyse bakgrunner på meldinger regnes ut fra grunnfar
 ## Sikkerhet og personvern
 
 - **Ingen oversikt over arrangementer**, `robots.txt` med `Disallow: /` og `X-Robots-Tag: noindex`.
+- **Lukket uten lenke:** forsiden, ukjente adresser og ugyldige lenker gir alle det samme nakne `404 Not Found`. `OPTIONS` besvares også med 404, så det ikke røper hvilke adresser som finnes.
 - **Hemmelige nøkler** lagres bare som SHA-256-hash og sammenlignes i konstant tid.
-- **Admin-vertsnavnet** sjekkes mot `Host`-headeren, ikke `X-Forwarded-Host` (som en klient kan sette selv).
+- **Nettstedet og admin-vertsnavnet** avgjøres av `Host`-headeren, ikke `X-Forwarded-Host` (som en klient kan sette selv).
 - **`Referrer-Policy: no-referrer`**, slik at arrangementets adresse ikke lekker til eksterne nettsteder, f.eks. der forsidebildet ligger.
 - **Content-Security-Policy** tillater bare egne skript, og all brukertekst settes som tekst i DOM-en (aldri `innerHTML`). Tekst i e-postene og i temaet HTML-escapes, og farger/fonter fra `.env` valideres før de settes inn i CSS.
 - **Avmelding krever et klikk på en knapp.** Mange e-posttjenester åpner lenker automatisk for å sjekke dem for virus, og det skal ikke melde noen av.
@@ -218,14 +290,20 @@ Nyanser som hover-farger og lyse bakgrunner på meldinger regnes ut fra grunnfar
 ## Datamodell
 
 ```
-events          Arrangementet (tittel, tid, kapasitet, maks per påmelding, felter …)
+events          Arrangementet (nettsted, tittel, tid, kapasitet, maks per påmelding, felter …)
  └─ bookings    Én påmelding: kontaktperson (navn + e-post) og avmeldingsnøkkel
      └─ registrations   Én rad per gjest: navn, valgfri e-post og svar på feltene
 ```
 
 Antall påmeldte er antall rader i `registrations`. Hvis alle personene i en påmelding meldes av eller fjernes, slettes også påmeldingen, og avmeldingslenken slutter å virke.
 
-Databasen oppgraderes automatisk ved oppstart (`PRAGMA user_version`). En database fra første versjon, der hver påmelding var én person, migreres uten tap av data, og avmeldingslenker som allerede er sendt ut, virker fortsatt.
+Databasen oppgraderes automatisk ved oppstart (`PRAGMA user_version`):
+
+| Versjon | Endring |
+|---|---|
+| 1 | Arrangementer og påmeldinger (én person per påmelding) |
+| 2 | Påmeldinger med flere personer (`bookings`). Eksisterende påmeldinger beholdes, og avmeldingslenker som allerede er sendt ut, virker fortsatt. |
+| 3 | Nettsted per arrangement (`events.site`). Eksisterende arrangementer havner på hovednettstedet (`main`). |
 
 ## Prosjektstruktur
 
@@ -234,19 +312,21 @@ src/
   server.js      Starter serveren
   app.js         Ruter: sider, offentlig API og admin-API bak admin-porten
   cfAccess.js    Verifisering av Cloudflare Access-token (JWT)
-  theme.js       Utseende fra miljøvariabler (validering, theme.css, topp og bunn)
-  views.js       Fletter temaet inn i HTML-sidene
+  sites.js       Nettsteder fra miljøvariabler (hovednettsted + SITE_<ID>_*, arv)
+  theme.js       Utseende fra miljøvariabler (validering, temastilark, topp og bunn)
+  views.js       Fletter tema og tekst inn i HTML-sidene, per nettsted
   db.js          SQLite: tabeller, migreringer og spørringer
   validation.js  Validering av arrangementer og påmeldinger, og påmeldingsstatus
   email.js       Resend-klient og e-postmaler
   ids.js         Tilfeldige lenker og nøkler, hashing
   csv.js         CSV-eksport
-  format.js      Datoformatering (norsk)
+  format.js      Datoer og svar på nettstedets språk
   html.js        HTML-escaping
   rateLimit.js   Enkel rate limiting
   config.js      Miljøvariabler
-views/           HTML-sidene (med plassholdere for temaet)
+views/           HTML-sidene (med plassholdere for tema og tekst)
 public/assets/   CSS og JavaScript for frontend
+  i18n/          Ordbøkene (nb.js, en.js), oversetter og datoformatering – delt med serveren
 branding/        Egne filer (logo o.l.), serveres som /assets/custom/
 test/            Tester (node:test)
 ```
@@ -255,12 +335,12 @@ test/            Tester (node:test)
 
 | Metode | Sti | Tilgang |
 |---|---|---|
-| `GET` | `/api/events/:slug` | Offentlig |
+| `GET` | `/api/events/:slug` | Offentlig. Ukjent arrangement gir naken `404` |
 | `POST` | `/api/events/:slug/registrations` | Offentlig. Body: `{ name, email, answers, guests: [{ name, email?, answers }] }` |
 | `POST` | `/api/events/:slug/cancel/lookup` | Avmeldingsnøkkel i body. Gir personene i påmeldingen |
 | `POST` | `/api/events/:slug/cancel` | Avmeldingsnøkkel i body. `ids` (valgfritt) velger hvem; uten `ids` meldes alle av |
-| `GET` | `/api/admin/config` | Admin-porten |
-| `POST` | `/api/admin/events` | Admin-porten + `X-Admin-Password` (hvis satt) |
+| `GET` | `/api/admin/config` | Admin-porten. Gir bl.a. nettstedene som kan velges |
+| `POST` | `/api/admin/events` | Admin-porten + `X-Admin-Password` (hvis satt). `site` velger nettsted (standard hovednettstedet) |
 | `GET` / `PUT` / `DELETE` | `/api/admin/events/:slug` | Admin-porten + `Authorization: Bearer <admin-nøkkel>` |
 | `DELETE` | `/api/admin/events/:slug/registrations/:id` | Admin-porten + `Authorization: Bearer <admin-nøkkel>` |
 | `GET` | `/api/admin/events/:slug/registrations.csv` | Admin-porten + `Authorization: Bearer <admin-nøkkel>` |

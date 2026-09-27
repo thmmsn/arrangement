@@ -1,8 +1,8 @@
 /*
-  Stil inspirert av reinhekla.no: lun, tradisjonell og rolig.
+  Standardstil: lun, tradisjonell og rolig.
   Lin-farget bakgrunn, mørk brun tekst, dyp bunadsrød som aksent og serif-titler.
 
-  Fargene, fontene og hjørneradiusen under er standardverdier. De overstyres av /theme.css,
+  Fargene, fontene og hjørneradiusen under er standardverdier. De overstyres av nettstedets temastilark (/assets/theme/<hash>.css),
   som lages fra miljøvariablene (COLOR_*, FONT_*, RADIUS – se .env.example). Nyanser som
   --accent-dark og --tint regnes ut fra grunnfargene, så de følger med automatisk.
 */
@@ -75,7 +75,7 @@ main { flex: 1; padding: 40px 0 64px; }
   font-size: 1.5rem;
   font-weight: 600;
 }
-.brand:hover { color: var(--accent); }
+
 .brand img { display: block; height: var(--logo-height, 44px); width: auto; max-width: 100%; }
 
 .home-text { white-space: pre-line; }
