@@ -204,6 +204,13 @@ export const MIGRATIONS = [
 
   ALTER TABLE events ADD COLUMN self_cancel_enabled INTEGER NOT NULL DEFAULT 1;
   `,
+
+  // 7: Delingsbildet (og:image), laget fra det opplastede forsidebildet (se ogImage.js).
+  // NULL = ikke laget ennå: bilder lastet opp før denne versjonen får det ved neste vedlikehold.
+  // Tom verdi = forsøkt, men bildet kunne ikke leses – da prøves det ikke igjen.
+  `
+  ALTER TABLE event_images ADD COLUMN og_data BLOB;
+  `,
 ];
 
 // Før prosjektet ble omdøpt til «arrangement», het databasefilen booking.db.
@@ -332,11 +339,16 @@ export function createRepository(db) {
       SELECT r.*, b.contact_name, b.contact_email, b.code AS booking_code, b.late
       FROM registrations r JOIN bookings b ON b.id = r.booking_id
       WHERE r.event_id = ? AND r.door_code = ?`),
-    imageMeta: db.prepare('SELECT type, hash FROM event_images WHERE event_id = ?'),
+    imageMeta: db.prepare(`
+      SELECT type, hash, coalesce(length(og_data), 0) > 0 AS has_og FROM event_images WHERE event_id = ?`),
     image: db.prepare('SELECT type, hash, data FROM event_images WHERE event_id = ?'),
+    ogImage: db.prepare(`
+      SELECT hash, og_data AS data FROM event_images WHERE event_id = ? AND coalesce(length(og_data), 0) > 0`),
     setImage: db.prepare(`
-      INSERT INTO event_images (event_id, type, hash, data, created_at) VALUES (@eventId, @type, @hash, @data, @now)
-      ON CONFLICT(event_id) DO UPDATE SET type = @type, hash = @hash, data = @data, created_at = @now`),
+      INSERT INTO event_images (event_id, type, hash, data, og_data, created_at) VALUES (@eventId, @type, @hash, @data, @ogData, @now)
+      ON CONFLICT(event_id) DO UPDATE SET type = @type, hash = @hash, data = @data, og_data = @ogData, created_at = @now`),
+    imagesWithoutOg: db.prepare('SELECT event_id, hash FROM event_images WHERE og_data IS NULL'),
+    setOgImage: db.prepare('UPDATE event_images SET og_data = ? WHERE event_id = ? AND hash = ?'),
     deleteImage: db.prepare('DELETE FROM event_images WHERE event_id = ?'),
     bookingCodeExists: db.prepare('SELECT 1 FROM bookings WHERE code = ?'),
     insertBooking: db.prepare(`
@@ -493,16 +505,34 @@ export function createRepository(db) {
     findRegistrationByDoorCode(eventId, doorCode) {
       return mapRegistration(stmt.registrationByDoorCode.get(eventId, doorCode));
     },
-    /** Forsidebildet: { type, hash } uten selve dataene, eller null. */
+    /** Forsidebildet: { type, hash, hasOg } uten selve dataene, eller null. */
     imageMeta(eventId) {
-      return stmt.imageMeta.get(eventId) ?? null;
+      const row = stmt.imageMeta.get(eventId);
+      return row ? { type: row.type, hash: row.hash, hasOg: row.has_og === 1 } : null;
     },
     /** Forsidebildet med data (Buffer), eller null. */
     image(eventId) {
       return stmt.image.get(eventId) ?? null;
     },
-    setImage(eventId, { type, hash, data }) {
-      stmt.setImage.run({ eventId, type, hash, data, now: new Date().toISOString() });
+    /** Delingsbildet (og:image): { hash, data } – hashen er forsidebildets – eller null. */
+    ogImage(eventId) {
+      return stmt.ogImage.get(eventId) ?? null;
+    },
+    /** `ogData`: delingsbildet laget fra det samme bildet (se ogImage.js). */
+    setImage(eventId, { type, hash, data, ogData }) {
+      stmt.setImage.run({ eventId, type, hash, data, ogData, now: new Date().toISOString() });
+    },
+    /** Forsidebilder som ikke har fått delingsbilde ennå: [{ eventId, hash }]. */
+    imagesWithoutOg() {
+      return stmt.imagesWithoutOg.all().map((row) => ({ eventId: row.event_id, hash: row.hash }));
+    },
+    /**
+     * Lagrer delingsbildet – bare hvis forsidebildet fortsatt er det samme (`hash`), så et nytt bilde
+     * som ble lastet opp mens det gamle ble behandlet, ikke får feil delingsbilde. Tom Buffer = kunne
+     * ikke lages.
+     */
+    setOgImage(eventId, hash, ogData) {
+      return stmt.setOgImage.run(ogData, eventId, hash).changes > 0;
     },
     deleteImage(eventId) {
       return stmt.deleteImage.run(eventId).changes > 0;

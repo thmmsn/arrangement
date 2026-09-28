@@ -6,10 +6,12 @@ import { CapacityError } from './db.js';
 import { registrationsToCsv } from './csv.js';
 import * as templates from './email.js';
 import { accessTokenFrom, AccessError, createAccessVerifier } from './cfAccess.js';
+import { escapeHtml } from './html.js';
 import { hashSecret, newSecret, newSlug, secretMatches, SLUG_PATTERN } from './ids.js';
 import { rateLimit } from './rateLimit.js';
 import { ImageError, MAX_IMAGE_BYTES, processImage } from './images.js';
 import { createLogoLoader } from './logo.js';
+import { createOgImage, OG_IMAGE_HEIGHT, OG_IMAGE_TYPE, OG_IMAGE_WIDTH, OgImageError } from './ogImage.js';
 import { createPlaceSearch } from './places.js';
 import { loadSites } from './sites.js';
 import { loadSkins, skinName } from './skins.js';
@@ -105,6 +107,12 @@ export function createApp({
     return image ? `${eventUrl(event)}/bilde/${image.hash}.${IMAGE_EXT[image.type]}` : null;
   };
   const imageUrlOf = (event) => uploadedImageUrl(event) ?? event.imageUrl;
+  // Delingsbildet (og:image) lages bare fra et opplastet bilde – aldri fra en lenke til et bilde et
+  // annet sted. Adressen har samme hash som forsidebildet, så et nytt bilde gir også ny adresse her.
+  const ogImageUrl = (event) => {
+    const image = repo.imageMeta(event.id);
+    return image?.hasOg ? `${eventUrl(event)}/bilde/${image.hash}-deling.jpg` : null;
+  };
   // Med eget admin-vertsnavn peker admin-lenkene dit; ellers til arrangementets domene.
   const adminBaseUrl = (event) => (config.adminHost ? `https://${config.adminHost}` : siteOf(event).baseUrl);
   const adminUrl = (event, key) => `${adminBaseUrl(event)}/admin/${event.slug}#${key}`;
@@ -121,11 +129,35 @@ export function createApp({
     .type('text/plain')
     .send('Not Found');
 
-  // `event` (valgfritt) gir arrangementets skin, lagt oppå nettstedets tema.
-  const sendPage = (res, name, site, status = 200, event = null) => {
+  // `event` (valgfritt) gir arrangementets skin, lagt oppå nettstedets tema. `meta`: ekstra
+  // <meta>-tagger for akkurat denne siden (se shareMeta).
+  const sendPage = (res, name, site, status = 200, event = null, meta = '') => {
     const skinHref = (event?.skin && skins.get(event.skin)?.href) || '';
-    res.status(status).type('html').send(views(name, { ...site, cssHref: cssHref.get(site.id), skinHref }));
+    res.status(status).type('html').send(views(name, { ...site, cssHref: cssHref.get(site.id), skinHref }, { meta }));
   };
+
+  // Open Graph- og Twitter-tagger, så arrangementslenken får tittel og bilde når den deles
+  // (Messenger, Slack, Teams, iMessage, LinkedIn …). Disse tjenestene kjører ikke JavaScript, så
+  // taggene må stå i HTML-en fra serveren. Bildet er delingsbildet laget fra det opplastede bildet.
+  function shareMeta(event, site) {
+    const tags = [
+      ['property', 'og:type', 'website'],
+      ['property', 'og:site_name', site.theme.siteName || site.t('meta.siteNameFallback')],
+      ['property', 'og:title', event.title],
+      ['property', 'og:url', eventUrl(event)],
+    ];
+    const image = ogImageUrl(event);
+    if (image) {
+      tags.push(
+        ['property', 'og:image', image],
+        ['property', 'og:image:type', OG_IMAGE_TYPE],
+        ['property', 'og:image:width', OG_IMAGE_WIDTH],
+        ['property', 'og:image:height', OG_IMAGE_HEIGHT],
+      );
+    }
+    tags.push(['name', 'twitter:card', image ? 'summary_large_image' : 'summary']);
+    return tags.map(([attr, key, value]) => `<meta ${attr}="${key}" content="${escapeHtml(value)}">`).join('\n  ');
+  }
 
   // ---------- Oppbevaring ----------
   // Alle data om et arrangement slettes så mange dager etter at det er over (DELETE_AFTER_DAYS).
@@ -266,23 +298,29 @@ export function createApp({
 
   // Arrangementssiden og avmeldingssiden. Åpnes et arrangement på feil domene, sendes nettleseren
   // videre til arrangementets eget domene (301), med samme sti – og nettleseren tar med #nøkkelen.
+  // Bare arrangementssiden får delingstagger: det er den lenken som deles. Avmeldingslenken er personlig.
   const eventPage = (view) => (req, res) => {
     const event = findEventBySlug(req.params.slug);
     if (!event) return notFound(req, res);
     const site = siteOf(event);
     if (site !== req.site) return redirectToSite(req, res, site);
-    sendPage(res, view, site, 200, event);
+    sendPage(res, view, site, 200, event, view === 'event' ? shareMeta(event, site) : '');
   };
-  // Opplastet forsidebilde. Adressen har en hash av innholdet, så et nytt bilde får ny adresse.
+  // Opplastet forsidebilde (<hash>.<filtype>) og delingsbildet laget fra det (<hash>-deling.jpg).
+  // Adressen har en hash av innholdet, så et nytt bilde får ny adresse.
   // «private»: bildet skal ikke ligge igjen i en delt mellomlagring (f.eks. hos Cloudflare) etter at
   // arrangementet er slettet.
   app.get('/:slug/bilde/:file', (req, res) => {
     const event = findEventBySlug(req.params.slug);
-    const image = event && repo.image(event.id);
-    if (!image || req.params.file !== `${image.hash}.${IMAGE_EXT[image.type]}`) return notFound(req, res);
+    const meta = event && repo.imageMeta(event.id);
+    if (!meta) return notFound(req, res);
+    const isOg = req.params.file === `${meta.hash}-deling.jpg`;
+    if (!isOg && req.params.file !== `${meta.hash}.${IMAGE_EXT[meta.type]}`) return notFound(req, res);
+    const image = isOg ? repo.ogImage(event.id) : repo.image(event.id);
+    if (!image) return notFound(req, res);
     const site = siteOf(event);
     if (site !== req.site) return redirectToSite(req, res, site);
-    res.type(image.type).set('Cache-Control', 'private, max-age=86400').send(image.data);
+    res.type(isOg ? OG_IMAGE_TYPE : image.type).set('Cache-Control', 'private, max-age=86400').send(image.data);
   });
   app.get('/:slug', eventPage('event'));
   app.get('/:slug/avmelding', eventPage('cancel'));
@@ -381,6 +419,8 @@ export function createApp({
       // Lenken arrangøren har skrevet inn, og et eventuelt opplastet bilde (som går foran).
       imageUrl: event.imageUrl,
       uploadedImage: uploadedImageUrl(event),
+      // Delingsbildet (og:image) som er laget fra det opplastede bildet.
+      ogImage: ogImageUrl(event),
       // Dørvaktlenken kan alltid vises på nytt: nøkkelen er avledet (se tokens.js).
       scannerUrl: event.features.tickets ? tickets.scannerUrl(event) : null,
       checkedIn: repo.countCheckedIn(event.id),
@@ -660,10 +700,13 @@ export function createApp({
   });
 
   // Forsidebilde: last opp (PUT med selve bildet som body) eller fjern (DELETE). Bildet sjekkes og
-  // renses for metadata (GPS-posisjon o.l.) før det lagres – se images.js.
+  // renses for metadata (GPS-posisjon o.l.) før det lagres – se images.js. Samtidig lages
+  // delingsbildet (og:image) fra det – se ogImage.js. Kan ikke bildedataene leses, avvises bildet:
+  // da ville det heller ikke vist seg i nettleseren.
   const imageBody = express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: MAX_IMAGE_BYTES });
-  adminApi.put('/events/:slug/image', loadAdminEvent, requireEventAdmin, imageBody, (req, res) => {
-    if (!Buffer.isBuffer(req.body)) return res.status(400).json({ error: adminT('errors.imageInvalid') });
+  adminApi.put('/events/:slug/image', loadAdminEvent, requireEventAdmin, imageBody, async (req, res) => {
+    const invalid = () => res.status(400).json({ error: adminT('errors.imageInvalid') });
+    if (!Buffer.isBuffer(req.body)) return invalid();
     let image;
     try {
       image = processImage(req.body);
@@ -673,12 +716,23 @@ export function createApp({
         : err.message === 'tooManyPixels' ? 'errors.imageTooManyPixels' : 'errors.imageInvalid';
       return res.status(err.message === 'tooLarge' ? 413 : 400).json({ error: adminT(key, { max: MAX_IMAGE_BYTES / 1024 / 1024 }) });
     }
-    repo.setImage(req.event.id, image);
-    res.json({ uploadedImage: uploadedImageUrl(req.event), width: image.width, height: image.height });
+    let ogData;
+    try {
+      ogData = await createOgImage(image.data);
+    } catch (err) {
+      if (!(err instanceof OgImageError)) throw err;
+      return invalid();
+    }
+    // Arrangementet kan ha blitt slettet mens bildet ble behandlet.
+    if (!repo.findEventById(req.event.id)) return notFound(req, res);
+    repo.setImage(req.event.id, { ...image, ogData });
+    res.json({
+      uploadedImage: uploadedImageUrl(req.event), ogImage: ogImageUrl(req.event), width: image.width, height: image.height,
+    });
   });
   adminApi.delete('/events/:slug/image', loadAdminEvent, requireEventAdmin, (req, res) => {
     repo.deleteImage(req.event.id);
-    res.json({ uploadedImage: null });
+    res.json({ uploadedImage: null, ogImage: null });
   });
 
   // Opphev avlysningen (f.eks. ved et feiltrykk). Ingen får e-post om dette.
@@ -794,8 +848,29 @@ export function createApp({
       }
     }
     const deleted = repo.deleteEventsEndedBefore(new Date(now.getTime() - deleteAfterDays * DAY));
-    return { reported, deleted };
+    const ogImages = await createMissingOgImages();
+    return { reported, deleted, ogImages };
   };
+
+  // Forsidebilder lastet opp før delingsbildet fantes, får det her (ved første vedlikehold etter
+  // oppgraderingen). Et bilde som ikke kan leses, merkes, så det ikke prøves igjen hver gang.
+  async function createMissingOgImages() {
+    let created = 0;
+    for (const { eventId, hash } of repo.imagesWithoutOg()) {
+      const image = repo.image(eventId);
+      if (!image || image.hash !== hash) continue;
+      let ogData;
+      try {
+        ogData = await createOgImage(image.data);
+      } catch (err) {
+        if (!(err instanceof OgImageError)) throw err;
+        logger.warn?.(`ADVARSEL: Kunne ikke lage delingsbilde for arrangement ${eventId}: ${err.message}`);
+        ogData = Buffer.alloc(0);
+      }
+      if (repo.setOgImage(eventId, hash, ogData) && ogData.length) created++;
+    }
+    return created;
+  }
 
   /**
    * Inngangen for den betrodde LAN-lytteren (se server.js): http.createServer(app.lanHandler).

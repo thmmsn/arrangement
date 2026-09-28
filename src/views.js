@@ -10,7 +10,10 @@ import { siteFooter, siteHeader, themeHead } from './theme.js';
 //   <!--THEME-HEAD-->                   stilark, fonter, favicon og arrangementets skin
 //   <!--SITE-HEADER--> / <!--SITE-HEADER wide-->   båndet og logo/navn øverst
 //   <!--SITE-FOOTER-->                  bunntekst og personvernlenke
+//   <!--PAGE-META-->                    <meta>-tagger for akkurat denne siden (f.eks. delingstagger
+//                                       for et arrangement), ferdig escapet av den som lager dem
 // Temaet endres bare ved omstart, så hver side lages én gang per nettsted og holdes i minnet.
+// <!--PAGE-META--> er forskjellig for hver forespørsel og settes derfor inn etter mellomlagringen.
 export function createViews(dir) {
   const templates = new Map();
   const rendered = new Map();
@@ -31,10 +34,11 @@ export function createViews(dir) {
       .replace(/\{\{t:([\w.]+)\}\}/g, (_, key) => escapeHtml(t(key)));
   }
 
-  /** Siden `name` med nettstedets språk og tema, og eventuelt arrangementets skin. */
-  return function page(name, site) {
+  /** Siden `name` med nettstedets språk og tema, og eventuelt arrangementets skin og `meta`. */
+  return function page(name, site, { meta = '' } = {}) {
     const key = `${site.id}:${name}:${site.skinHref || ''}`;
     if (!rendered.has(key)) rendered.set(key, render(template(name), site));
-    return rendered.get(key);
+    // Funksjon som erstatning: ellers ville «$&», «$'» o.l. i en arrangementstittel blitt tolket.
+    return rendered.get(key).replace('<!--PAGE-META-->', () => meta);
   };
 }

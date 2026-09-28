@@ -226,6 +226,45 @@ test('versjon 5-database migreres: bookings uten avmeldingsnøkkel, ingen deltak
   }
 });
 
+// Versjon 7 lagrer delingsbildet (og:image) ved siden av forsidebildet. Bilder fra før har det ikke
+// og skal lages ved neste vedlikehold – forsidebildet selv skal være urørt.
+test('versjon 6-database migreres: forsidebildet beholdes, delingsbildet mangler og lages senere', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'arrangement-migrering-'));
+  const path = join(dir, 'arrangement.db');
+  try {
+    const old = new Database(path);
+    for (const migration of MIGRATIONS.slice(0, 6)) {
+      if (typeof migration === 'function') migration(old);
+      else old.exec(migration);
+    }
+    old.pragma('user_version = 6');
+    const now = '2026-09-01T10:00:00.000Z';
+    old.prepare(`INSERT INTO events (id, slug, admin_key_hash, title, starts_at, organizer_name, organizer_email, created_at, updated_at)
+      VALUES (1, 'abcdefghjkmn', 'x', 'Arrangement', '2099-01-01T10:00:00.000Z', 'Kari', 'kari@example.com', ?, ?)`).run(now, now);
+    old.prepare(`INSERT INTO event_images (event_id, type, hash, data, created_at) VALUES (1, 'image/png', '0123456789abcdef', ?, ?)`)
+      .run(Buffer.from('bildedata'), now);
+    old.close();
+
+    const db = openDatabase(path);
+    assert.equal(db.pragma('user_version', { simple: true }), MIGRATIONS.length);
+    const repo = createRepository(db);
+    assert.deepEqual(repo.imageMeta(1), { type: 'image/png', hash: '0123456789abcdef', hasOg: false });
+    assert.deepEqual(repo.image(1).data, Buffer.from('bildedata'));
+    assert.equal(repo.ogImage(1), null);
+    assert.deepEqual(repo.imagesWithoutOg(), [{ eventId: 1, hash: '0123456789abcdef' }]);
+
+    // Delingsbildet lagres bare hvis forsidebildet fortsatt er det samme.
+    assert.equal(repo.setOgImage(1, 'ffffffffffffffff', Buffer.from('feil')), false);
+    assert.equal(repo.setOgImage(1, '0123456789abcdef', Buffer.from('og')), true);
+    assert.deepEqual(repo.ogImage(1), { hash: '0123456789abcdef', data: Buffer.from('og') });
+    assert.equal(repo.imageMeta(1).hasOg, true);
+    assert.deepEqual(repo.imagesWithoutOg(), []);
+    db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // Prosjektet het «booking» før, og databasefilen booking.db. En eksisterende installasjon skal
 // beholde alle data etter omdøpingen.
 test('den gamle databasefilen booking.db tas over av arrangement.db', async () => {

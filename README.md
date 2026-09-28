@@ -5,7 +5,7 @@
 Et lite og enkelt alternativ til Hoopla for påmelding til arrangementer:
 
 - **Arrangementer kan bare nås via lenke** – `arrangement.domain.no/<hash>`. Det finnes ingen oversikt, og søkemotorer blir bedt om å holde seg unna.
-- **Forsidebilde** som lastes opp (GPS og andre metadata fjernes) eller lenkes til.
+- **Forsidebilde** som lastes opp (GPS og andre metadata fjernes) eller lenkes til. Fra et opplastet bilde lages et **delingsbilde** (`og:image`), så lenken får bilde når den deles.
 - **Påmelding med navn, e-post og egendefinerte felter** (kort tekst, lang tekst, telefon, tall, nedtrekksliste, avkrysning).
 - **Den som melder på kan legge til flere personer** i samme skjema. Hver person er én gjest og tar én plass, og hver person svarer på de egendefinerte feltene (f.eks. allergier). Arrangøren bestemmer hvor mange som kan meldes på om gangen (standard 10, 1 = bare seg selv).
 - **Antall påmeldte vises** på arrangementssiden (kan skrus av), med ledige plasser hvis det er et tak.
@@ -393,6 +393,22 @@ Arrangøren kan **laste opp et bilde** eller lime inn en lenke. Et opplastet bil
 - **Lagring:** bildet ligger i databasen, i en egen tabell, og slettes sammen med arrangementet.
 - **Visning:** bildet vises på arrangementets eget domene (`/<hash>/bilde/<hash-av-innholdet>.jpg`), med `Cache-Control: private`, så det ikke blir liggende i en delt mellomlagring etter at arrangementet er slettet. I Google Wallet vises det øverst på kortet.
 
+### Delingsbilde (og:image)
+
+Når arrangementslenken deles i Messenger, Slack, Teams, iMessage, LinkedIn o.l., viser tjenesten en forhåndsvisning med tittel og bilde. Bildet er et eget **delingsbilde som lages fra det opplastede forsidebildet**:
+
+- **Format:** JPEG på 1200 × 630 piksler (forholdet 1,91 : 1 som disse tjenestene bruker), beskåret fra midten – samme utsnitt som forsidebildet på arrangementssiden. Små bilder skaleres opp, så forhåndsvisningen alltid blir stor.
+- **Riktig vei:** bildet roteres etter EXIF-retningen, så mobilbilder ikke blir liggende.
+- **Gjennomsiktighet** (PNG/WebP) fylles med hvitt – ellers blir den svart hos noen tjenester.
+- **Uten metadata:** delingsbildet har verken EXIF, XMP eller fargeprofil (fargene gjøres om til sRGB).
+- **Når:** delingsbildet lages samtidig med opplastingen og lagres ved siden av forsidebildet. Kan ikke bildedataene leses (et ødelagt eller avkortet bilde), avvises opplastingen med «Ugyldig bilde». Bilder som ble lastet opp før delingsbildet fantes, får det ved første vedlikehold etter oppgraderingen.
+- **Adresse:** `/<hash>/bilde/<hash-av-forsidebildet>-deling.jpg`, med `Cache-Control: private` og samme domenekrav som forsidebildet. Et nytt forsidebilde gir ny adresse, og den gamle slutter å virke.
+- **Bare fra opplastede bilder:** er forsidebildet bare en lenke til et bilde et annet sted, får siden ingen `og:image` – serveren henter aldri bilder fra andre nettsteder.
+
+Arrangementssiden (`/<hash>`) har taggene `og:type`, `og:site_name`, `og:title` (arrangementets tittel), `og:url` og – når det finnes et opplastet bilde – `og:image` med type, bredde og høyde, samt `twitter:card` (`summary_large_image` med bilde, ellers `summary`). Taggene må stå i HTML-en fra serveren, fordi tjenestene som lager forhåndsvisninger ikke kjører JavaScript. Avmeldings- og billettsidene er personlige og har ingen delingstagger.
+
+**Merk:** `robots.txt` har `Disallow: /`. Noen tjenester respekterer det også når de lager forhåndsvisninger (X/Twitter og LinkedIn gjør det) og viser da ingen forhåndsvisning. Andre, som iMessage, henter siden direkte fra telefonen og bryr seg ikke om `robots.txt`.
+
 ---
 
 ## Kalender, sted og Wallet
@@ -625,6 +641,7 @@ Databasen oppgraderes automatisk ved oppstart (`PRAGMA user_version`):
 | 4 | Billetter, innsjekking, kartpunkt, brytere, etteranmelding, skin og avlysning. Eksisterende påmeldinger får billettnummer, og arrangementer med passert frist får ingen rapport ved oppgraderingen. |
 | 5 | Dørkode per person (eksisterende påmeldinger får en) og tabellen `event_images` for opplastede bilder. |
 | 6 | Bryter for selvavmelding (`events.self_cancel_enabled`, på). Den tilfeldige avmeldingsnøkkelen (`bookings.cancel_token_hash`) fjernes – avmeldingsnøklene avledes nå fra påmeldings- og billettnummeret. `bookings` bygges opp på nytt med de samme id-ene. |
+| 7 | Delingsbildet (`event_images.og_data`). Eksisterende forsidebilder får det ved første vedlikehold etter oppgraderingen. |
 
 Migreringene kjøres med fremmednøkler slått av, og hver migrering kjører `PRAGMA foreign_key_check` før den lagres (slik SQLite anbefaler for ombygging av tabeller). Ellers ville `DROP TABLE bookings` i versjon 6 slettet alle deltakerne via `ON DELETE CASCADE`.
 
@@ -654,6 +671,7 @@ src/
   zip.js, png.js Minimal ZIP-skriver og PNG-koder (til Wallet-kortene)
   places.js      Stedsoppslag mot Kartverket og kartlenker
   images.js      Opplastede bilder: filtype, grenser og fjerning av metadata
+  ogImage.js     Delingsbildet (og:image, 1200 × 630 JPEG) laget fra det opplastede bildet (sharp)
   skins.js       Innebygde og egne skins
   filename.js    Filnavn til vedlegg og nedlastinger
   csv.js         CSV-eksport
@@ -689,7 +707,7 @@ test/            Tester (node:test)
 | `POST` | `/api/admin/events/:slug/scanner/rotate` | Admin-porten + admin-nøkkel. Ny dørvaktlenke |
 | `POST` / `DELETE` | `/api/admin/events/:slug/cancel` | Admin-porten + admin-nøkkel. Avlys (`{ notify, message }`) / opphev |
 | `GET` | `/api/admin/places?q=` | Admin-porten. Stedsoppslag hos Kartverket |
-| `PUT` / `DELETE` | `/api/admin/events/:slug/image` | Admin-porten + admin-nøkkel. Last opp forsidebilde (selve bildet som body, `Content-Type: image/…`) / fjern |
+| `PUT` / `DELETE` | `/api/admin/events/:slug/image` | Admin-porten + admin-nøkkel. Last opp forsidebilde (selve bildet som body, `Content-Type: image/…`) / fjern. Svaret har `uploadedImage` og `ogImage` (delingsbildet) |
 | `GET` | `/api/tickets/:nøkkel`, `/api/bookings/:nøkkel` | Billettlenken. Billetten(e), lenker og om telefonen er dørvakt |
 | `POST` | `/api/events/:slug/scanner/login` | Dørvaktnøkkel i body. Setter informasjonskapselen |
 | `GET` | `/api/events/:slug/scanner`, `…/scanner/search?q=` | Dørvakt. Status og liste for bruk uten nett; navnesøk |

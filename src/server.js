@@ -54,13 +54,15 @@ for (const [site, count] of Object.entries(repo.countEventsBySite())) {
   }
 }
 
-// Vedlikehold hvert tiende minutt: rapport til arrangøren når påmeldingsfristen er nådd, og
-// sletting av arrangementer som var over for mer enn DELETE_AFTER_DAYS dager siden.
+// Vedlikehold hvert tiende minutt: rapport til arrangøren når påmeldingsfristen er nådd,
+// sletting av arrangementer som var over for mer enn DELETE_AFTER_DAYS dager siden, og delingsbilde
+// for forsidebilder lastet opp før det fantes.
 async function maintenance() {
   try {
-    const { reported, deleted } = await app.runMaintenance();
+    const { reported, deleted, ogImages } = await app.runMaintenance();
     if (reported.length) console.log(`Rapport sendt ved påmeldingsfristen: ${reported.join(', ')}`);
     if (deleted.length) console.log(`Slettet ${deleted.length} arrangement(er) som var over: ${deleted.join(', ')}`);
+    if (ogImages) console.log(`Laget delingsbilde (og:image) for ${ogImages} eksisterende forsidebilde(r).`);
   } catch (err) {
     console.error('Vedlikehold feilet:', err);
   }
