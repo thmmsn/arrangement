@@ -7,7 +7,8 @@
 //   /b/<påmeldingsnøkkel>          alle billettene i én påmelding (lenken i e-posten)
 //   /b/<påmeldingsnøkkel>/pdf|apple|google
 //   /<slug>/kalender.ics           kalenderfil (bare offentlig informasjon)
-//   /<slug>/skanner#<nøkkel>       dørvaktlenken
+//   /dorvakt/<slug>#<nøkkel>       dørvaktlenken – samme hash som /<slug> og /admin/<slug>
+//   /<slug>/skanner#<nøkkel>       den eldre dørvaktlenken, med samme nøkkel; virker fortsatt
 //
 // Hvorfor ligger billettnøkkelen i stien og ikke etter #, slik som admin- og avmeldingsnøkkelen?
 // - QR-koden skal kunne skannes med vanlig kamera og åpne billetten direkte.
@@ -83,7 +84,7 @@ export function createTicketFeature(ctx) {
   const ticketUrl = (event, code) => `${base(event)}${ticketPath(code)}`;
   const bookingUrl = (event, code) => `${base(event)}${bookingPath(code)}`;
   const calendarUrl = (event) => `${base(event)}/${event.slug}/kalender.ics`;
-  const scannerUrl = (event) => `${base(event)}/${event.slug}/skanner#${tokens.scanner(event.id, event.scannerVersion)}`;
+  const scannerUrl = (event) => `${base(event)}/dorvakt/${event.slug}#${tokens.scanner(event.id, event.scannerVersion)}`;
   // Avmelding (/<slug>/avmelding#<nøkkel>), bare når arrangøren lar deltakerne melde seg av selv.
   // Nøkkelen står etter #, så den havner aldri i serverlogger eller Referer-headere.
   const cancelPath = (event, token) => (event.features.selfCancel ? `/${event.slug}/avmelding#${token}` : null);
@@ -383,13 +384,19 @@ export function createTicketFeature(ctx) {
         .send(eventIcs({ event, eventUrl: eventUrl(event), host: new URL(site.baseUrl).hostname, lang: site.lang, cancelledPrefix: `${site.t('event.badge.cancelled').toUpperCase()}:` }));
     });
 
-    app.get('/:slug/skanner', (req, res) => {
+    // Dørvaktlenken er /dorvakt/<slug>#<nøkkel>. Lenker som ble sendt ut før adressen ble endret
+    // (/<slug>/skanner#<nøkkel>), får den samme siden direkte – ikke en videresending – så en dørvakt
+    // som laster siden på nytt midt i et arrangement, aldri merker noe. Nøkkelen og informasjonskapselen
+    // er de samme for begge adressene (se tokens.js).
+    const scannerPage = (req, res) => {
       const event = findEventBySlug(req.params.slug);
       if (!event || !event.features.tickets) return notFound(req, res);
       if (!onRightSite(req, res, event)) return;
       noStore(res);
       sendPage(res, 'scanner', siteOf(event), 200, event);
-    });
+    };
+    app.get('/dorvakt/:slug', scannerPage);
+    app.get('/:slug/skanner', scannerPage);
   }
 
   // ---------- Offentlig API ----------
@@ -537,7 +544,7 @@ export function createTicketFeature(ctx) {
 
   // ---------- Admin-API ----------
 
-  function mountAdminApi(adminApi, { loadAdminEvent, requireEventAdmin }) {
+  function mountAdminApi(adminApi, { loadAdminEvent, requireEventAdmin, requireCreator }) {
     const adminCheckin = (undo) => (req, res) => {
       const id = Number(req.params.id);
       const person = Number.isInteger(id) && repo.findRegistration(req.event.id, id);
@@ -556,8 +563,9 @@ export function createTicketFeature(ctx) {
       res.json({ scannerUrl: scannerUrl(repo.findEventById(req.event.id)) });
     });
 
-    // Stedsoppslag mot Kartverket (se places.js).
-    adminApi.get('/places', async (req, res) => {
+    // Stedsoppslag mot Kartverket (se places.js): i skjemaet for et nytt arrangement (opprettingstilgang)
+    // og når ett arrangement redigeres (admin-nøkkelen).
+    const places = async (req, res) => {
       try {
         res.json({ results: await ctx.placeSearch.search(req.query.q) });
       } catch (err) {
@@ -565,7 +573,9 @@ export function createTicketFeature(ctx) {
         logger.error(err.message);
         res.status(502).json({ error: adminT('errors.placesUnavailable') });
       }
-    });
+    };
+    adminApi.get('/places', requireCreator, places);
+    adminApi.get('/events/:slug/places', loadAdminEvent, requireEventAdmin, places);
   }
 
   // ---------- E-post ----------

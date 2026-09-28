@@ -9,8 +9,14 @@
 //   SITE_COM_DOMAIN=arrangement.domain.no
 //   SITE_COM_LANG=en
 //   SITE_COM_SITE_NAME=…, SITE_COM_LOGO_URL=…, SITE_COM_EMAIL_FROM=…, SITE_COM_BASE_URL=…
-// Temavariabler og EMAIL_FROM som ikke er satt for nettstedet, arves fra hovednettstedet.
-// Tekst som er skrevet på ett språk (FOOTER_TEXT), arves bare hvis språket er det samme.
+// Temavariabler som ikke er satt for nettstedet, arves fra hovednettstedet. Tekst som er skrevet på
+// ett språk (FOOTER_TEXT), arves bare hvis språket er det samme.
+//
+// Avsenderen følger domenet: første ledd blir adressen, resten blir e-postdomenet (se senderFor).
+//   arrangement.arkitekt-thommesen.no  →  arrangement@arkitekt-thommesen.no
+//   event.thommesenarchitecture.com    →  event@thommesenarchitecture.com
+// Navnet på avsenderen er nettstedets SITE_NAME (uten det: «Påmelding» / «Registration»). EMAIL_FROM (hovednettstedet) og SITE_<ID>_EMAIL_FROM
+// overstyrer.
 //
 // Språket for hovednettstedet heter SITE_LANG og ikke LANG, fordi LANG er en standard
 // miljøvariabel i Linux (f.eks. «en_US.UTF-8») som ofte allerede er satt.
@@ -62,7 +68,7 @@ export function loadSites(env, { port = 3000 } = {}) {
     host: mainDomain || (env.BASE_URL ? hostOfUrl(mainBaseUrl) : ''),
     baseUrl: mainBaseUrl,
     lang: mainLang,
-    emailFrom: env.EMAIL_FROM || DEFAULT_EMAIL_FROM,
+    emailFrom: env.EMAIL_FROM || senderFor(mainDomain, mainTheme.theme.siteName || translator(mainLang)('meta.siteNameFallback')) || DEFAULT_EMAIL_FROM,
     theme: mainTheme.theme,
   });
 
@@ -120,7 +126,8 @@ export function loadSites(env, { port = 3000 } = {}) {
     // Advarsler om arvede verdier er allerede gitt for hovednettstedet.
     warnings.push(...theme.warnings.filter((w) => w.startsWith(`SITE_${ID}_`)));
 
-    sites.push(makeSite({ id, host: domain, baseUrl, lang, emailFrom: vars.EMAIL_FROM || mainSite.emailFrom, theme: theme.theme }));
+    const emailFrom = vars.EMAIL_FROM || senderFor(domain, theme.theme.siteName || translator(lang)('meta.siteNameFallback')) || mainSite.emailFrom;
+    sites.push(makeSite({ id, host: domain, baseUrl, lang, emailFrom, theme: theme.theme }));
   }
 
   // To nettsteder kan ikke dele domene – da ville det vært tilfeldig hvilket som svarte.
@@ -133,7 +140,50 @@ export function loadSites(env, { port = 3000 } = {}) {
     seen.set(site.host, site.id);
   }
 
+  // En avsender på et annet domene enn nettstedet er nesten alltid en feil (f.eks. en kopiert linje):
+  // gjestene får da e-post fra et domene de ikke kjenner igjen.
+  for (const site of sites) {
+    const mailHost = mailHostOf(site.emailFrom);
+    if (site.host && mailHost && !sameDomain(mailHost, site.host)) {
+      const name = site.id === MAIN_SITE ? 'EMAIL_FROM' : `SITE_${site.id.toUpperCase()}_EMAIL_FROM`;
+      warnings.push(`${name}: avsenderen ${site.emailFrom} er ikke på nettstedets domene (${site.host}). E-post om arrangementene der kommer fra ${mailHost}.`);
+    }
+  }
+
   return { sites, mainSite, warnings };
+}
+
+// «Navn <lokal@domene>» eller «lokal@domene».
+const EMAIL_FROM_PATTERN = /^(.*<)?\s*([^<>@\s]+)@([^<>@\s]+?)\s*(>?)\s*$/;
+
+/** Domenet i en avsenderadresse, med små bokstaver, eller '' hvis den ikke kan leses. */
+export function mailHostOf(emailFrom) {
+  return EMAIL_FROM_PATTERN.exec(String(emailFrom ?? ''))?.[3].toLowerCase() ?? '';
+}
+
+// Samme domene, eller det ene er et underdomene av det andre (arrangement.domene.no og domene.no).
+function sameDomain(a, b) {
+  return a === b || a.endsWith(`.${b}`) || b.endsWith(`.${a}`);
+}
+
+/**
+ * Avsenderen laget fra nettstedets domene: første ledd er adressen, resten er e-postdomenet.
+ *   arrangement.arkitekt-thommesen.no  →  «Thommesen Arkitekter <arrangement@arkitekt-thommesen.no>»
+ * Et domene med bare to ledd (arkitekt-thommesen.no) har ikke noe ledd å ta av; da blir adressen
+ * arrangement@arkitekt-thommesen.no. Uten domene (lokal utvikling): null.
+ */
+function senderFor(domain, siteName) {
+  if (!domain) return null;
+  const labels = domain.split('.');
+  const address = labels.length >= 3 ? `${labels[0]}@${labels.slice(1).join('.')}` : `arrangement@${domain}`;
+  return siteName ? `${displayName(siteName)} <${address}>` : address;
+}
+
+// Navnet i «Navn <adresse>». Med tegn som har en egen betydning i e-postadresser (f.eks. komma), må
+// det stå i anførselstegn – ellers leses «Thommesen, Arkitekter <…>» som to mottakere.
+function displayName(name) {
+  const clean = name.replace(/[\r\n<>]/g, ' ').trim();
+  return /[()[\]:;@\\,."]/.test(clean) ? `"${clean.replace(/(["\\])/g, '\\$1')}"` : clean;
 }
 
 function makeSite({ id, host, baseUrl, lang, emailFrom, theme }) {

@@ -191,7 +191,7 @@ function showResult(result, slug, timeZone) {
   app.replaceChildren(...[
     ...resultView(result, { slug, timeZone, onUpdate: update }),
     result.stats ? h('p', { class: 'muted' }, t('scanner.stats', result.stats)) : null,
-    slug ? h('p', {}, h('a', { class: 'btn secondary', href: `/${slug}/skanner` }, t('scanner.openScanner'))) : null,
+    slug ? h('p', {}, h('a', { class: 'btn secondary', href: `/dorvakt/${slug}` }, t('scanner.openScanner'))) : null,
   ].filter(Boolean));
   document.title = app.querySelector('h2')?.textContent || document.title;
   feedback(['checked_in', 'undone', 'not_checked_in'].includes(result.result));

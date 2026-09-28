@@ -1,4 +1,4 @@
-// Skannersiden for dørvakter: /<slug>/skanner#<dørvaktnøkkel>.
+// Skannersiden for dørvakter: /dorvakt/<slug>#<dørvaktnøkkel> (eldre lenker: /<slug>/skanner#<nøkkel>).
 //
 // 1. Første gang: dørvakten skriver eventuelt navnet sitt og trykker Start. Nøkkelen sendes til
 //    serveren, som lagrer en informasjonskapsel (HttpOnly) for arrangementet, og nøkkelen fjernes
@@ -7,11 +7,15 @@
 //    Vanlig kamera-app virker også: QR-koden åpner billetten, og billettsiden sjekker inn.
 // 3. Uten nett: siden har en liste med hasher av alle billettene og kan kjenne igjen en ekte
 //    billett selv. Innsjekkingen legges i kø og sendes når nettet er tilbake.
-import { api, formatEventTime, h, notice, secretFromHash, slugFromPath, t } from './common.js';
+import { api, formatEventTime, h, notice, secretFromHash, t } from './common.js';
 import { feedback, resultView } from './staff.js';
 
 const app = document.getElementById('app');
-const slug = slugFromPath();
+// Tolkes her, ikke med slugFromPath i common.js: rett etter en ny versjon kan nettleseren ha en eldre
+// common.js i hurtigbufferen (inntil én time), og den kjenner ikke /dorvakt/<slug>. Denne filen lastes
+// alltid i riktig versjon (scanner.js?v=<versjon>), så skanneren virker også i den timen.
+const [first, second] = location.pathname.split('/').filter(Boolean);
+const slug = ((first === 'dorvakt' ? second : first) || '').toLowerCase();
 const key = secretFromHash();
 const QUEUE_KEY = `dv-queue-${slug}`;
 const NAME_KEY = 'dv-name';

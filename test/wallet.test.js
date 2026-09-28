@@ -255,7 +255,7 @@ describe('Wallet i appen', () => {
     assert.match(mail.text, /Lagre alle i Google Wallet: http:\/\/localhost:3000\/b\/.+\/google/);
     const ticketUrl = `http://localhost:3000${data.json.tickets[1].path}`;
     assert.ok(mail.text.includes(`Person 2\nNavn: Kari\nDørkode: ${data.json.tickets[1].doorCode}\nBillett: ${ticketUrl}\nLegg til i Apple Wallet: ${ticketUrl}/apple\nLagre i Google Wallet: ${ticketUrl}/google\nLast ned PDF: ${ticketUrl}/pdf\nMeld av: `), mail.text);
-    assert.ok(mail.html.includes(`href="http://localhost:3000${path}/apple" style="display:inline-block;background:#000000;`));
+    assert.match(mail.html, new RegExp(`<td bgcolor="#000000"[^>]*>\\s*<a href="http://localhost:3000${path}/apple"`));
 
     const off = await createEvent(app, { features: { appleWallet: false, googleWallet: false } });
     const r2 = await register(app, off.slug, { email: 'ingen@example.com' });

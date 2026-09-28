@@ -12,6 +12,9 @@ import { siteFooter, siteHeader, themeHead } from './theme.js';
 //   <!--SITE-FOOTER-->                  bunntekst, personvernlenke og versjonsnummeret
 //   <!--PAGE-META-->                    <meta>-tagger for akkurat denne siden (f.eks. delingstagger
 //                                       for et arrangement), ferdig escapet av den som lager dem
+//   {{VERSION}}                         appens versjonsnummer, i skriptadressene (…/admin.js?v={{VERSION}}):
+//                                       en ny versjon gir ny adresse, så nettleseren aldri kjører et
+//                                       gammelt skript fra hurtigbufferen (/assets caches i én time)
 // Temaet endres bare ved omstart, så hver side lages én gang per nettsted og holdes i minnet.
 // <!--PAGE-META--> er forskjellig for hver forespørsel og settes derfor inn etter mellomlagringen.
 // `version`: appens versjonsnummer (se version.js), vist nederst til høyre på alle sidene.
@@ -31,6 +34,7 @@ export function createViews(dir, { version = null } = {}) {
       .replace(/<!--SITE-HEADER( wide)?-->/, (_, wide) => siteHeader(theme, { wide: Boolean(wide), t }))
       .replace('<!--SITE-FOOTER-->', siteFooter(theme, { t, version }))
       .replaceAll('{{LANG}}', escapeHtml(site.lang))
+      .replaceAll('{{VERSION}}', escapeHtml(version ?? ''))
       .replaceAll('{{SITE_NAME}}', escapeHtml(theme.siteName || t('meta.siteNameFallback')))
       .replace(/\{\{t:([\w.]+)\}\}/g, (_, key) => escapeHtml(t(key)));
   }

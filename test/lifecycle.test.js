@@ -95,7 +95,7 @@ test('rapport ved påmeldingsfristen: én gang, med alle påmeldte og CSV – ik
   assert.match(report.text, /2 personer i 1 påmeldinger\./);
   assert.match(report.text, /1\. Ola Nordmann – ola@example\.com/);
   assert.match(report.text, /2\. Kari Nordmann – meldt på av Ola Nordmann/);
-  assert.match(report.text, /Dørvaktlenke: http:\/\/localhost:3000\/.+\/skanner#/);
+  assert.match(report.text, new RegExp(`Dørvaktlenke: http://localhost:3000/dorvakt/${event.slug}#`));
   assert.equal(report.attachments[0].filename, `pameldte-${event.slug}.csv`);
   assert.match(report.attachments[0].content.toString(), /Allergier/);
 

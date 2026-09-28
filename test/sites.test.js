@@ -64,12 +64,48 @@ describe('nettsteder fra miljøvariabler', () => {
     assert.equal(com.theme.footerText, '');
   });
 
-  test('et nettsted på samme språk arver også teksten, og EMAIL_FROM arves når den mangler', () => {
+  test('et nettsted på samme språk arver også teksten', () => {
     const { sites } = loadSites({ DOMAIN: MAIN, FOOTER_TEXT: 'Felles', EMAIL_FROM: 'A <a@example.no>', SITE_TO_DOMAIN: 'to.example.no' });
     const to = sites.find((s) => s.id === 'to');
     assert.equal(to.lang, 'nb');
     assert.equal(to.theme.footerText, 'Felles');
-    assert.equal(to.emailFrom, 'A <a@example.no>');
+  });
+
+  test('avsenderen følger domenet: første ledd blir adressen, resten e-postdomenet', () => {
+    const env = {
+      DOMAIN: 'event.thommesenarchitecture.com', SITE_NAME: 'Thommesen Arkitekter',
+      SITE_NO_DOMAIN: 'arrangement.arkitekt-thommesen.no',
+    };
+    const from = (e) => Object.fromEntries(loadSites(e).sites.map((site) => [site.id, site.emailFrom]));
+    assert.deepEqual(from(env), {
+      main: 'Thommesen Arkitekter <event@thommesenarchitecture.com>',
+      no: 'Thommesen Arkitekter <arrangement@arkitekt-thommesen.no>',
+    });
+    // EMAIL_FROM overstyrer bare hovednettstedet – det nye domenet får fortsatt sin egen avsender.
+    assert.deepEqual(from({ ...env, EMAIL_FROM: 'Thommesen Arkitekter <arrangement@thommesenarchitecture.com>' }), {
+      main: 'Thommesen Arkitekter <arrangement@thommesenarchitecture.com>',
+      no: 'Thommesen Arkitekter <arrangement@arkitekt-thommesen.no>',
+    });
+    // SITE_<ID>_EMAIL_FROM overstyrer nettstedet, og nettstedets eget SITE_NAME blir navnet.
+    assert.equal(from({ ...env, SITE_NO_EMAIL_FROM: 'Påmelding <post@arkitekt-thommesen.no>' }).no, 'Påmelding <post@arkitekt-thommesen.no>');
+    assert.equal(from({ ...env, SITE_NO_SITE_NAME: 'Thommesen' }).no, 'Thommesen <arrangement@arkitekt-thommesen.no>');
+    // Bare to ledd: ingenting å ta av. Tegn som komma gjør at navnet må stå i anførselstegn.
+    assert.equal(from({ DOMAIN: 'arkitekt-thommesen.no', SITE_NAME: 'Thommesen, Arkitekter' }).main, '"Thommesen, Arkitekter" <arrangement@arkitekt-thommesen.no>');
+    // Uten SITE_NAME: standardnavnet på nettstedets språk, som på sidene.
+    assert.equal(from({ DOMAIN: 'arkitekt-thommesen.no' }).main, 'Påmelding <arrangement@arkitekt-thommesen.no>');
+    assert.equal(from({ DOMAIN: 'arrangement.example.no', SITE_EN_DOMAIN: 'events.example.com', SITE_EN_LANG: 'en' }).en, 'Registration <events@example.com>');
+    // Uten domene (lokal utvikling): standardavsenderen som før.
+    assert.equal(from({}).main, 'Påmelding <arrangement@example.com>');
+  });
+
+  test('en avsender på et annet domene enn nettstedet gir en advarsel', () => {
+    const { warnings } = loadSites({
+      DOMAIN: 'event.thommesenarchitecture.com', EMAIL_FROM: 'A <arrangement@thommesenarchitecture.com>',
+      SITE_NO_DOMAIN: 'arrangement.arkitekt-thommesen.no', SITE_NO_EMAIL_FROM: 'A <arrangement@thommesenarchitecture.com>',
+    });
+    assert.deepEqual(warnings, [
+      'SITE_NO_EMAIL_FROM: avsenderen A <arrangement@thommesenarchitecture.com> er ikke på nettstedets domene (arrangement.arkitekt-thommesen.no). E-post om arrangementene der kommer fra thommesenarchitecture.com.',
+    ]);
   });
 
   test('feil i oppsettet gir tydelige advarsler eller stopper oppstarten', () => {
@@ -237,11 +273,12 @@ describe('e-postlenker per nettsted', () => {
     assert.match(guest.html, new RegExp(`<img src="https://${MAIN}/assets/custom/logo\\.svg"`));
   });
 
-  test('med ADMIN_HOST peker admin-lenken dit, mens resten følger nettstedet', async () => {
+  test('med ADMIN_HOST følger også admin-lenken arrangementets nettsted – ADMIN_HOST gjelder bare oppretting', async () => {
     const app = await startApp({ ...TWO_SITES, ADMIN_HOST: ADMIN });
     const en = await createEvent(app, { site: 'com' }, onHost(ADMIN));
-    assert.equal(en.adminUrl, `https://${ADMIN}/admin/${en.slug}#${en.adminKey}`);
+    assert.equal(en.adminUrl, `https://${COM}/admin/${en.slug}#${en.adminKey}`);
     assert.equal(en.eventUrl, `https://${COM}/${en.slug}`);
+    assert.match(en.scannerUrl, new RegExp(`^https://${COM}/dorvakt/${en.slug}#`));
   });
 });
 
@@ -357,6 +394,14 @@ describe('et offentlig domene er helt lukket uten gyldig lenke', () => {
       { path: '/abcdefghjkmn' },
       { path: '/abcdefghjkmn/avmelding' },
       { path: '/abcdefghjkmn/admin' },
+      { path: '/abcdefghjkmn/skanner' },
+      { path: '/admin/abcdefghjkmn' },
+      { path: '/admin/abcdefghjkmn/avlys' },
+      { path: '/dorvakt' },
+      { path: '/dorvakt/abcdefghjkmn' },
+      { path: '/api/admin/events/abcdefghjkmn' },
+      { path: '/api/admin/events/abcdefghjkmn/config' },
+      { path: '/api/admin/places?q=Oslo' },
       { path: '/theme.css' },
       { path: '/assets/theme/0000000000.css' },
       { path: '/api/events/abcdefghjkmn' },
@@ -409,4 +454,60 @@ test('loadConfig gir hovednettstedets verdier som før', () => {
   assert.equal(config.baseUrl, `https://${MAIN}`);
   assert.equal(config.emailFrom, 'Påmelding <pamelding@example.no>');
   assert.equal(config.sites.length, 2);
+});
+
+describe('avsender per domene i appen', () => {
+  const ENV = {
+    ADMIN_NO_AUTH: 'true', ADMIN_EMAIL: 'drift@thommesenarchitecture.com', SITE_NAME: 'Thommesen Arkitekter',
+    DOMAIN: 'event.thommesenarchitecture.com', EMAIL_FROM: 'Thommesen Arkitekter <arrangement@thommesenarchitecture.com>',
+    SITE_NO_DOMAIN: 'arrangement.arkitekt-thommesen.no',
+  };
+  const NO_FROM = 'Thommesen Arkitekter <arrangement@arkitekt-thommesen.no>';
+
+  test('all e-post om et arrangement kommer fra domenet det hører til – også kopien til administratoren', async () => {
+    const app = await startApp(ENV);
+    const created = await createEvent(app, { site: 'no' });
+    assert.deepEqual(app.sent.map((m) => [m.to, m.from]), [
+      ['arrangor@example.com', NO_FROM],
+      ['drift@thommesenarchitecture.com', NO_FROM],
+    ]);
+    app.sent.length = 0;
+    await app.request({
+      method: 'POST', path: `/api/events/${created.slug}/registrations`, headers: onHost('arrangement.arkitekt-thommesen.no'),
+      body: { name: 'Ola', email: 'ola@example.com' },
+    });
+    assert.deepEqual(app.sent.map((m) => m.from), [NO_FROM, NO_FROM]);
+  });
+
+  test('avviser Resend domenet (ikke verifisert ennå), sendes e-posten fra hovednettstedets avsender', async () => {
+    const sent = [];
+    const errors = [];
+    // Som Resend: et domene som ikke er verifisert, gir 403.
+    const mailer = {
+      async send(message) {
+        if (message.from.includes('@arkitekt-thommesen.no')) {
+          throw new Error('Resend svarte 403: {"statusCode":403,"message":"The arkitekt-thommesen.no domain is not verified. Please, add and verify your domain on https://resend.com/domains","name":"validation_error"}');
+        }
+        sent.push(message);
+        return { id: 'x' };
+      },
+    };
+    const app = await startApp(ENV, { mailer });
+    const created = await createEvent(app, { site: 'no' });
+    const reg = await app.request({
+      method: 'POST', path: `/api/events/${created.slug}/registrations`, headers: onHost('arrangement.arkitekt-thommesen.no'),
+      body: { name: 'Ola', email: 'ola@example.com' },
+    });
+    assert.equal(reg.status, 201);
+    assert.equal(reg.json.emailSent, true, 'gjesten får bekreftelsen likevel');
+    const guest = sent.find((m) => m.to === 'ola@example.com');
+    assert.equal(guest.from, 'Thommesen Arkitekter <arrangement@thommesenarchitecture.com>');
+    assert.ok(guest.html.includes('arrangement.arkitekt-thommesen.no'), 'lenkene er fortsatt nettstedets egne');
+
+    // Andre feil prøves ikke på nytt fra en annen avsender.
+    const failing = { async send() { errors.push(1); throw new Error('Resend svarte 500: intern feil'); } };
+    const app2 = await startApp(ENV, { mailer: failing });
+    await app2.request({ method: 'POST', path: '/api/admin/events', body: { title: 'x', startsAt: '2030-01-01T10:00:00Z', organizerName: 'A', organizerEmail: 'a@example.com', site: 'no' } });
+    assert.equal(errors.length, 2, 'én gang til arrangøren og én til administratoren – ingen nye forsøk');
+  });
 });

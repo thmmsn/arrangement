@@ -104,12 +104,15 @@ async function register(slug, event, overrides = {}) {
 const admin = (key) => ({ Authorization: `Bearer ${key}` });
 
 describe('opprette arrangement', () => {
-  test('uten Cloudflare Access og uten ADMIN_NO_AUTH er oppretting slått av', async () => {
+  test('uten CREATE_KEY, Cloudflare Access og ADMIN_NO_AUTH er oppretting slått av', async () => {
     const closed = await startApp({});
     const res = await closed.request({ method: 'POST', path: '/api/admin/events', body: eventInput() });
     assert.equal(res.status, 403);
-    assert.match(res.json.error, /Cloudflare Access er ikke satt opp/);
+    assert.match(res.json.error, /verken CREATE_KEY eller Cloudflare Access er satt opp/);
     assert.equal(closed.sent.length, 0);
+    // Oppsettet og stedsoppslaget til skjemaet er stengt på samme måte.
+    assert.equal((await closed.request({ path: '/api/admin/config' })).status, 403);
+    assert.equal((await closed.request({ path: '/api/admin/places?q=Oslo' })).status, 403);
   });
 
   test('gir tilfeldig lenke og admin-lenke, og sender admin-lenken til arrangøren', async () => {

@@ -17,18 +17,22 @@ if (!version) console.warn('ADVARSEL: VERSION mangler eller har feil format (år
 
 for (const warning of config.warnings) console.warn(`ADVARSEL: ${warning}`);
 const accessEnabled = Boolean(config.cfAccessTeamDomain && config.cfAccessAudiences.length);
-if (!accessEnabled && config.adminNoAuth) {
+// Hvem som kan opprette arrangementer. Administrasjonen av ett arrangement krever bare admin-nøkkelen.
+const creators = [
+  config.createKey && 'opprettingsnøkkelen (CREATE_KEY, /admin/ny#<nøkkel>)',
+  accessEnabled && `Cloudflare Access (${config.cfAccessTeamDomain})`,
+  config.lanPort && `LAN-porten ${config.lanPort}`,
+].filter(Boolean);
+if (!accessEnabled && !config.createKey && config.adminNoAuth) {
   console.warn('ADVARSEL: ADMIN_NO_AUTH=true – alle som når /admin kan opprette arrangementer. Bare for lokal utvikling!');
-} else if (!accessEnabled && config.lanPort) {
-  console.warn(`ADVARSEL: Cloudflare Access er ikke satt opp (CF_ACCESS_TEAM_DOMAIN og CF_ACCESS_AUD) – nye arrangementer kan bare opprettes via LAN-porten ${config.lanPort}.`);
-} else if (!accessEnabled) {
-  console.warn('ADVARSEL: Cloudflare Access er ikke satt opp (CF_ACCESS_TEAM_DOMAIN og CF_ACCESS_AUD) – ingen kan opprette nye arrangementer.');
+} else if (!creators.length) {
+  console.warn('ADVARSEL: Verken CREATE_KEY eller Cloudflare Access (CF_ACCESS_TEAM_DOMAIN og CF_ACCESS_AUD) er satt opp – ingen kan opprette nye arrangementer.');
+} else {
+  console.log(`Nye arrangementer kan opprettes med ${creators.join(', ')}.`);
 }
-if (config.cfAccessTeamDomain) {
-  console.log(`Admin krever Cloudflare Access (${config.cfAccessTeamDomain}).`);
-}
+console.log('Hvert arrangement administreres med sin egen admin-lenke (/admin/<hash>#<nøkkel>) – den krever bare nøkkelen.');
 if (config.adminHost) {
-  console.log(`Admin svarer bare på https://${config.adminHost}/admin`);
+  console.log(`Oppretting (/admin/ny) svarer bare på https://${config.adminHost}/admin/ny`);
 }
 if (!config.resendApiKey) {
   console.warn('ADVARSEL: RESEND_API_KEY er ikke satt – e-poster skrives til konsollen i stedet for å sendes.');
@@ -46,7 +50,7 @@ if (!config.adminEmails.length) {
 console.log(`Data om et arrangement slettes ${config.deleteAfterDays} dager etter at det er over.`);
 
 if (!config.adminHost) {
-  console.warn('ADVARSEL: ADMIN_HOST er ikke satt – /admin finnes da på de offentlige domenene. Sett ADMIN_HOST for å lukke dem helt.');
+  console.warn('ADVARSEL: ADMIN_HOST er ikke satt – /admin/ny finnes da på de offentlige domenene. Sett ADMIN_HOST for å lukke dem helt.');
 }
 
 // Arrangementer som hører til et nettsted som ikke lenger er satt opp, vises på hovednettstedet.
@@ -75,7 +79,7 @@ const maintenanceTimer = setInterval(maintenance, 10 * 60_000);
 
 const server = app.listen(config.port, () => {
   for (const site of config.sites) {
-    console.log(`Nettsted «${site.id}»: ${site.baseUrl} (${site.lang})`);
+    console.log(`Nettsted «${site.id}»: ${site.baseUrl} (${site.lang}), e-post fra ${site.emailFrom}`);
   }
   console.log(`Arrangement ${version ?? '(ukjent versjon)'} kjører på port ${config.port}`);
 });
@@ -87,8 +91,8 @@ if (config.lanPort) {
   lanServer = http.createServer(app.lanHandler);
   lanServer.listen(config.lanPort, () => {
     console.warn([
-      `ADVARSEL: LAN-porten ${config.lanPort} er BETRODD. Alle som når den, kan administrere og opprette`,
-      '  arrangementer – uten Cloudflare Access, uten ADMIN_HOST og uten rate limiting.',
+      `ADVARSEL: LAN-porten ${config.lanPort} er BETRODD. Alle som når den, kan opprette arrangementer`,
+      '  – uten Cloudflare Access, uten CREATE_KEY, uten ADMIN_HOST og uten rate limiting.',
       `  Port ${config.lanPort} må ALDRI rutes gjennom Cloudflare-tunnelen eller publiseres mot internett.`,
       `  Tunnelen skal fortsatt gå til port ${config.port}. Publiser LAN-porten bare på kontorets nett.`,
       `  Nettsted på LAN: velges fra Host, eller med ?site=<id> (${config.sites.map((site) => site.id).join(', ')}).`,

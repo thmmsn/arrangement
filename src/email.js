@@ -61,12 +61,14 @@ const DEFAULT_SITE = {
 // Logoen øverst i e-posten. Uten `logo` er den en lenke til bildet på nettstedet. Med `logo` (se
 // emailLogo.js) er den et bilde bygget inn i e-posten (src="cid:…"), med bredde og høyde som
 // attributter – Outlook for Windows ser bare på dem.
+// Logoen står i en egen tabellcelle med align="center" (se layout), fordi Outlook for Windows
+// ignorerer margin:0 auto på bilder.
 function logoImg(theme, logo = null) {
   const alt = escapeHtml(theme.siteName || '');
   if (!logo) {
-    return `<img src="${escapeHtml(theme.logoAbsoluteUrl)}" alt="${alt}" height="${theme.logoHeight}" style="display:block;height:${theme.logoHeight}px;width:auto;margin:0 auto 20px;border:0;">`;
+    return `<img src="${escapeHtml(theme.logoAbsoluteUrl)}" alt="${alt}" height="${theme.logoHeight}" style="display:block;height:${theme.logoHeight}px;width:auto;margin:0 auto;border:0;">`;
   }
-  return `<img src="cid:${escapeHtml(logo.cid)}" alt="${alt}" width="${logo.width}" height="${logo.height}" style="display:block;width:${logo.width}px;height:${logo.height}px;margin:0 auto 20px;border:0;">`;
+  return `<img src="cid:${escapeHtml(logo.cid)}" alt="${alt}" width="${logo.width}" height="${logo.height}" style="display:block;width:${logo.width}px;height:${logo.height}px;margin:0 auto;border:0;">`;
 }
 
 /**
@@ -90,56 +92,103 @@ export function embedLogo(message, logo) {
 
 // E-post-HTML må ha stilene inline – e-postklienter ignorerer stilark. Fargene kommer fra temaet
 // og er allerede validert (se theme.js), så de kan trygt settes inn i style-attributter.
+//
+// Outlook for Windows tegner e-post med Word, som bare forstår en liten del av CSS. Derfor:
+// - Oppsettet er tabeller, ikke <div>: Word ignorerer max-width, border-radius og padding på <div>.
+//   Bredden på 560 piksler settes i en tabell bare Outlook ser (<!--[if mso]>), andre bruker max-width.
+// - Bakgrunnsfarger står på tabellceller (bgcolor og background) – ikke på <body> eller <a>. En farge
+//   på <a> blir i Word bare en markering bak teksten.
+// - Knappene er tabellceller med farge og luft (padding, og mso-padding-alt for Outlook), med lenken inni.
+// - Alle tabeller har cellpadding="0" cellspacing="0" border="0", og tekst har fast linjehøyde i piksler
+//   (mso-line-height-rule:exactly). Ellers legger Word på sine egne mellomrom mellom radene.
+// - Avsnitt har egen margin, så mellomrommene er de samme i alle e-postklienter.
+const SANS = 'Arial,Helvetica,sans-serif';
+const SERIF = "Georgia,'Times New Roman',serif";
+const TABLE = 'role="presentation" cellpadding="0" cellspacing="0" border="0"';
+
 function emailUi(site) {
   const { theme, t, lang } = site;
   const c = theme.colors;
   const brand = theme.logoAbsoluteUrl
     ? logoImg(theme)
     : theme.siteName
-      ? `<p style="text-align:center;margin:0 0 20px;font-family:Arial,sans-serif;font-size:13px;letter-spacing:2px;text-transform:uppercase;color:${c.accent};">${escapeHtml(theme.siteName)}</p>`
+      ? `<p style="margin:0;font-family:${SANS};font-size:13px;line-height:18px;mso-line-height-rule:exactly;letter-spacing:2px;text-transform:uppercase;color:${c.accent};">${escapeHtml(theme.siteName)}</p>`
       : '';
-  const p = (html) => `<p style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;">${html}</p>`;
-  const link = (href, labelHtml) => `<a href="${escapeHtml(href)}" style="color:${c.accent};">${labelHtml}</a>`;
+  const p = (html) => `<p style="margin:0 0 16px;font-family:${SANS};font-size:15px;line-height:22px;mso-line-height-rule:exactly;color:${c.text};">${html}</p>`;
+  const link = (href, labelHtml) => `<a href="${escapeHtml(href)}" style="color:${c.accent};text-decoration:underline;">${labelHtml}</a>`;
+  // En knapp: fargen og luften ligger på tabellcellen, så Outlook tegner en ekte knapp.
+  const buttonCell = (href, label, { background, color, radius, padding, fontSize, bold = false }) => `<table ${TABLE}><tr>
+<td bgcolor="${background}" style="background:${background};border-radius:${radius}px;mso-padding-alt:${padding};">
+<a href="${escapeHtml(href)}" style="display:inline-block;padding:${padding};border-radius:${radius}px;background:${background};color:${color};text-decoration:none;font-family:${SANS};font-size:${fontSize}px;line-height:20px;mso-line-height-rule:exactly;${bold ? 'font-weight:bold;' : ''}"><span style="color:${color};">${escapeHtml(label)}</span></a>
+</td></tr></table>`;
 
   return {
     t,
     lang,
     p,
     link,
-    h1: (text) => `<h1 style="font-weight:normal;font-size:26px;margin:0 0 8px;">${escapeHtml(text)}</h1>`,
+    h1: (text) => `<h1 style="margin:0 0 16px;font-family:${SERIF};font-weight:normal;font-size:26px;line-height:32px;mso-line-height-rule:exactly;color:${c.text};">${escapeHtml(text)}</h1>`,
+    h2: (text) => `<h2 style="margin:24px 0 8px;font-family:${SERIF};font-weight:normal;font-size:19px;line-height:26px;mso-line-height-rule:exactly;color:${c.text};">${escapeHtml(text)}</h2>`,
     layout(title, bodyHtml) {
       return `<!doctype html>
-<html lang="${escapeHtml(lang)}"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head>
-<body style="margin:0;padding:24px 12px;background:${c.background};font-family:Georgia,'Times New Roman',serif;color:${c.text};">
-  <div style="max-width:560px;margin:0 auto;">
-    ${brand}
-    <div style="background:${c.surface};border:1px solid ${c.border};border-radius:6px;padding:32px 28px;">
-      ${bodyHtml}
-    </div>
-  </div>
+<html lang="${escapeHtml(lang)}"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>${escapeHtml(title)}</title></head>
+<body style="margin:0;padding:0;background:${c.background};">
+<table ${TABLE} width="100%" bgcolor="${c.background}" style="width:100%;background:${c.background};">
+<tr><td align="center" style="padding:24px 12px;">
+<!--[if mso]><table ${TABLE} width="560" align="center"><tr><td><![endif]-->
+<table ${TABLE} width="100%" style="width:100%;max-width:560px;">
+${brand ? `<tr><td align="center" style="padding:0 0 20px;">${brand}</td></tr>` : ''}
+<tr><td bgcolor="${c.surface}" style="background:${c.surface};border:1px solid ${c.border};border-radius:6px;padding:32px 28px;font-family:${SERIF};color:${c.text};">
+${bodyHtml}
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</td></tr>
+</table>
 </body></html>`;
     },
     detailsTable(rows) {
+      const cell = `font-family:${SANS};font-size:14px;line-height:20px;mso-line-height-rule:exactly;vertical-align:top;`;
       const html = rows
         .filter(([, value]) => value)
-        .map(([label, value]) => `<tr>
-          <td style="padding:6px 16px 6px 0;color:${c.muted};vertical-align:top;white-space:nowrap;font-family:Arial,sans-serif;font-size:14px;">${escapeHtml(label)}</td>
-          <td style="padding:6px 0;font-family:Arial,sans-serif;font-size:14px;">${escapeHtml(value)}</td>
-        </tr>`)
+        .map(([label, value]) => `<tr><td style="${cell}padding:4px 16px 4px 0;color:${c.muted};white-space:nowrap;">${escapeHtml(label)}</td><td style="${cell}padding:4px 0;color:${c.text};">${escapeHtml(value)}</td></tr>`)
         .join('');
-      return `<table style="border-collapse:collapse;margin:16px 0;">${html}</table>`;
+      return `<table ${TABLE} style="border-collapse:collapse;margin:0 0 16px;">${html}</table>`;
     },
     button(href, label) {
-      return `<p style="margin:24px 0;"><a href="${escapeHtml(href)}" style="display:inline-block;background:${c.accent};color:${c.accentText};text-decoration:none;padding:12px 20px;border-radius:4px;font-family:Arial,sans-serif;font-size:15px;">${escapeHtml(label)}</a></p>`;
+      const button = buttonCell(href, label, {
+        background: c.accent, color: c.accentText, radius: 4, padding: '12px 20px', fontSize: 15,
+      });
+      return `<table ${TABLE}><tr><td style="padding:8px 0 24px;">${button}</td></tr></table>`;
     },
     small(html) {
-      return p(`<span style="color:${c.muted};font-size:13px;">${html}</span>`);
+      return `<p style="margin:0 0 16px;font-family:${SANS};font-size:13px;line-height:19px;mso-line-height-rule:exactly;color:${c.muted};">${html}</p>`;
     },
-    /** Svarte knapper for Apple Wallet og Google Wallet, side om side (brytes på smale skjermer). */
+    /**
+     * Svarte knapper for Apple Wallet og Google Wallet, side om side. Hver knapp er en tabell med
+     * align="left", så de legger seg etter hverandre og brytes til neste linje på smale skjermer – også i
+     * Outlook. Den ytre cellen holder på dem, så teksten under ikke legger seg ved siden av.
+     */
     walletButtons(buttons) {
       if (!buttons.length) return '';
-      const one = ([href, label]) => `<a href="${escapeHtml(href)}" style="display:inline-block;background:#000000;color:#ffffff;text-decoration:none;padding:11px 18px;margin:0 8px 8px 0;border-radius:8px;font-family:Arial,sans-serif;font-size:14px;font-weight:bold;">${escapeHtml(label)}</a>`;
-      return `<p style="margin:0 0 16px;">${buttons.map(one).join('')}</p>`;
+      const one = ([href, label]) => `<table ${TABLE} align="left"><tr><td style="padding:0 8px 8px 0;">${buttonCell(href, label, {
+        background: '#000000', color: '#ffffff', radius: 8, padding: '11px 18px', fontSize: 14, bold: true,
+      })}</td></tr></table>`;
+      return `<table ${TABLE} width="100%" style="width:100%;"><tr><td style="padding:0 0 8px;">${buttons.map(one).join('')}</td></tr></table>`;
+    },
+    /** Sitat, f.eks. arrangørens melding ved avlysning: en celle med farget kant til venstre. */
+    quote(text) {
+      return `<table ${TABLE} width="100%" style="width:100%;margin:0 0 16px;"><tr><td bgcolor="${c.background}" style="background:${c.background};border-left:3px solid ${c.accent};padding:12px 16px;font-family:${SANS};font-size:15px;line-height:22px;mso-line-height-rule:exactly;color:${c.text};white-space:pre-line;">${escapeHtml(text)}</td></tr></table>`;
+    },
+    /** Punktliste (ul) eller nummerert liste (ol) med faste mellomrom. */
+    list(tag, itemsHtml, fontSize = 15) {
+      const lineHeight = fontSize === 15 ? 22 : 21;
+      return `<${tag} style="margin:0 0 16px;padding-left:22px;font-family:${SANS};font-size:${fontSize}px;line-height:${lineHeight}px;mso-line-height-rule:exactly;color:${c.text};">${itemsHtml.map((item) => `<li style="margin:0 0 4px;">${item}</li>`).join('')}</${tag}>`;
     },
     /** Lenker på én linje, skilt med «·». */
     linkLine(items) {
@@ -197,7 +246,7 @@ function personLinkList(ui, links = {}) {
 function personsHtml(ui, event, persons) {
   if (persons.length === 1) return ui.detailsTable(personRows(ui, event, persons[0]));
   return persons.map((person, i) => `
-    <h2 style="font-weight:normal;font-size:19px;margin:20px 0 0;">${escapeHtml(ui.t('email.person', { n: i + 1 }))}</h2>
+    ${ui.h2(ui.t('email.person', { n: i + 1 }))}
     ${ui.detailsTable(personRows(ui, event, person))}
     ${ui.linkLine(personLinkList(ui, person.links))}`).join('');
 }
@@ -400,7 +449,6 @@ export function eventCreated({
     : t('email.eventCreated.intro');
   const by = forAdmin && createdBy ? t('email.eventCreated.createdBy', { email: createdBy }) : '';
   const lines = reportAt && deleteAt ? lifecycleLines(ui, { event, timeZone, reportAt, deleteAt }) : [];
-  const h2 = (text) => `<h2 style="font-weight:normal;font-size:19px;margin:24px 0 4px;">${escapeHtml(text)}</h2>`;
 
   const html = ui.layout(subject, `
     ${ui.h1(event.title)}
@@ -410,8 +458,8 @@ export function eventCreated({
     ${ui.detailsTable(eventRows(ui, event, timeZone))}
     ${ui.p(adminInfo)}
     ${ui.button(adminUrl, t('email.eventCreated.adminButton'))}
-    ${scannerUrl ? `${h2(t('email.eventCreated.scannerHeading'))}${ui.p(escapeHtml(t('email.eventCreated.scannerInfo')))}${ui.p(ui.link(scannerUrl, escapeHtml(scannerUrl)))}` : ''}
-    ${lines.length ? `${h2(t('email.eventCreated.nextHeading'))}<ul style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;padding-left:20px;">${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>` : ''}
+    ${scannerUrl ? `${ui.h2(t('email.eventCreated.scannerHeading'))}${ui.p(escapeHtml(t('email.eventCreated.scannerInfo')))}${ui.p(ui.link(scannerUrl, escapeHtml(scannerUrl)))}` : ''}
+    ${lines.length ? `${ui.h2(t('email.eventCreated.nextHeading'))}${ui.list('ul', lines.map(escapeHtml))}` : ''}
     ${cancelEventUrl ? ui.small(ui.sentenceWithLink('email.eventCreated.cancelEvent', {}, cancelEventUrl, escapeHtml(t('email.linkHere')))) : ''}
   `);
   const text = [
@@ -448,9 +496,10 @@ export function deadlineReport({ event, registrations, count, scannerUrl, delete
   const deletion = t('email.eventCreated.deletion', { date: formatDateTime(deleteAt.toISOString(), timeZone, ui.lang) });
 
   const list = registrations.length
-    ? `<ol style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;padding-left:22px;">${registrations
-      .map((r) => { const [name, extra] = who(r); return `<li>${escapeHtml(name)}${extra ? ` <span style="color:${site.theme.colors.muted};">– ${escapeHtml(extra)}</span>` : ''}</li>`; })
-      .join('')}</ol>`
+    ? ui.list('ol', registrations.map((r) => {
+      const [name, extra] = who(r);
+      return `${escapeHtml(name)}${extra ? ` <span style="color:${site.theme.colors.muted};">– ${escapeHtml(extra)}</span>` : ''}`;
+    }), 14)
     : ui.p(escapeHtml(t('email.report.none')));
 
   const html = ui.layout(subject, `
@@ -487,9 +536,7 @@ export function eventCancelledGuest({ event, booking, message, timeZone, site = 
   const { t } = ui;
   const subject = t('email.eventCancelled.subject', { title: event.title });
   const intro = t('email.eventCancelled.intro', { title: event.title, when: formatEventTime(event.startsAt, event.endsAt, timeZone, ui.lang) });
-  const quote = message
-    ? `<blockquote style="margin:16px 0;padding:12px 16px;border-left:3px solid ${site.theme.colors.accent};background:${site.theme.colors.background};font-family:Arial,sans-serif;font-size:15px;line-height:1.5;white-space:pre-line;">${escapeHtml(message)}</blockquote>`
-    : '';
+  const quote = message ? ui.quote(message) : '';
   const html = ui.layout(subject, `
     ${ui.h1(event.title)}
     ${ui.p(`${escapeHtml(t('email.greeting', { name: booking.contactName }))} ${escapeHtml(intro)}`)}

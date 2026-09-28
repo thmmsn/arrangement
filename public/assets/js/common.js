@@ -56,13 +56,16 @@ export function h(tag, attrs = {}, ...children) {
   return el;
 }
 
-/** Slug fra adressen: «k7hq2mxpr9az» fra både /k7hq2mxpr9az, /k7hq2mxpr9az/avmelding og /admin/k7hq2mxpr9az. */
+/**
+ * Slug fra adressen: «k7hq2mxpr9az» fra /k7hq2mxpr9az, /k7hq2mxpr9az/avmelding, /admin/k7hq2mxpr9az,
+ * /dorvakt/k7hq2mxpr9az og den eldre dørvaktadressen /k7hq2mxpr9az/skanner.
+ */
 export function slugFromPath() {
   const parts = location.pathname.split('/').filter(Boolean);
-  return (parts[0] === 'admin' ? parts[1] : parts[0])?.toLowerCase() || '';
+  return (parts[0] === 'admin' || parts[0] === 'dorvakt' ? parts[1] : parts[0])?.toLowerCase() || '';
 }
 
-/** Hemmeligheten etter # i adressen (admin-nøkkel eller avmeldingsnøkkel). */
+/** Hemmeligheten etter # i adressen (admin-nøkkel, opprettingsnøkkel, dørvaktnøkkel eller avmeldingsnøkkel). */
 export function secretFromHash() {
   return decodeURIComponent(location.hash.slice(1));
 }
