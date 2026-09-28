@@ -24,7 +24,7 @@ export default {
     genericError: 'Noe gikk galt ({status})',
     copy: 'Kopier',
     copied: 'Kopiert!',
-    copyPrompt: 'Kopier teksten:',
+    copyFailed: 'Kunne ikke kopiere – merk teksten og kopier den',
     remove: 'Fjern',
     open: 'Åpne',
     privacy: 'Personvern',

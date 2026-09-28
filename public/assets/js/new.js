@@ -41,7 +41,7 @@ function linkBox(label, url) {
   const field = h('input', { type: 'text', value: url, readOnly: true, 'aria-label': label });
   field.addEventListener('focus', () => field.select());
   const copy = h('button', { class: 'btn secondary small', type: 'button' }, t('common.copy'));
-  copy.addEventListener('click', () => copyToClipboard(url, copy));
+  copy.addEventListener('click', () => copyToClipboard(url, copy, field));
   return h('div', { class: 'form-row' },
     h('span', { class: 'label' }, label),
     h('div', { class: 'linkbox' }, field, copy));

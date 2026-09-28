@@ -4,7 +4,7 @@
 // For en dørvakt (logget inn med dørvaktlenken på denne telefonen): /t/ sjekker gjesten inn med én
 // gang og viser grønt, gult eller rødt – med «Angre». Innsjekkingen er en POST fra siden, aldri bare
 // det at lenken åpnes (e-postprogrammer og forhåndsvisninger åpner lenker av seg selv).
-import { api, formatDay, formatEventTime, formatTime, h, notice, t } from './common.js';
+import { api, formatDay, formatEventTime, formatTime, h, notice, t, writeClipboard } from './common.js';
 import { feedback, resultView } from './staff.js';
 
 const app = document.getElementById('app');
@@ -120,7 +120,8 @@ function ticketTools(ticket, event, links) {
     links.pdf ? h('a', { class: 'btn small secondary', href: `${ticket.path}/pdf`, target: '_blank' }, t('links.pdf')) : null);
 }
 
-// Delingsmenyen på telefonen (Web Share). Nettlesere uten den (f.eks. Firefox på PC) kopierer teksten.
+// Delingsmenyen på telefonen (Web Share). Nettlesere uten den (f.eks. Firefox på PC) kopierer teksten –
+// også over vanlig HTTP (LAN-porten), se writeClipboard.
 async function shareTicket(ticket, event, button) {
   const text = [
     t('ticket.shareText', { title: event.title, name: ticket.name }),
@@ -133,8 +134,7 @@ async function shareTicket(ticket, event, button) {
     } catch { /* avbrutt av brukeren */ }
     return;
   }
-  await navigator.clipboard.writeText(text);
-  button.textContent = t('ticket.copied', { name: ticket.name });
+  button.textContent = await writeClipboard(text) ? t('ticket.copied', { name: ticket.name }) : t('common.copyFailed');
 }
 
 function staffButton(event, ticket) {

@@ -24,7 +24,7 @@ export default {
     genericError: 'Something went wrong ({status})',
     copy: 'Copy',
     copied: 'Copied!',
-    copyPrompt: 'Copy the text:',
+    copyFailed: 'Could not copy – select the text and copy it',
     remove: 'Remove',
     open: 'Open',
     privacy: 'Privacy',

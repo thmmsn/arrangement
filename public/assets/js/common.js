@@ -162,13 +162,57 @@ export function notice(type, ...content) {
   return h('div', { class: `notice ${type}`, role: type === 'error' ? 'alert' : 'status' }, ...content);
 }
 
-export async function copyToClipboard(text, button) {
+// Kopiering til utklippstavlen.
+// navigator.clipboard finnes bare i en «sikker kontekst» (HTTPS eller localhost). Over vanlig HTTP –
+// f.eks. den betrodde LAN-porten (http://192.168.…:3001) – mangler den. Da kopieres teksten via et
+// skjult tekstfelt og document.execCommand('copy'), som virker i alle nettlesere så lenge det skjer
+// rett etter et klikk. Ingen popup: teksten havner på utklippstavlen med én gang.
+function copyViaTextarea(text) {
+  const focused = document.activeElement;
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.readOnly = true; // hindrer at tastaturet dukker opp på mobil
+  area.setAttribute('aria-hidden', 'true');
+  area.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;';
+  document.body.append(area);
+  area.select();
+  area.setSelectionRange(0, text.length); // iOS velger ellers ingenting
+  let copied = false;
   try {
-    await navigator.clipboard.writeText(text);
-    const original = button.textContent;
-    button.textContent = t('common.copied');
-    setTimeout(() => { button.textContent = original; }, 1500);
+    copied = document.execCommand('copy');
   } catch {
-    prompt(t('common.copyPrompt'), text);
+    copied = false;
+  }
+  area.remove();
+  focused?.focus?.({ preventScroll: true });
+  return copied;
+}
+
+/** Legger `text` på utklippstavlen. Gir true når det lyktes. */
+export async function writeClipboard(text) {
+  if (window.isSecureContext && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch { /* f.eks. nektet av nettleseren – prøv den andre måten */ }
+  }
+  return copyViaTextarea(text);
+}
+
+/**
+ * Kopier-knappen: kopierer `text` og viser «Kopiert!» på knappen en liten stund. Lykkes det ikke
+ * (svært sjelden), merkes teksten i `field` (lenkefeltet ved siden av knappen), så den kan kopieres
+ * med tastatur eller langt trykk – uten popup.
+ */
+export async function copyToClipboard(text, button, field = null) {
+  const copied = await writeClipboard(text);
+  const original = button.dataset.label ?? button.textContent;
+  button.dataset.label = original;
+  button.textContent = t(copied ? 'common.copied' : 'common.copyFailed');
+  clearTimeout(button.copyTimer);
+  button.copyTimer = setTimeout(() => { button.textContent = original; }, copied ? 1500 : 4000);
+  if (!copied && field) {
+    field.focus();
+    field.select();
   }
 }

@@ -86,7 +86,7 @@ function render() {
 function overviewCard() {
   const url = event.url;
   const copy = h('button', { class: 'btn secondary small', type: 'button' }, t('common.copy'));
-  copy.addEventListener('click', () => copyToClipboard(url, copy));
+  copy.addEventListener('click', () => copyToClipboard(url, copy, field));
   const field = h('input', { type: 'text', value: url, readOnly: true, 'aria-label': t('admin.link') });
   field.addEventListener('focus', () => field.select());
 
@@ -208,7 +208,7 @@ function scannerCard() {
   const field = h('input', { type: 'text', value: event.scannerUrl, readOnly: true, 'aria-label': t('admin.scannerHeading') });
   field.addEventListener('focus', () => field.select());
   const copy = h('button', { class: 'btn secondary small', type: 'button' }, t('common.copy'));
-  copy.addEventListener('click', () => copyToClipboard(event.scannerUrl, copy));
+  copy.addEventListener('click', () => copyToClipboard(event.scannerUrl, copy, field));
   const rotate = h('button', { class: 'btn danger small', type: 'button' }, t('admin.scannerRotate'));
   rotate.addEventListener('click', async () => {
     if (!confirm(t('admin.scannerRotateConfirm'))) return;
