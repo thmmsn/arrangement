@@ -74,7 +74,7 @@ test('ugyldige verdier ignoreres med advarsel – ingen CSS- eller HTML-injeksjo
 
 // Hjelper: åpner arrangementssiden og henter nettstedets temastilark som siden lenker til.
 async function eventPageWithCss(env) {
-  const app = await startApp({ ADMIN_PASSWORD: 'hemmelig', ...env });
+  const app = await startApp({ ADMIN_NO_AUTH: 'true', ...env });
   const { slug } = await createEvent(app);
   const page = await app.request({ path: `/${slug}` });
   assert.equal(page.status, 200);

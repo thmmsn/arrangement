@@ -78,7 +78,7 @@ main { flex: 1; padding: 40px 0 64px; }
 
 .brand img { display: block; height: var(--logo-height, 44px); width: auto; max-width: 100%; }
 
-.home-text { white-space: pre-line; }
+
 
 .site-footer {
   border-top: 1px solid var(--line);
@@ -220,7 +220,6 @@ label, .label {
   margin-bottom: 6px;
 }
 .required-mark { color: var(--accent); margin-left: 2px; }
-.hint { display: block; font-weight: 400; color: var(--muted); font-size: 14px; margin-top: 4px; }
 
 input[type='text'], input[type='email'], input[type='tel'], input[type='number'],
 input[type='url'], input[type='password'], input[type='datetime-local'], select, textarea {

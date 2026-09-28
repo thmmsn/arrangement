@@ -9,7 +9,7 @@ const MAIN = 'booking.example.no';
 const COM = 'booking.example.com';
 const ADMIN = 'booking-admin.example.no';
 const TWO_SITES = {
-  ADMIN_PASSWORD: 'hemmelig',
+  ADMIN_NO_AUTH: 'true',
   DOMAIN: MAIN,
   SITE_NAME: 'Eksempel',
   LOGO_URL: '/assets/custom/logo.svg',
@@ -174,7 +174,7 @@ describe('301 til riktig domene', () => {
   test('ukjent nettsted i skjemaet avvises (på admin-språket)', async () => {
     const app = await startApp(TWO_SITES);
     const res = await app.request({
-      method: 'POST', path: '/api/admin/events', headers: { 'x-admin-password': 'hemmelig' },
+      method: 'POST', path: '/api/admin/events',
       body: { title: 'X', startsAt: '2030-01-01T10:00:00Z', organizerName: 'A', organizerEmail: 'a@example.com', site: 'finnes-ikke' },
     });
     assert.equal(res.status, 400);

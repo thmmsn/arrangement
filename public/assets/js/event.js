@@ -157,8 +157,8 @@ function personBlock({ contact, onRemove }) {
       h('input', { id: nameId, 'data-name': true, type: 'text', autocomplete: contact ? 'name' : 'off', required: true, maxLength: 200 })),
     row('email',
       contact
-        ? h('label', { for: emailId }, t('form.email'), requiredMark(), h('span', { class: 'hint' }, t('form.emailHintContact')))
-        : h('label', { for: emailId }, t('form.email'), h('span', { class: 'hint' }, t('form.emailHintGuest'))),
+        ? h('label', { for: emailId }, t('form.email'), requiredMark())
+        : h('label', { for: emailId }, t('form.email')),
       h('input', { id: emailId, 'data-email': true, type: 'email', autocomplete: contact ? 'email' : 'off', required: contact, maxLength: 254 })),
     event.fields.map(fieldInput),
   );
@@ -239,8 +239,7 @@ function registrationForm() {
     people,
     canAdd
       ? h('div', { class: 'add-person', 'data-error-for': 'guests' },
-        h('div', { class: 'actions' }, addButton, addHint),
-        h('p', { class: 'muted small' }, t('form.addInfo')))
+        h('div', { class: 'actions' }, addButton, addHint))
       : null,
     // Honningkrukke mot roboter – skjult for mennesker og skjermlesere.
     h('div', { class: 'hp', 'aria-hidden': 'true' },

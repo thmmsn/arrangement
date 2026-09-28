@@ -70,7 +70,7 @@ export function eventInput(overrides = {}) {
 /** Oppretter et arrangement via admin-API-et og returnerer { slug, adminKey, eventUrl, adminUrl }. */
 export async function createEvent(app, overrides = {}, headers = {}) {
   const res = await app.request({
-    method: 'POST', path: '/api/admin/events', headers: { 'x-admin-password': 'hemmelig', ...headers }, body: eventInput(overrides),
+    method: 'POST', path: '/api/admin/events', headers, body: eventInput(overrides),
   });
   if (res.status !== 201) throw new Error(`Kunne ikke opprette arrangement: ${res.status} ${res.text}`);
   return res.json;

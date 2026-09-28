@@ -10,8 +10,11 @@ const mailer = createMailer({ apiKey: config.resendApiKey, from: config.emailFro
 const app = createApp({ repo, mailer, config });
 
 for (const warning of config.warnings) console.warn(`ADVARSEL: ${warning}`);
-if (!config.adminPassword && !(config.cfAccessTeamDomain && config.cfAccessAudiences.length)) {
-  console.warn('ADVARSEL: verken ADMIN_PASSWORD eller Cloudflare Access er satt opp – ingen kan opprette nye arrangementer.');
+const accessEnabled = Boolean(config.cfAccessTeamDomain && config.cfAccessAudiences.length);
+if (!accessEnabled && config.adminNoAuth) {
+  console.warn('ADVARSEL: ADMIN_NO_AUTH=true – alle som når /admin kan opprette arrangementer. Bare for lokal utvikling!');
+} else if (!accessEnabled) {
+  console.warn('ADVARSEL: Cloudflare Access er ikke satt opp (CF_ACCESS_TEAM_DOMAIN og CF_ACCESS_AUD) – ingen kan opprette nye arrangementer.');
 }
 if (config.cfAccessTeamDomain) {
   console.log(`Admin krever Cloudflare Access (${config.cfAccessTeamDomain}).`);

@@ -10,12 +10,12 @@ test('lenkene bygges fra DOMAIN når BASE_URL mangler', () => {
 
 // `docker run --env-file` beholder anførselstegn bokstavelig – de skal ikke havne i avsenderadressen.
 test('omsluttende anførselstegn fjernes', () => {
-  const config = loadConfig({ EMAIL_FROM: '"Påmelding <booking@domain.com>"', ADMIN_PASSWORD: "'hemmelig'" });
+  const config = loadConfig({ EMAIL_FROM: '"Påmelding <booking@domain.com>"', TIME_ZONE: "'Europe/Oslo'" });
   assert.equal(config.emailFrom, 'Påmelding <booking@domain.com>');
-  assert.equal(config.adminPassword, 'hemmelig');
+  assert.equal(config.timeZone, 'Europe/Oslo');
   // Anførselstegn inne i verdien, eller bare på én side, røres ikke.
-  assert.equal(loadConfig({ ADMIN_PASSWORD: 'a"b"' }).adminPassword, 'a"b"');
-  assert.equal(loadConfig({ ADMIN_PASSWORD: '"' }).adminPassword, '"');
+  assert.equal(loadConfig({ RESEND_API_KEY: 'a"b"' }).resendApiKey, 'a"b"');
+  assert.equal(loadConfig({ RESEND_API_KEY: '"' }).resendApiKey, '"');
 });
 
 test('TRUST_PROXY tolkes som tall eller boolsk verdi', () => {

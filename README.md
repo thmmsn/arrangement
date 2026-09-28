@@ -51,11 +51,11 @@ Krever Node.js 22.9 eller nyere (og Python + C++-kompilator for `better-sqlite3`
 
 ```bash
 npm install
-cp .env.example .env      # tøm DOMAIN, og sett ADMIN_PASSWORD
+cp .env.example .env      # tøm DOMAIN, og sett ADMIN_NO_AUTH=true
 npm run dev               # starter på http://localhost:3000 og laster på nytt ved endringer
 ```
 
-1. Gå til <http://localhost:3000/admin/ny>, skriv inn `ADMIN_PASSWORD` og opprett et arrangement.
+1. Gå til <http://localhost:3000/admin/ny> og opprett et arrangement. Lokalt, uten Cloudflare Access, må `ADMIN_NO_AUTH=true` være satt – ellers er oppretting slått av.
 2. Du får en påmeldingslenke og en administrasjonslenke.
 3. Uten `RESEND_API_KEY` skrives e-postene til terminalen, så du ser nøyaktig hva som ville blitt sendt (inkludert avmeldingslenken).
 
@@ -135,11 +135,11 @@ Med flere nettsteder er A det klart beste valget: ellers finnes `/admin` på hve
 
 **B. Samme domene, egne stier:** Lag én Access-applikasjon for `booking.domain.com` med **to** stier: `admin` og `api/admin`. Glemmer du `api/admin`, er selve dataene ubeskyttet av Access – derfor anbefales C i tillegg.
 
-**C. La appen verifisere Access (anbefalt i tillegg til A eller B):**
+**C. La appen verifisere Access (påkrevd, i tillegg til A eller B):**
 
 Sett `CF_ACCESS_TEAM_DOMAIN` (Zero Trust → Settings → Custom Pages → *Team domain*) og `CF_ACCESS_AUD` (applikasjonens *Application Audience (AUD) Tag*). Da sjekker appen selv signaturen på Access-tokenet Cloudflare sender med hver forespørsel, og avviser alt til `/admin` og `/api/admin` som ikke har passert Access. En feilkonfigurert Access-regel kan dermed ikke gjøre admin offentlig.
 
-Med C kan `ADMIN_PASSWORD` stå tomt – Access er innloggingen. Settes det likevel, kreves det i tillegg.
+Access er den eneste innloggingen – det finnes ikke noe passord. Uten C er oppretting av arrangementer derfor slått av, slik at en glemt innstilling aldri gjør det mulig for hvem som helst å opprette arrangementer og sende e-post i ditt navn. For lokal utvikling uten Access finnes `ADMIN_NO_AUTH=true`, som appen varsler tydelig om ved oppstart, og som ikke har noen virkning når Access er satt opp.
 
 **Arrangører:** Admin-lenken per arrangement (`/admin/<hash>#<nøkkel>`) krever fortsatt sin egen nøkkel. Med Access må arrangørene i tillegg slippes inn av Access-policyen – legg til e-postadressene deres der, eller behold administrasjonen for deg selv.
 
@@ -151,8 +151,8 @@ Med C kan `ADMIN_PASSWORD` stå tomt – Access er innloggingen. Settes det like
 | `ADMIN_HOST` | At admin i det hele tatt finnes på det offentlige domenet |
 | Appens egen Access-sjekk (`CF_ACCESS_*`) | Feilkonfigurerte Access-regler |
 | Admin-nøkkel per arrangement | At én arrangør ser andres arrangementer |
-| `ADMIN_PASSWORD` (valgfritt med Access) | Oppretting av arrangementer uten Access |
-| Rate limiting per ekte klient-IP | Gjetting av passord (maks 20 forsøk per 15 min) |
+| Oppretting slått av uten Access | At en glemt innstilling åpner for oppretting |
+| Rate limiting per ekte klient-IP | Masseoppretting og spam (maks 20 nye arrangementer per 15 min) |
 
 ### Sikkerhetskopi
 
@@ -340,7 +340,7 @@ test/            Tester (node:test)
 | `POST` | `/api/events/:slug/cancel/lookup` | Avmeldingsnøkkel i body. Gir personene i påmeldingen |
 | `POST` | `/api/events/:slug/cancel` | Avmeldingsnøkkel i body. `ids` (valgfritt) velger hvem; uten `ids` meldes alle av |
 | `GET` | `/api/admin/config` | Admin-porten. Gir bl.a. nettstedene som kan velges |
-| `POST` | `/api/admin/events` | Admin-porten + `X-Admin-Password` (hvis satt). `site` velger nettsted (standard hovednettstedet) |
+| `POST` | `/api/admin/events` | Admin-porten (krever Cloudflare Access). `site` velger nettsted (standard hovednettstedet) |
 | `GET` / `PUT` / `DELETE` | `/api/admin/events/:slug` | Admin-porten + `Authorization: Bearer <admin-nøkkel>` |
 | `DELETE` | `/api/admin/events/:slug/registrations/:id` | Admin-porten + `Authorization: Bearer <admin-nøkkel>` |
 | `GET` | `/api/admin/events/:slug/registrations.csv` | Admin-porten + `Authorization: Bearer <admin-nøkkel>` |

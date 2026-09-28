@@ -169,7 +169,6 @@ export function guestConfirmation({ event, booking, eventUrl, cancelUrl, timeZon
     ${ui.detailsTable(eventRows(ui, event, timeZone))}
     ${personsHtml(ui, event, persons)}
     ${ui.button(eventUrl, t('email.confirmation.viewEvent'))}
-    ${ui.p(escapeHtml(t('email.confirmation.questions')))}
     ${ui.small(ui.sentenceWithLink(cancelKey, {}, cancelUrl, escapeHtml(t('email.linkHere'))))}
   `);
   const text = `${t('email.greeting', { name: contactName })}
@@ -181,8 +180,6 @@ ${detailsText(eventRows(ui, event, timeZone))}
 ${personsText(ui, event, persons)}
 
 ${t('email.confirmation.viewEventText', { url: eventUrl })}
-
-${t('email.confirmation.questions')}
 
 ${t(`${cancelKey}Text`, { url: cancelUrl })}`;
   return { from: site.emailFrom, to: contactEmail, subject, html, text, replyTo: event.organizerEmail };
@@ -205,15 +202,12 @@ export function organizerNotification({ event, booking, count, site = DEFAULT_SI
     ${ui.p(escapeHtml(intro))}
     ${personsHtml(ui, event, persons)}
     ${ui.p(escapeHtml(status))}
-    ${ui.small(escapeHtml(t('email.notification.adminHint')))}
   `);
   const text = `${intro}
 
 ${personsText(ui, event, persons)}
 
-${status}
-
-${t('email.notification.adminHint')}`;
+${status}`;
   return { from: site.emailFrom, to: event.organizerEmail, subject, html, text, replyTo: contactEmail };
 }
 

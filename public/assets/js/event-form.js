@@ -17,16 +17,15 @@ const PRESETS = [
  * @param {string} opts.timeZone       Tidssonen tidspunktene tolkes i
  * @param {{id: string, label: string, lang: string}[]} opts.sites  Nettstedene som kan velges
  * @param {boolean} [opts.editing]     Viser «påmelding åpen»-bryteren
- * @param {Node[]} [opts.prepend]      Ekstra elementer øverst i skjemaet (f.eks. passordfelt)
  * @param {(payload: object) => Promise<void>} opts.onSubmit
  */
-export function createEventForm({ initial = {}, timeZone, sites = [], submitLabel, editing = false, prepend = [], onSubmit }) {
+export function createEventForm({ initial = {}, timeZone, sites = [], submitLabel, editing = false, onSubmit }) {
   // Kopier feltene så endringer ikke lekker ut før skjemaet lagres.
   let fields = (initial.fields || []).map((f) => ({ ...f, options: [...(f.options || [])] }));
 
-  const row = (name, label, input, hint) =>
+  const row = (name, label, input) =>
     h('div', { class: 'form-row', 'data-error-for': name },
-      h('label', { for: name }, label, hint ? h('span', { class: 'hint' }, hint) : null),
+      h('label', { for: name }, label),
       input);
 
   const required = (label) => `${label} *`;
@@ -63,35 +62,29 @@ export function createEventForm({ initial = {}, timeZone, sites = [], submitLabe
 
   const form = h('form', { novalidate: true },
     status,
-    ...prepend,
     h('fieldset', {},
       h('legend', {}, t('eventForm.legendAbout')),
-      sites.length > 1 ? row('site', t('eventForm.site'), site, t('eventForm.siteHint')) : null,
+      sites.length > 1 ? row('site', t('eventForm.site'), site) : null,
       row('title', required(t('eventForm.title')), input('title', { value: initial.title || '', maxLength: 200, required: true })),
-      row('description', t('eventForm.description'), description, t('eventForm.descriptionHint')),
+      row('description', t('eventForm.description'), description),
       row('location', t('eventForm.location'), input('location', { value: initial.location || '', maxLength: 300 })),
       h('div', { class: 'form-grid' },
         row('startsAt', required(t('eventForm.startsAt')),
           input('startsAt', { type: 'datetime-local', value: toLocalInput(initial.startsAt, timeZone), required: true })),
         row('endsAt', t('eventForm.endsAt'), input('endsAt', { type: 'datetime-local', value: toLocalInput(initial.endsAt, timeZone) })),
       ),
-      h('p', { class: 'muted small' }, t('eventForm.timeZoneNote', { timeZone })),
       row('imageUrl', t('eventForm.imageUrl'),
-        input('imageUrl', { type: 'url', value: initial.imageUrl || '', placeholder: 'https://…' }),
-        t('eventForm.imageUrlHint')),
+        input('imageUrl', { type: 'url', value: initial.imageUrl || '', placeholder: 'https://…' })),
     ),
     h('fieldset', {},
       h('legend', {}, t('eventForm.legendRegistration')),
       h('div', { class: 'form-grid' },
         row('capacity', t('eventForm.capacity'),
-          input('capacity', { type: 'number', min: 1, value: initial.capacity ?? '', placeholder: t('eventForm.capacityPlaceholder') }),
-          t('eventForm.capacityHint')),
+          input('capacity', { type: 'number', min: 1, value: initial.capacity ?? '', placeholder: t('eventForm.capacityPlaceholder') })),
         row('maxPerBooking', t('eventForm.maxPerBooking'),
-          input('maxPerBooking', { type: 'number', min: 1, max: 50, value: initial.maxPerBooking ?? 10 }),
-          t('eventForm.maxPerBookingHint')),
+          input('maxPerBooking', { type: 'number', min: 1, max: 50, value: initial.maxPerBooking ?? 10 })),
         row('registrationDeadline', t('eventForm.deadline'),
-          input('registrationDeadline', { type: 'datetime-local', value: toLocalInput(initial.registrationDeadline, timeZone) }),
-          t('eventForm.deadlineHint')),
+          input('registrationDeadline', { type: 'datetime-local', value: toLocalInput(initial.registrationDeadline, timeZone) })),
       ),
       h('div', { class: 'form-row' },
         h('label', { class: 'checkbox' },
@@ -101,7 +94,7 @@ export function createEventForm({ initial = {}, timeZone, sites = [], submitLabe
         ? h('div', { class: 'form-row' },
           h('label', { class: 'checkbox' },
             h('input', { type: 'checkbox', name: 'isOpen', checked: initial.isOpen ?? true }),
-            h('span', {}, t('eventForm.isOpen'), h('span', { class: 'hint' }, t('eventForm.isOpenHint')))))
+            h('span', {}, t('eventForm.isOpen'))))
         : null,
     ),
     h('fieldset', {},
@@ -110,13 +103,11 @@ export function createEventForm({ initial = {}, timeZone, sites = [], submitLabe
         row('organizerName', required(t('eventForm.organizerName')),
           input('organizerName', { value: initial.organizerName || '', maxLength: 200, required: true })),
         row('organizerEmail', required(t('eventForm.organizerEmail')),
-          input('organizerEmail', { type: 'email', value: initial.organizerEmail || '', required: true }),
-          t('eventForm.organizerEmailHint')),
+          input('organizerEmail', { type: 'email', value: initial.organizerEmail || '', required: true })),
       ),
     ),
     h('fieldset', { 'data-error-for': 'fields' },
       h('legend', {}, t('eventForm.legendForm')),
-      h('p', { class: 'muted small' }, t('eventForm.formIntro')),
       fieldList,
       h('div', { class: 'actions' },
         h('button', { class: 'btn secondary small', type: 'button', onclick: () => addField({ label: '', type: 'text', required: false }) },

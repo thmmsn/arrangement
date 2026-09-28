@@ -16,7 +16,7 @@ after(() => servers.forEach((s) => s.close()));
 async function start(configOverrides = {}, deps = {}) {
   const config = {
     baseUrl: 'https://booking.example.com',
-    adminPassword: '',
+    adminNoAuth: false,
     timeZone: 'Europe/Oslo',
     trustProxy: true, // Verste tilfelle: X-Forwarded-Host skal likevel ikke kunne lure admin-porten.
     rateLimits: { create: { windowMs: 60_000, max: 1000 } },
@@ -90,12 +90,12 @@ describe('ADMIN_HOST: admin bare på eget vertsnavn', () => {
   const ADMIN = 'booking-admin.example.com';
 
   test('admin-sider og admin-API finnes ikke på det offentlige domenet', async () => {
-    const port = await start({ adminHost: ADMIN, adminPassword: 'hemmelig' });
+    const port = await start({ adminHost: ADMIN, adminNoAuth: true });
     const pub = { host: 'booking.example.com' };
 
     assert.equal((await request(port, { path: '/admin/ny', headers: pub })).status, 404);
     assert.equal((await request(port, { path: '/api/admin/config', headers: pub })).status, 404);
-    const create = await request(port, { method: 'POST', path: '/api/admin/events', headers: { ...pub, 'x-admin-password': 'hemmelig' }, body: eventBody });
+    const create = await request(port, { method: 'POST', path: '/api/admin/events', headers: pub, body: eventBody });
     assert.equal(create.status, 404);
 
     // X-Forwarded-Host kan klienten sette selv – det skal ikke åpne admin på det offentlige domenet.
@@ -104,11 +104,11 @@ describe('ADMIN_HOST: admin bare på eget vertsnavn', () => {
   });
 
   test('på admin-vertsnavnet virker alt, og admin-lenken peker dit', async () => {
-    const port = await start({ adminHost: ADMIN, adminPassword: 'hemmelig' });
+    const port = await start({ adminHost: ADMIN, adminNoAuth: true });
     const adm = { host: ADMIN };
 
     assert.equal((await request(port, { path: '/admin/ny', headers: adm })).status, 200);
-    const create = await request(port, { method: 'POST', path: '/api/admin/events', headers: { ...adm, 'x-admin-password': 'hemmelig' }, body: eventBody });
+    const create = await request(port, { method: 'POST', path: '/api/admin/events', headers: adm, body: eventBody });
     assert.equal(create.status, 201);
     assert.equal(create.json.adminUrl, `https://${ADMIN}/admin/${create.json.slug}#${create.json.adminKey}`);
     assert.equal(create.json.eventUrl, `https://booking.example.com/${create.json.slug}`);
@@ -124,18 +124,18 @@ describe('ADMIN_HOST: admin bare på eget vertsnavn', () => {
   });
 
   test('admin kan ikke nås med store bokstaver (forbi en Access-regel på stien «admin»)', async () => {
-    const port = await start({ adminPassword: 'hemmelig' });
+    const port = await start({ adminNoAuth: true });
     assert.equal((await request(port, { path: '/admin/ny' })).status, 200);
     for (const path of ['/ADMIN/ny', '/Admin/ny', '/API/ADMIN/config', '/api/Admin/config', '/Api/admin/config']) {
       assert.equal((await request(port, { path })).status, 404, path);
     }
-    const create = await request(port, { method: 'POST', path: '/api/ADMIN/events', headers: { 'x-admin-password': 'hemmelig' }, body: eventBody });
+    const create = await request(port, { method: 'POST', path: '/api/ADMIN/events', body: eventBody });
     assert.equal(create.status, 404);
   });
 
   test('uten ADMIN_HOST sendes gamle admin-lenker til /admin på samme domene – bare for arrangementer som finnes', async () => {
-    const port = await start({ adminPassword: 'hemmelig' });
-    const created = await request(port, { method: 'POST', path: '/api/admin/events', headers: { 'x-admin-password': 'hemmelig' }, body: eventBody });
+    const port = await start({ adminNoAuth: true });
+    const created = await request(port, { method: 'POST', path: '/api/admin/events', body: eventBody });
     const legacy = await request(port, { path: `/${created.json.slug}/admin` });
     assert.equal(legacy.status, 301);
     assert.equal(legacy.headers.location, `/admin/${created.json.slug}`);
@@ -161,13 +161,14 @@ describe('Cloudflare Access-verifisering', () => {
   }
 
   test('admin uten gyldig token avvises – både sider og API', async () => {
-    const port = await startWithAccess({ adminPassword: 'hemmelig' });
+    // ADMIN_NO_AUTH skal ikke kunne åpne noe når Access er satt opp.
+    const port = await startWithAccess({ adminNoAuth: true });
     assert.equal((await request(port, { path: '/api/admin/config' })).status, 403);
     const page = await request(port, { path: '/admin/ny' });
     assert.equal(page.status, 403);
     assert.match(page.text, /Ingen tilgang/);
-    const create = await request(port, { method: 'POST', path: '/api/admin/events', headers: { 'x-admin-password': 'hemmelig' }, body: eventBody });
-    assert.equal(create.status, 403, 'riktig passord hjelper ikke uten Access-token');
+    const create = await request(port, { method: 'POST', path: '/api/admin/events', body: eventBody });
+    assert.equal(create.status, 403, 'ingen oppretting uten Access-token');
   });
 
   test('gyldig token slipper gjennom – fra header eller cookie', async () => {
@@ -176,12 +177,11 @@ describe('Cloudflare Access-verifisering', () => {
     const viaHeader = await request(port, { path: '/api/admin/config', headers: { 'cf-access-jwt-assertion': token } });
     assert.equal(viaHeader.status, 200);
     assert.equal(viaHeader.json.accessEmail, 'admin@example.com');
-    assert.equal(viaHeader.json.passwordRequired, false);
     const viaCookie = await request(port, { path: '/admin/ny', headers: { cookie: `annet=1; CF_Authorization=${token}` } });
     assert.equal(viaCookie.status, 200);
   });
 
-  test('med Access trengs ikke ADMIN_PASSWORD for å opprette arrangementer', async () => {
+  test('med gyldig Access-token kan arrangementer opprettes', async () => {
     const port = await startWithAccess();
     const headers = { 'cf-access-jwt-assertion': makeToken(key) };
     const res = await request(port, { method: 'POST', path: '/api/admin/events', headers, body: eventBody });
@@ -190,14 +190,6 @@ describe('Cloudflare Access-verifisering', () => {
     assert.equal((await request(port, { path: `/api/admin/events/${res.json.slug}`, headers })).status, 401);
     const withKey = await request(port, { path: `/api/admin/events/${res.json.slug}`, headers: { ...headers, authorization: `Bearer ${res.json.adminKey}` } });
     assert.equal(withKey.status, 200);
-  });
-
-  test('er ADMIN_PASSWORD satt, kreves det i tillegg til Access', async () => {
-    const port = await startWithAccess({ adminPassword: 'hemmelig' });
-    const headers = { 'cf-access-jwt-assertion': makeToken(key) };
-    assert.equal((await request(port, { method: 'POST', path: '/api/admin/events', headers, body: eventBody })).status, 401);
-    const ok = await request(port, { method: 'POST', path: '/api/admin/events', headers: { ...headers, 'x-admin-password': 'hemmelig' }, body: eventBody });
-    assert.equal(ok.status, 201);
   });
 
   test('ugyldige token avvises', async () => {

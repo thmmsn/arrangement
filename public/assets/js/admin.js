@@ -98,11 +98,10 @@ function overviewCard() {
     ),
     sites.length > 1 && site ? h('p', { class: 'muted small' }, t('admin.site', { site: site.label })) : null,
     h('div', { class: 'form-row' },
-      h('span', { class: 'label' }, t('admin.link'), h('span', { class: 'hint' }, t('admin.linkHint'))),
+      h('span', { class: 'label' }, t('admin.link')),
       h('div', { class: 'linkbox' }, field, copy,
         h('a', { class: 'btn secondary small', href: url, target: '_blank', rel: 'noopener' }, t('common.open')))),
-    h('div', { class: 'actions' }, toggle,
-      h('span', { class: 'muted small' }, event.showCount ? t('admin.countPublic') : t('admin.countHidden'))),
+    h('div', { class: 'actions' }, toggle),
   );
 }
 
@@ -202,7 +201,6 @@ function dangerCard() {
   });
   return h('section', { class: 'card' },
     h('h3', {}, t('admin.deleteHeading')),
-    h('p', { class: 'muted small' }, t('admin.deleteText')),
     button);
 }
 

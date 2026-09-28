@@ -19,8 +19,9 @@ export function loadConfig(rawEnv = process.env) {
     emailFrom: mainSite.emailFrom,
     warnings,
     databasePath: env.DATABASE_PATH || 'data/booking.db',
-    // Passordet som kreves for å opprette nye arrangementer. Tomt = oppretting er slått av.
-    adminPassword: env.ADMIN_PASSWORD || '',
+    // Oppretting av arrangementer uten Cloudflare Access. BARE for lokal utvikling – da kan alle som
+    // når /admin opprette arrangementer.
+    adminNoAuth: ['true', '1', 'yes', 'ja'].includes((env.ADMIN_NO_AUTH || '').trim().toLowerCase()),
     // Uten nøkkel skrives e-postene til konsollen i stedet for å sendes (nyttig i utvikling).
     resendApiKey: env.RESEND_API_KEY || '',
     // Tidssonen arrangementstider vises i, uavhengig av hvor gjesten befinner seg.

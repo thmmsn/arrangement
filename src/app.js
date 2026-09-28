@@ -226,16 +226,12 @@ export function createApp({ repo, mailer, config, logger = console, accessVerifi
     next();
   }
 
-  // Oppretting av nye arrangementer krever ADMIN_PASSWORD. Når Cloudflare Access verifiseres
-  // (adminGate har allerede sluppet forespørselen gjennom), kan passordet droppes.
+  // Oppretting av nye arrangementer krever Cloudflare Access (adminGate har da allerede verifisert
+  // tokenet). Uten Access er oppretting slått av – med mindre ADMIN_NO_AUTH=true er satt for lokal
+  // utvikling. Slik blir en glemt innstilling aldri til at hvem som helst kan opprette arrangementer
+  // og sende e-post i ditt navn.
   function requireCreator(req, res, next) {
-    if (config.adminPassword) {
-      if (!secretMatches(req.get('x-admin-password') || '', hashSecret(config.adminPassword))) {
-        return res.status(401).json({ error: adminT('errors.wrongPassword') });
-      }
-      return next();
-    }
-    if (accessVerifier) return next();
+    if (accessVerifier || config.adminNoAuth) return next();
     return res.status(403).json({ error: adminT('errors.creationDisabled') });
   }
 
@@ -413,7 +409,6 @@ export function createApp({ repo, mailer, config, logger = console, accessVerifi
 
   adminApi.get('/config', (req, res) => res.json({
     timeZone: config.timeZone,
-    passwordRequired: Boolean(config.adminPassword),
     accessEmail: req.accessUser?.email ?? null,
     // Nettstedene arrangøren kan velge mellom. Hovednettstedet først.
     sites: sites.map(({ id, label, lang, baseUrl }) => ({ id, label, lang, baseUrl })),

@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { createApp } from '../src/app.js';
 import { createRepository, openDatabase } from '../src/db.js';
+import { startApp } from './helpers.js';
 
 // Kjører hele appen mot en database i minnet, med en falsk e-posttjeneste som bare husker meldingene.
 
 const config = {
   baseUrl: 'https://booking.example.com',
-  adminPassword: 'hemmelig',
+  // Testene kjører uten Cloudflare Access, som ved lokal utvikling.
+  adminNoAuth: true,
   timeZone: 'Europe/Oslo',
   trustProxy: false,
   // Testene gjør mange kall på kort tid; selve rate limiteren testes i rateLimit.test.js.
@@ -80,7 +82,7 @@ function eventInput(overrides = {}) {
 }
 
 async function createEvent(overrides) {
-  const res = await call('/api/admin/events', { method: 'POST', body: eventInput(overrides), headers: { 'X-Admin-Password': 'hemmelig' } });
+  const res = await call('/api/admin/events', { method: 'POST', body: eventInput(overrides), });
   assert.equal(res.status, 201, JSON.stringify(res.data));
   const { data: event } = await call(`/api/events/${res.data.slug}`);
   sent = [];
@@ -102,15 +104,16 @@ async function register(slug, event, overrides = {}) {
 const admin = (key) => ({ Authorization: `Bearer ${key}` });
 
 describe('opprette arrangement', () => {
-  test('krever riktig administratorpassord', async () => {
-    const none = await call('/api/admin/events', { method: 'POST', body: eventInput() });
-    assert.equal(none.status, 401);
-    const wrong = await call('/api/admin/events', { method: 'POST', body: eventInput(), headers: { 'X-Admin-Password': 'feil' } });
-    assert.equal(wrong.status, 401);
+  test('uten Cloudflare Access og uten ADMIN_NO_AUTH er oppretting slått av', async () => {
+    const closed = await startApp({});
+    const res = await closed.request({ method: 'POST', path: '/api/admin/events', body: eventInput() });
+    assert.equal(res.status, 403);
+    assert.match(res.json.error, /Cloudflare Access er ikke satt opp/);
+    assert.equal(closed.sent.length, 0);
   });
 
   test('gir tilfeldig lenke og admin-lenke, og sender admin-lenken til arrangøren', async () => {
-    const res = await call('/api/admin/events', { method: 'POST', body: eventInput(), headers: { 'X-Admin-Password': 'hemmelig' } });
+    const res = await call('/api/admin/events', { method: 'POST', body: eventInput(), });
     assert.equal(res.status, 201);
     assert.match(res.data.slug, /^[a-z2-9]{12}$/);
     assert.equal(res.data.eventUrl, `https://booking.example.com/${res.data.slug}`);
@@ -124,7 +127,6 @@ describe('opprette arrangement', () => {
     const res = await call('/api/admin/events', {
       method: 'POST',
       body: { title: '', startsAt: 'i morgen', organizerEmail: 'ikke-epost', fields: [{ label: 'Valg', type: 'select', options: [] }] },
-      headers: { 'X-Admin-Password': 'hemmelig' },
     });
     assert.equal(res.status, 400);
     assert.deepEqual(Object.keys(res.data.errors).sort(), ['fields', 'organizerEmail', 'organizerName', 'startsAt', 'title']);
@@ -134,7 +136,6 @@ describe('opprette arrangement', () => {
     const res = await call('/api/admin/events', {
       method: 'POST',
       body: eventInput({ imageUrl: 'javascript:alert(1)' }),
-      headers: { 'X-Admin-Password': 'hemmelig' },
     });
     assert.equal(res.status, 400);
     assert.ok(res.data.errors.imageUrl);
@@ -423,7 +424,7 @@ describe('påmelding av flere personer', () => {
   test('standard er maks 10 per påmelding, og verdien valideres', async () => {
     const { event } = await createEvent();
     assert.equal(event.maxPerBooking, 10);
-    const bad = await call('/api/admin/events', { method: 'POST', body: eventInput({ maxPerBooking: 0 }), headers: { 'X-Admin-Password': 'hemmelig' } });
+    const bad = await call('/api/admin/events', { method: 'POST', body: eventInput({ maxPerBooking: 0 }), });
     assert.equal(bad.status, 400);
     assert.ok(bad.data.errors.maxPerBooking);
   });
