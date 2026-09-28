@@ -32,6 +32,29 @@ export function formatCode(code) {
   return code.toUpperCase().replace(/^(.{4})(.{4})(.+)$/, '$1-$2-$3');
 }
 
+// Dørkode: 5 store bokstaver, unik innenfor arrangementet. Står stort på billetten, så dørvakten kan
+// taste den inn uten å bytte mellom bokstaver og tall på tastaturet. I og O er utelatt (ligner 1 og 0).
+// 24^5 ≈ 7,96 millioner koder: med 500 gjester treffer en gjettet kode en gyldig billett med
+// sannsynlighet 500 / 24^5 ≈ 0,006 %, og dørvakten ser uansett navnet på skjermen.
+export const DOOR_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+export const DOOR_CODE_LENGTH = 5;
+const DOOR_CODE_PATTERN = new RegExp(`^[${DOOR_ALPHABET}]{${DOOR_CODE_LENGTH}}$`);
+
+export function newDoorCode() {
+  let code = '';
+  for (let i = 0; i < DOOR_CODE_LENGTH; i++) code += DOOR_ALPHABET[randomInt(DOOR_ALPHABET.length)];
+  return code;
+}
+
+/**
+ * «abc de» → «ABCDE», eller null hvis det ikke kan være en dørkode. Bare mellomrom og bindestrek
+ * fjernes: et billettnummer med tall («K7HQ-2MXP-R9») skal aldri tolkes som en dørkode.
+ */
+export function parseDoorCode(input) {
+  const code = String(input ?? '').toUpperCase().replace(/[\s-]/g, '');
+  return DOOR_CODE_PATTERN.test(code) ? code : null;
+}
+
 /** Det dørvakten taster inn («k7hq 2mxp-r9») → «k7hq2mxpr9», eller null hvis det ikke kan være et nummer. */
 export function parseCode(input) {
   const code = String(input ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');

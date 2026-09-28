@@ -3,6 +3,7 @@
 Et lite og enkelt alternativ til Hoopla for påmelding til arrangementer:
 
 - **Arrangementer kan bare nås via lenke** – `booking.domain.com/<hash>`. Det finnes ingen oversikt, og søkemotorer blir bedt om å holde seg unna.
+- **Forsidebilde** som lastes opp (GPS og andre metadata fjernes) eller lenkes til.
 - **Påmelding med navn, e-post og egendefinerte felter** (kort tekst, lang tekst, telefon, tall, nedtrekksliste, avkrysning).
 - **Den som melder på kan legge til flere personer** i samme skjema. Hver person er én gjest og tar én plass, og hver person svarer på de egendefinerte feltene (f.eks. allergier). Arrangøren bestemmer hvor mange som kan meldes på om gangen (standard 10, 1 = bare seg selv).
 - **Antall påmeldte vises** på arrangementssiden (kan skrus av), med ledige plasser hvis det er et tak.
@@ -12,7 +13,7 @@ Et lite og enkelt alternativ til Hoopla for påmelding til arrangementer:
 - **Utseendet styres med miljøvariabler**: navn, logo, farger, fonter, hjørneradius og tekster.
 - **Flere domener, én database og én admin**: hvert domene er et *nettsted* med eget språk (norsk eller engelsk), tema, avsender og base-URL.
 - **Helt lukket uten lenke**: forsiden og alle ukjente adresser svarer bare `404 Not Found` – uten logo, navn eller språk.
-- **Mobilbillett med QR-kode** per person, med billettnummer, PDF-billett i e-posten, **Apple Wallet** og **Google Wallet** – som Hoopla.
+- **Mobilbillett med QR-kode** per person, med dørkode på 5 bokstaver, PDF-billett i e-posten, **Apple Wallet** og **Google Wallet** – som Hoopla.
 - **Innsjekking i døra**: en egen dørvaktlenke. Dørvakten kan skanne QR-koden med vanlig kamera på iPhone, bruke skanneren på siden, taste inn billettnummeret eller søke på navn. Det gir grønt, gult eller rødt svar med «Angre», og innsjekking virker også uten nett.
 - **Kalenderfil (.ics)** til deltakerne, og lenke til Google Kalender.
 - **Sted fra Kartverket** (adresse, stedsnavn eller gnr/bnr) med kartpunkt, som gir **veibeskrivelse** på sidene, i e-posten og i Wallet. Wallet-kortet dukker opp av seg selv når tiden nærmer seg og man er i nærheten.
@@ -251,7 +252,7 @@ En test sjekker at alle språk har nøyaktig de samme nøklene og plassholderne,
 
 ### Billetten
 
-Hver person i en påmelding får en billett med QR-kode og et billettnummer, for eksempel `K7HQ-2MXP-R9`. Bekreftelses-e-posten har en knapp til siden med alle billettene i påmeldingen (`/b/…`). Der kan man bla mellom billettene (1 / 3), laste ned PDF, legge dem i Apple Wallet eller Google Wallet og legge arrangementet i kalenderen. PDF-billetten (én side per person) og kalenderfilen ligger også ved e-posten. Etter påmeldingen vises knappen «Vis billettene» med én gang.
+Hver person i en påmelding får en billett med QR-kode og en **dørkode** på 5 bokstaver, for eksempel `FFRXK`. Bekreftelses-e-posten har en knapp til siden med alle billettene i påmeldingen (`/b/…`). Der kan man bla mellom billettene (1 / 3), laste ned PDF, legge dem i Apple Wallet eller Google Wallet og legge arrangementet i kalenderen. PDF-billetten (én side per person) og kalenderfilen ligger også ved e-posten. Etter påmeldingen vises knappen «Vis billettene» med én gang.
 
 **QR-koden er en lenke:** `https://booking.domain.com/t/<billettnummer><signatur>`. Da kan den skannes med vanlig kamera på alle telefoner. Signaturen er
 
@@ -267,18 +268,47 @@ På admin-siden og i den første e-posten til arrangøren står en **dørvaktlen
 
 1. Dørvakten åpner lenken én gang og skriver eventuelt navnet sitt. Telefonen får en informasjonskapsel for arrangementet. Den er `HttpOnly`, `SameSite=Lax` og gyldig til to døgn etter at arrangementet er over. Nøkkelen fjernes fra adresselinjen.
 2. **Med vanlig kamera** (iPhone eller Android): QR-koden åpner billetten, siden ser at telefonen tilhører en dørvakt og sjekker gjesten inn. Skjermen blir grønn («Sjekket inn»), gul («Allerede sjekket inn 18:02 av Kari») eller rød («Ugyldig billett», «Feil arrangement» eller «Avlyst»), med lyd og vibrasjon. «Angre» retter et feiltrykk.
-3. **Skanneren på siden** (`/<hash>/skanner`) bruker kameraet direkte. Den bruker nettleserens innebygde QR-leser når den finnes, ellers [jsQR](https://github.com/cozmo/jsQR). Siden har også felt for **billettnummeret** og **søk på navn** (minst to tegn, maks ti treff) for gjester uten billett på telefonen.
+3. **Skanneren på siden** (`/<hash>/skanner`) bruker kameraet direkte. Den bruker nettleserens innebygde QR-leser når den finnes, ellers [jsQR](https://github.com/cozmo/jsQR). Siden har også felt for **dørkoden** og **søk på navn** (minst to tegn, maks ti treff) for gjester uten billett på telefonen.
+   - Dørkoden sendes så snart femte bokstav er skrevet.
+   - Koden har bare bokstaver, så dørvakten slipper å bytte mellom bokstaver og tall på tastaturet.
 4. **Hele familien på én gang:** etter en innsjekking vises de andre i samme påmelding med en «Sjekk inn»-knapp.
 
 Innsjekkingen skjer alltid med en `POST` fra siden, aldri bare ved at lenken åpnes. E-postprogrammer og forhåndsvisninger åpner nemlig lenker av seg selv. Den er også atomisk (`UPDATE … WHERE checked_in_at IS NULL`), så to dørvakter som skanner samme billett samtidig aldri begge får «Sjekket inn».
 
+### Dørkoden
+
+Dørkoden står stort på billetten, i PDF-en, under QR-koden i Wallet og i bekreftelses-e-posten, én per person. Den har 5 bokstaver fra et alfabet på 24 (A–Z uten I og O, som ligner 1 og 0) og er unik innenfor arrangementet. Antall mulige koder er
+
+$$24^5 = 7\,962\,624$$
+
+Hvis noen finner på en kode i døra, er sannsynligheten for å treffe en av $N$ gyldige billetter
+
+$$p = \frac{N}{24^5}, \qquad N = 500 \;\Rightarrow\; p \approx 6{,}3 \cdot 10^{-5} \approx 0{,}006\,\%$$
+
+Dørvakten ser i tillegg navnet på skjermen og kan be om legitimasjon. Dørkoden er ikke en hemmelighet på samme måte som billettlenken: den gir bare innsjekking, og bare for en innlogget dørvakt. Selve billettsiden kan bare åpnes med den lange, signerte lenken i QR-koden.
+
+Billettnummeret på 10 tegn (i lenken) godtas også i feltet, med Enter.
+
 **Dørvaktmodus:** dørvakten ser bare navn, hvem som meldte på og status, aldri e-post, telefonnummer eller svar på skjemaet.
 
-**Uten nett:** skannersiden har en liste med navn og SHA-256-hasher av alle billettlenker og -numre. Forsvinner nettet, kjenner siden igjen en ekte billett selv og legger innsjekkingen i kø. Køen sendes, med riktig tidspunkt, så snart nettet er tilbake. Hashene kan ikke brukes til å lage billetter.
+**Uten nett:** skannersiden har en liste med navn, dørkoder og SHA-256-hasher av alle billettlenker. Forsvinner nettet, kjenner siden igjen en ekte billett selv og legger innsjekkingen i kø. Køen sendes, med riktig tidspunkt, så snart nettet er tilbake. Hashene kan ikke brukes til å lage billetter.
 
 **Ny dørvaktlenke:** «Lag ny lenke» på admin-siden gjør den gamle ugyldig og logger ut alle telefoner som brukte den. Nøkkelen er avledet av arrangementet og et versjonsnummer, så den kan alltid vises på nytt.
 
-På admin-siden er det en kolonne «Innsjekket» med tidspunkt og dørvakt, «Sjekk inn» og «Angre», og en teller. CSV-eksporten har kolonnene «Etteranmelding» og «Innsjekket».
+På admin-siden er det en kolonne «Innsjekket» med tidspunkt og dørvakt, «Sjekk inn» og «Angre», og en teller. CSV-eksporten har kolonnene «Etteranmelding», «Innsjekket» og «Dørkode».
+
+---
+
+## Forsidebilde
+
+Arrangøren kan **laste opp et bilde** eller lime inn en lenke. Et opplastet bilde går foran lenken.
+
+- **I nettleseren:** et stort bilde (over 2000 piksler på den lengste siden, eller over 1,5 MB) skaleres ned før opplasting. JPEG forblir JPEG; PNG og WebP blir WebP, som beholder gjennomsiktighet. Et mobilbilde på 12 MB blir typisk noen hundre kB, og retningen blir riktig.
+- **På serveren:**
+  - Filtypen avgjøres av innholdet, ikke filnavnet. Bare JPEG, PNG og WebP godtas, maks 5 MB og maks 40 millioner piksler, så et lite «bildebombe»-bilde ikke kan få nettleseren til å gå tom for minne.
+  - **Alle metadata fjernes** før lagring: EXIF og XMP (GPS-posisjon, tidspunkt, kameramodell), kommentarer og tekstfelter. Bare bildets retning beholdes, i en minimal EXIF-blokk, så mobilbilder ikke vises liggende. Selve bildedataene endres ikke.
+- **Lagring:** bildet ligger i databasen, i en egen tabell, og slettes sammen med arrangementet.
+- **Visning:** bildet vises på arrangementets eget domene (`/<hash>/bilde/<hash-av-innholdet>.jpg`), med `Cache-Control: private`, så det ikke blir liggende i en delt mellomlagring etter at arrangementet er slettet. I Google Wallet vises det øverst på kortet.
 
 ---
 
@@ -509,6 +539,7 @@ Databasen oppgraderes automatisk ved oppstart (`PRAGMA user_version`):
 | 2 | Påmeldinger med flere personer (`bookings`). Eksisterende påmeldinger beholdes, og avmeldingslenker som allerede er sendt ut, virker fortsatt. |
 | 3 | Nettsted per arrangement (`events.site`). Eksisterende arrangementer havner på hovednettstedet (`main`). |
 | 4 | Billetter, innsjekking, kartpunkt, brytere, etteranmelding, skin og avlysning. Eksisterende påmeldinger får billettnummer, og arrangementer med passert frist får ingen rapport ved oppgraderingen. |
+| 5 | Dørkode per person (eksisterende påmeldinger får en) og tabellen `event_images` for opplastede bilder. |
 
 ## Prosjektstruktur
 
@@ -534,6 +565,7 @@ src/
   walletConfig.js Sertifikater og nøkler til Wallet fra filer
   zip.js, png.js Minimal ZIP-skriver og PNG-koder (til Wallet-kortene)
   places.js      Stedsoppslag mot Kartverket og kartlenker
+  images.js      Opplastede bilder: filtype, grenser og fjerning av metadata
   skins.js       Innebygde og egne skins
   filename.js    Filnavn til vedlegg og nedlastinger
   csv.js         CSV-eksport
@@ -569,10 +601,11 @@ test/            Tester (node:test)
 | `POST` | `/api/admin/events/:slug/scanner/rotate` | Admin-porten + admin-nøkkel. Ny dørvaktlenke |
 | `POST` / `DELETE` | `/api/admin/events/:slug/cancel` | Admin-porten + admin-nøkkel. Avlys (`{ notify, message }`) / opphev |
 | `GET` | `/api/admin/places?q=` | Admin-porten. Stedsoppslag hos Kartverket |
+| `PUT` / `DELETE` | `/api/admin/events/:slug/image` | Admin-porten + admin-nøkkel. Last opp forsidebilde (selve bildet som body, `Content-Type: image/…`) / fjern |
 | `GET` | `/api/tickets/:nøkkel`, `/api/bookings/:nøkkel` | Billettlenken. Billetten(e), lenker og om telefonen er dørvakt |
 | `POST` | `/api/events/:slug/scanner/login` | Dørvaktnøkkel i body. Setter informasjonskapselen |
 | `GET` | `/api/events/:slug/scanner`, `…/scanner/search?q=` | Dørvakt. Status og liste for bruk uten nett; navnesøk |
-| `POST` | `/api/events/:slug/scanner/checkin`, `…/scanner/undo` | Dørvakt. `{ token }`, `{ code }` eller `{ id }`; angre med `{ id }` |
+| `POST` | `/api/events/:slug/scanner/checkin`, `…/scanner/undo` | Dørvakt. `{ token }`, `{ code }` (dørkode eller billettnummer) eller `{ id }`; angre med `{ id }` |
 
 *Admin-porten* = riktig vertsnavn (hvis `ADMIN_HOST` er satt) og gyldig Cloudflare Access-token (hvis `CF_ACCESS_*` er satt).
 
@@ -586,7 +619,5 @@ test/            Tester (node:test)
 - Gjest kan endre svarene sine, eller legge til personer i en eksisterende påmelding
 - Felter som bare spørres én gang per påmelding (f.eks. telefon til kontaktpersonen), ikke per person
 - Egen bekreftelse til personer som er lagt til med e-postadresse
-- Opplasting av forsidebilde (i dag er det en lenke) – står i kø
-- Kort dørkode på 4–5 bokstaver for raskere manuell innskriving – til vurdering
 - Oppdatering av Wallet-kort som allerede er lagt til (Apples push-tjeneste og Googles API)
 - Betaling (f.eks. Vipps eller Stripe)

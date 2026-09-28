@@ -309,7 +309,7 @@ describe('administrasjon', () => {
     const bytes = Buffer.from(await csv.arrayBuffer());
     assert.deepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
     const text = bytes.subarray(3).toString('utf8');
-    assert.ok(text.startsWith('#;Påmeldt;Navn;E-post;Påmeldt av;Kontakt-e-post;Allergier;Middag;Samtykke;Etteranmelding;Innsjekket\r\n'));
+    assert.ok(text.startsWith('#;Påmeldt;Navn;E-post;Påmeldt av;Kontakt-e-post;Allergier;Middag;Samtykke;Etteranmelding;Innsjekket;Dørkode\r\n'));
     assert.match(text, /;'=Formel;/); // CSV-injection nøytralisert
     assert.match(text, /;"Gluten; laktose";/);
 

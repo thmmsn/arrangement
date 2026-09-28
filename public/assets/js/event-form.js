@@ -44,6 +44,7 @@ export function createEventForm({
   const siteLang = () => sites.find((s) => s.id === site.value)?.lang ?? t.lang;
 
   const place = placeField(initial);
+  const image = imageField(initial);
   const features = featureToggles(initial.features ?? {}, wallets);
   const skinPicker = skinField(initial.skin ?? '', skins);
 
@@ -81,8 +82,9 @@ export function createEventForm({
           input('startsAt', { type: 'datetime-local', value: toLocalInput(initial.startsAt, timeZone), required: true })),
         row('endsAt', t('eventForm.endsAt'), input('endsAt', { type: 'datetime-local', value: toLocalInput(initial.endsAt, timeZone) })),
       ),
-      row('imageUrl', t('eventForm.imageUrl'),
-        input('imageUrl', { type: 'url', value: initial.imageUrl || '', placeholder: 'https://…' })),
+      h('div', { class: 'form-row', 'data-error-for': 'imageUrl' },
+        h('span', { class: 'label' }, t('eventForm.imageUrl')),
+        image.el),
     ),
     h('fieldset', {},
       h('legend', {}, t('eventForm.legendRegistration')),
@@ -214,7 +216,7 @@ export function createEventForm({
       registrationDeadline: fromLocalInput(el.registrationDeadline.value, timeZone),
       capacity: el.capacity.value === '' ? null : Number(el.capacity.value),
       maxPerBooking: el.maxPerBooking.value === '' ? null : Number(el.maxPerBooking.value),
-      imageUrl: el.imageUrl.value,
+      imageUrl: image.url(),
       showCount: el.showCount.checked,
       isOpen: editing ? el.isOpen.checked : true,
       allowLate: el.allowLate.checked,
@@ -227,7 +229,9 @@ export function createEventForm({
 
     submit.disabled = true;
     try {
-      await onSubmit(payload);
+      // Bildet lastes opp for seg etter at arrangementet er lagret (det trenger arrangementets nøkkel).
+      await onSubmit(payload, { image: image.read() });
+      image.saved();
     } catch (err) {
       status.replaceChildren(notice('error', err.message));
       showFieldErrors(form, err.errors);
@@ -332,6 +336,105 @@ function placeField(initial) {
   renderChip();
 
   return { el: h('div', { class: 'place-field' }, input, list, message, chip), input, geo: () => geo };
+}
+
+// ---------- Forsidebilde: opplasting eller lenke ----------
+
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+const MAX_SIDE = 2000;
+const TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
+/**
+ * Et bilde fra mobilen kan være 12 MB og 4000 piksler bredt. Er det større enn nødvendig, skaleres
+ * det ned i nettleseren før opplasting (maks 2000 piksler på den lengste siden). Da forsvinner også
+ * metadata som GPS-posisjon, og bildet roteres riktig. Serveren sjekker og renser uansett selv.
+ */
+async function prepareImage(file) {
+  if (!TYPES.includes(file.type)) throw new Error(t('eventForm.imageType'));
+  let bitmap = null;
+  try {
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  } catch { /* nettleseren kan ikke lese bildet – la serveren avgjøre */ }
+  if (bitmap) {
+    const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+    if (scale < 1 || file.size > 1.5 * 1024 * 1024) {
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(bitmap.width * scale);
+      canvas.height = Math.round(bitmap.height * scale);
+      canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      // JPEG forblir JPEG; PNG og WebP kan ha gjennomsiktighet og blir WebP.
+      const type = file.type === 'image/jpeg' ? 'image/jpeg' : 'image/webp';
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, type, 0.85));
+      if (blob && TYPES.includes(blob.type) && blob.size < file.size) file = blob;
+    }
+    bitmap.close?.();
+  }
+  if (file.size > MAX_UPLOAD_BYTES) throw new Error(t('eventForm.imageTooLarge', { max: MAX_UPLOAD_BYTES / 1024 / 1024 }));
+  return file;
+}
+
+/** Forhåndsvisning, «Last opp bilde», «eller lenke» og «Fjern bildet». Et opplastet bilde går foran lenken. */
+function imageField(initial) {
+  let upload = null; // Blob som skal lastes opp
+  let removeUpload = false;
+  let uploaded = initial.uploadedImage || null;
+  let objectUrl = null;
+
+  const preview = h('img', { class: 'image-preview', alt: '', hidden: true });
+  preview.addEventListener('error', () => { preview.hidden = true; });
+  const error = h('div');
+  const file = h('input', { id: 'imageFile', type: 'file', accept: TYPES.join(','), class: 'visually-hidden' });
+  const pick = h('label', { class: 'btn secondary small', for: 'imageFile' }, t('eventForm.imageUpload'));
+  const url = h('input', { id: 'imageUrl', name: 'imageUrl', type: 'url', value: initial.imageUrl || '', placeholder: 'https://…' });
+  const remove = h('button', { class: 'btn danger small', type: 'button' }, t('eventForm.imageRemove'));
+
+  const show = () => {
+    const src = upload ? objectUrl : uploaded || url.value.trim();
+    preview.hidden = !src;
+    if (src) preview.src = src;
+    remove.hidden = !(upload || uploaded);
+  };
+
+  file.addEventListener('change', async () => {
+    error.replaceChildren();
+    const [chosen] = file.files;
+    file.value = '';
+    if (!chosen) return;
+    try {
+      upload = await prepareImage(chosen);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = URL.createObjectURL(upload);
+      removeUpload = false;
+      show();
+    } catch (err) {
+      error.replaceChildren(notice('error', err.message));
+    }
+  });
+  remove.addEventListener('click', () => {
+    if (upload) upload = null;
+    else if (uploaded) {
+      uploaded = null;
+      removeUpload = true;
+    }
+    show();
+  });
+  url.addEventListener('input', show);
+  show();
+
+  return {
+    el: h('div', { class: 'image-field' },
+      preview, error,
+      h('div', { class: 'actions' }, file, pick, remove),
+      h('div', { class: 'image-link' }, h('span', { class: 'muted small' }, t('eventForm.imageOrLink')), url)),
+    url: () => url.value,
+    read: () => ({ upload, removeUpload }),
+    /** Etter lagring: det som ble lastet opp, er nå det lagrede bildet. */
+    saved() {
+      if (upload) uploaded = objectUrl;
+      upload = null;
+      removeUpload = false;
+    },
+  };
 }
 
 // ---------- Billetter: brytere per arrangement ----------

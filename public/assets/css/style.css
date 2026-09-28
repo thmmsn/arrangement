@@ -458,6 +458,10 @@ tr.added td:nth-child(2) { padding-left: 22px; }
   letter-spacing: 0.08em;
   margin: 6px 0 10px;
 }
+.ticket-door { margin: 8px 0 10px; }
+.ticket-door .label { display: block; margin: 0; color: var(--muted); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; }
+.ticket-door .ticket-code { font-size: 2.2rem; font-weight: 700; letter-spacing: 0.2em; margin: 0; }
+.scan-code input { font-size: 1.6rem; }
 .ticket-nav { display: flex; align-items: center; justify-content: center; gap: 16px; }
 .ticket-position { color: var(--muted); min-width: 4em; text-align: center; }
 .ticket-actions { margin-bottom: 24px; }
@@ -498,6 +502,10 @@ tr.added td:nth-child(2) { padding-left: 22px; }
 
 /* ---------- Skjema: sted, brytere og utseende ---------- */
 
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.image-preview { display: block; max-width: 100%; max-height: 220px; border-radius: var(--radius-sm); margin-bottom: 10px; object-fit: cover; }
+.image-field .actions { margin: 0 0 10px; }
+.image-link { display: grid; grid-template-columns: max-content 1fr; gap: 10px; align-items: center; }
 .place-field { position: relative; }
 .place-results {
   position: absolute;

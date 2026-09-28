@@ -27,7 +27,7 @@ import { applePasses } from './appleWallet.js';
 import { eventIcs, googleCalendarUrl } from './calendar.js';
 import { fileSlug } from './filename.js';
 import { googleSaveUrl } from './googleWallet.js';
-import { formatCode, parseCode } from './ids.js';
+import { formatCode, parseCode, parseDoorCode } from './ids.js';
 import { ticketsPdf } from './pdf.js';
 import { appleDirectionsUrl, directionsUrl, PlaceSearchError } from './places.js';
 import { qrSvg } from './qr.js';
@@ -58,6 +58,7 @@ export function parseCookies(header) {
  */
 export function createTicketFeature(ctx) {
   const { repo, config, tokens, siteOf, eventUrl, findEventBySlug, notFound, sendPage, logger, adminT } = ctx;
+  const imageUrlOf = ctx.imageUrlOf ?? ((event) => event.imageUrl);
   const wallet = config.wallet ?? { apple: null, google: null };
 
   // ---------- Brytere og lenker ----------
@@ -108,7 +109,7 @@ export function createTicketFeature(ctx) {
       startsAt: event.startsAt,
       endsAt: event.endsAt,
       organizerName: event.organizerName,
-      imageUrl: event.imageUrl,
+      imageUrl: imageUrlOf(event),
       timeZone: config.timeZone,
       cancelled: Boolean(event.cancelledAt),
     };
@@ -120,6 +121,7 @@ export function createTicketFeature(ctx) {
       id: person.id,
       name: person.name,
       code: person.code,
+      doorCode: person.doorCode,
       url: ticketUrl(event, person.code),
       path: ticketPath(person.code),
       index: i + 1,
@@ -231,8 +233,11 @@ export function createTicketFeature(ctx) {
       const code = tokens.parseTicket(body.token.trim());
       person = code && repo.findRegistrationByCode(code);
     } else if (body.code !== undefined) {
-      const code = parseCode(body.code);
-      person = code && repo.findRegistrationByCode(code);
+      // Dørkoden (5 bokstaver) gjelder bare dette arrangementet. Billettnummeret (10 tegn) fra
+      // eldre PDF-er og Wallet-kort godtas fortsatt.
+      const door = parseDoorCode(body.code);
+      const code = !door && parseCode(body.code);
+      person = door ? repo.findRegistrationByDoorCode(event.id, door) : code && repo.findRegistrationByCode(code);
     } else if (Number.isInteger(body.id)) {
       person = repo.findRegistration(event.id, body.id);
     }
@@ -283,6 +288,7 @@ export function createTicketFeature(ctx) {
   function redirectGoogle(res, event, persons) {
     const url = googleSaveUrl({
       config: wallet.google, event, site: siteOf(event), eventUrl: eventUrl(event), tickets: ticketList(event, persons),
+      heroImage: imageUrlOf(event),
     });
     noStore(res).redirect(302, url);
   }
@@ -454,6 +460,8 @@ export function createTicketFeature(ctx) {
           name: r.name,
           token: sha256(tokens.ticket(r.code)).slice(0, 32),
           code: sha256(r.code).slice(0, 32),
+          // Dørkoden er kort og kan uansett tastes inn av dørvakten, så den sendes som den er.
+          door: r.doorCode,
           checkedInAt: r.checkedInAt,
         })),
       });

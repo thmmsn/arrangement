@@ -89,7 +89,10 @@ function ticketCard(ticket, event, staff) {
     h('div', { class: 'ticket-qr' }, h('img', { src: ticket.qr, alt: ticket.code, width: 260, height: 260 })),
     h('div', { class: 'ticket-holder' }, ticket.name),
     ticket.total > 1 ? h('div', { class: 'muted small' }, t('ticket.position', { n: ticket.index, total: ticket.total })) : null,
-    h('div', { class: 'ticket-code', 'aria-label': t('ticket.number') }, ticket.code),
+    // Dørkoden stort: kan leses opp og tastes inn i døra hvis QR-koden ikke virker.
+    ticket.doorCode
+      ? h('div', { class: 'ticket-door' }, h('span', { class: 'label' }, t('ticket.doorCode')), h('span', { class: 'ticket-code' }, ticket.doorCode))
+      : h('div', { class: 'ticket-code', 'aria-label': t('ticket.number') }, ticket.code),
     ticket.checkedInAt
       ? h('div', { class: 'badge' }, t('ticket.checkedIn', { time: `${formatDay(ticket.checkedInAt, tz)} ${formatTime(ticket.checkedInAt, tz)}` }))
       : null,

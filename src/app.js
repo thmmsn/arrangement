@@ -8,6 +8,7 @@ import * as templates from './email.js';
 import { accessTokenFrom, AccessError, createAccessVerifier } from './cfAccess.js';
 import { hashSecret, newSecret, newSlug, secretMatches, SLUG_PATTERN } from './ids.js';
 import { rateLimit } from './rateLimit.js';
+import { ImageError, MAX_IMAGE_BYTES, processImage } from './images.js';
 import { createPlaceSearch } from './places.js';
 import { loadSites } from './sites.js';
 import { loadSkins, skinName } from './skins.js';
@@ -30,6 +31,7 @@ const CUSTOM_SKINS = path.join(ROOT, 'skins');
 // jsQR leser QR-koder i nettleseren på skannersiden (når nettleseren ikke har BarcodeDetector).
 const JSQR = path.join(ROOT, 'node_modules', 'jsqr', 'dist', 'jsQR.js');
 const DAY = 86_400_000;
+const IMAGE_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 
 // Maks antall forespørsler per IP-adresse innenfor tidsvinduet. Kan overstyres via config.rateLimits.
 const DEFAULT_RATE_LIMITS = {
@@ -83,6 +85,12 @@ export function createApp({
   // Hemmeligheter legges etter # i lenken. Den delen sendes aldri til serveren av nettleseren,
   // så den havner ikke i serverlogger, proxy-logger eller Referer-headere.
   const eventUrl = (event) => `${siteOf(event).baseUrl}/${event.slug}`;
+  // Forsidebildet: et opplastet bilde (på arrangementets eget domene) går foran en lenke.
+  const uploadedImageUrl = (event) => {
+    const image = repo.imageMeta(event.id);
+    return image ? `${eventUrl(event)}/bilde/${image.hash}.${IMAGE_EXT[image.type]}` : null;
+  };
+  const imageUrlOf = (event) => uploadedImageUrl(event) ?? event.imageUrl;
   const cancelUrl = (event, token) => `${siteOf(event).baseUrl}/${event.slug}/avmelding#${token}`;
   // Med eget admin-vertsnavn peker admin-lenkene dit; ellers til arrangementets domene.
   const adminBaseUrl = (event) => (config.adminHost ? `https://${config.adminHost}` : siteOf(event).baseUrl);
@@ -120,7 +128,7 @@ export function createApp({
   // ---------- Billetter, kalender, Wallet og innsjekking (se tickets.js) ----------
   const tokens = createTokens(repo.secret());
   const tickets = createTicketFeature({
-    repo, config, tokens, siteOf, eventUrl, findEventBySlug, notFound, sendPage, logger, adminT, placeSearch, limiter, limits,
+    repo, config, tokens, siteOf, eventUrl, imageUrlOf, findEventBySlug, notFound, sendPage, logger, adminT, placeSearch, limiter, limits,
   });
 
   // ---------- Felles mellomvare ----------
@@ -141,7 +149,8 @@ export function createApp({
         "script-src 'self'",
         `style-src ${csp.styles.join(' ')}`,
         `font-src ${csp.fonts.join(' ')}`,
-        "img-src 'self' https: data:",
+        // blob: trengs for forhåndsvisning av et bilde før det lastes opp (admin-skjemaet).
+        "img-src 'self' https: data: blob:",
         "connect-src 'self'",
         "frame-ancestors 'none'",
         "base-uri 'none'",
@@ -226,6 +235,17 @@ export function createApp({
     if (site !== req.site) return res.redirect(301, `${site.baseUrl}${req.originalUrl}`);
     sendPage(res, view, site, 200, event);
   };
+  // Opplastet forsidebilde. Adressen har en hash av innholdet, så et nytt bilde får ny adresse.
+  // «private»: bildet skal ikke ligge igjen i en delt mellomlagring (f.eks. hos Cloudflare) etter at
+  // arrangementet er slettet.
+  app.get('/:slug/bilde/:file', (req, res) => {
+    const event = findEventBySlug(req.params.slug);
+    const image = event && repo.image(event.id);
+    if (!image || req.params.file !== `${image.hash}.${IMAGE_EXT[image.type]}`) return notFound(req, res);
+    const site = siteOf(event);
+    if (site !== req.site) return res.redirect(301, `${site.baseUrl}${req.originalUrl}`);
+    res.type(image.type).set('Cache-Control', 'private, max-age=86400').send(image.data);
+  });
   app.get('/:slug', eventPage('event'));
   app.get('/:slug/avmelding', eventPage('cancel'));
 
@@ -292,7 +312,7 @@ export function createApp({
       endsAt: event.endsAt,
       registrationDeadline: event.registrationDeadline,
       organizerName: event.organizerName,
-      imageUrl: event.imageUrl,
+      imageUrl: imageUrlOf(event),
       fields: event.fields,
       maxPerBooking: event.maxPerBooking,
       timeZone: config.timeZone,
@@ -320,6 +340,9 @@ export function createApp({
     return {
       ...publicEvent(event, count),
       features: event.features,
+      // Lenken arrangøren har skrevet inn, og et eventuelt opplastet bilde (som går foran).
+      imageUrl: event.imageUrl,
+      uploadedImage: uploadedImageUrl(event),
       // Dørvaktlenken kan alltid vises på nytt: nøkkelen er avledet (se tokens.js).
       scannerUrl: event.features.tickets ? tickets.scannerUrl(event) : null,
       checkedIn: repo.countCheckedIn(event.id),
@@ -410,7 +433,10 @@ export function createApp({
       {
         ...templates.guestConfirmation({
           event,
-          booking,
+          // Med billetter får gjesten også dørkoden til hver person – arrangøren trenger den ikke.
+          booking: event.features.tickets
+            ? { ...booking, persons: persons.map((p, i) => ({ ...p, doorCode: result.persons[i].doorCode })) }
+            : booking,
           eventUrl: eventUrl(event),
           cancelUrl: cancelUrl(event, cancelToken),
           timeZone: config.timeZone,
@@ -566,6 +592,28 @@ export function createApp({
     res.json({ event: adminEvent(cancelled, repo.countRegistrations(event.id)), notified });
   });
 
+  // Forsidebilde: last opp (PUT med selve bildet som body) eller fjern (DELETE). Bildet sjekkes og
+  // renses for metadata (GPS-posisjon o.l.) før det lagres – se images.js.
+  const imageBody = express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: MAX_IMAGE_BYTES });
+  adminApi.put('/events/:slug/image', loadAdminEvent, requireEventAdmin, imageBody, (req, res) => {
+    if (!Buffer.isBuffer(req.body)) return res.status(400).json({ error: adminT('errors.imageInvalid') });
+    let image;
+    try {
+      image = processImage(req.body);
+    } catch (err) {
+      if (!(err instanceof ImageError)) throw err;
+      const key = err.message === 'tooLarge' ? 'errors.imageTooLarge'
+        : err.message === 'tooManyPixels' ? 'errors.imageTooManyPixels' : 'errors.imageInvalid';
+      return res.status(err.message === 'tooLarge' ? 413 : 400).json({ error: adminT(key, { max: MAX_IMAGE_BYTES / 1024 / 1024 }) });
+    }
+    repo.setImage(req.event.id, image);
+    res.json({ uploadedImage: uploadedImageUrl(req.event), width: image.width, height: image.height });
+  });
+  adminApi.delete('/events/:slug/image', loadAdminEvent, requireEventAdmin, (req, res) => {
+    repo.deleteImage(req.event.id);
+    res.json({ uploadedImage: null });
+  });
+
   // Opphev avlysningen (f.eks. ved et feiltrykk). Ingen får e-post om dette.
   adminApi.delete('/events/:slug/cancel', loadAdminEvent, requireEventAdmin, (req, res) => {
     repo.setCancelled(req.event.id, null);
@@ -578,9 +626,10 @@ export function createApp({
     res.json({
       event: adminEvent(req.event, registrations.length),
       registrations: registrations.map(({
-        id, bookingId, position, name, email, answers, createdAt, contactName, contactEmail, code, checkedInAt, checkedInBy, late,
+        id, bookingId, position, name, email, answers, createdAt, contactName, contactEmail, code, doorCode, checkedInAt, checkedInBy, late,
       }) => ({
         id, bookingId, position, name, email, answers, createdAt, contactName, contactEmail, checkedInAt, checkedInBy, late,
+        doorCode: req.event.features.tickets ? doorCode : null,
         ticketUrl: req.event.features.tickets ? tickets.ticketUrl(req.event, code) : null,
       })),
     });

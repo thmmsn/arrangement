@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
-import { newCode } from './ids.js';
+import { newCode, newDoorCode } from './ids.js';
 
 // Hver migrering kjøres én gang. PRAGMA user_version husker hvor langt databasen er kommet.
 // Nye endringer legges til nederst – eksisterende migreringer skal aldri endres.
@@ -148,6 +148,35 @@ export const MIGRATIONS = [
     CREATE UNIQUE INDEX bookings_code ON bookings(code);
     `);
   },
+
+  // 5: Dørkode og opplastet forsidebilde.
+  // - Dørkode: 5 bokstaver per person, unik innenfor arrangementet (se ids.js).
+  // - Bildet lagres i databasen, i en egen tabell så det ikke hentes med hvert arrangement. Det slettes
+  //   sammen med arrangementet (ON DELETE CASCADE) og kommer med i sikkerhetskopien.
+  (db) => {
+    db.exec(`
+    ALTER TABLE registrations ADD COLUMN door_code TEXT;
+
+    CREATE TABLE event_images (
+      event_id   INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,
+      type       TEXT    NOT NULL,   -- image/jpeg, image/png eller image/webp
+      hash       TEXT    NOT NULL,   -- SHA-256 av innholdet (forkortet), brukes i adressen
+      data       BLOB    NOT NULL,
+      created_at TEXT    NOT NULL
+    );
+    `);
+    const used = new Map(); // event_id → brukte koder
+    const setCode = db.prepare('UPDATE registrations SET door_code = ? WHERE id = ?');
+    for (const { id, event_id: eventId } of db.prepare('SELECT id, event_id FROM registrations').all()) {
+      if (!used.has(eventId)) used.set(eventId, new Set());
+      const codes = used.get(eventId);
+      let code = newDoorCode();
+      while (codes.has(code)) code = newDoorCode();
+      codes.add(code);
+      setCode.run(code, id);
+    }
+    db.exec('CREATE UNIQUE INDEX registrations_door_code ON registrations(event_id, door_code);');
+  },
 ];
 
 export function openDatabase(path) {
@@ -238,13 +267,24 @@ export function createRepository(db) {
       FROM registrations r JOIN bookings b ON b.id = r.booking_id
       WHERE r.event_id = ? AND r.id = ?`),
     ticketCodeExists: db.prepare('SELECT 1 FROM registrations WHERE ticket_code = ?'),
+    doorCodeExists: db.prepare('SELECT 1 FROM registrations WHERE event_id = ? AND door_code = ?'),
+    registrationByDoorCode: db.prepare(`
+      SELECT r.*, b.contact_name, b.contact_email, b.code AS booking_code, b.late
+      FROM registrations r JOIN bookings b ON b.id = r.booking_id
+      WHERE r.event_id = ? AND r.door_code = ?`),
+    imageMeta: db.prepare('SELECT type, hash FROM event_images WHERE event_id = ?'),
+    image: db.prepare('SELECT type, hash, data FROM event_images WHERE event_id = ?'),
+    setImage: db.prepare(`
+      INSERT INTO event_images (event_id, type, hash, data, created_at) VALUES (@eventId, @type, @hash, @data, @now)
+      ON CONFLICT(event_id) DO UPDATE SET type = @type, hash = @hash, data = @data, created_at = @now`),
+    deleteImage: db.prepare('DELETE FROM event_images WHERE event_id = ?'),
     bookingCodeExists: db.prepare('SELECT 1 FROM bookings WHERE code = ?'),
     insertBooking: db.prepare(`
       INSERT INTO bookings (event_id, contact_name, contact_email, cancel_token_hash, code, late, created_at)
       VALUES (@eventId, @contactName, @contactEmail, @cancelTokenHash, @code, @late, @now)`),
     insertRegistration: db.prepare(`
-      INSERT INTO registrations (event_id, booking_id, position, name, email, answers, ticket_code, created_at)
-      VALUES (@eventId, @bookingId, @position, @name, @email, @answers, @ticketCode, @now)`),
+      INSERT INTO registrations (event_id, booking_id, position, name, email, answers, ticket_code, door_code, created_at)
+      VALUES (@eventId, @bookingId, @position, @name, @email, @answers, @ticketCode, @doorCode, @now)`),
     bookingByToken: db.prepare('SELECT * FROM bookings WHERE event_id = ? AND cancel_token_hash = ?'),
     bookingByCode: db.prepare('SELECT * FROM bookings WHERE code = ?'),
     // Atomisk: to dørvakter som skanner samme billett samtidig kan ikke begge få «sjekket inn».
@@ -309,6 +349,8 @@ export function createRepository(db) {
     }).lastInsertRowid);
     const persons = booking.persons.map((person, position) => {
       const ticketCode = unusedCode(stmt.ticketCodeExists);
+      let doorCode = newDoorCode();
+      while (stmt.doorCodeExists.get(event.id, doorCode)) doorCode = newDoorCode();
       const id = Number(stmt.insertRegistration.run({
         eventId: event.id,
         bookingId,
@@ -317,9 +359,10 @@ export function createRepository(db) {
         email: person.email || '',
         answers: JSON.stringify(person.answers),
         ticketCode,
+        doorCode,
         now,
       }).lastInsertRowid);
-      return { id, code: ticketCode };
+      return { id, code: ticketCode, doorCode };
     });
     return { bookingId, bookingCode, persons, ids: persons.map((p) => p.id), count: count + booking.persons.length };
   });
@@ -390,6 +433,24 @@ export function createRepository(db) {
     /** Personen med dette billettnummeret, med påmeldingen den hører til, eller null. */
     findRegistrationByCode(code) {
       return mapRegistration(stmt.registrationByCode.get(code));
+    },
+    /** Personen med denne dørkoden i arrangementet, eller null. */
+    findRegistrationByDoorCode(eventId, doorCode) {
+      return mapRegistration(stmt.registrationByDoorCode.get(eventId, doorCode));
+    },
+    /** Forsidebildet: { type, hash } uten selve dataene, eller null. */
+    imageMeta(eventId) {
+      return stmt.imageMeta.get(eventId) ?? null;
+    },
+    /** Forsidebildet med data (Buffer), eller null. */
+    image(eventId) {
+      return stmt.image.get(eventId) ?? null;
+    },
+    setImage(eventId, { type, hash, data }) {
+      stmt.setImage.run({ eventId, type, hash, data, now: new Date().toISOString() });
+    },
+    deleteImage(eventId) {
+      return stmt.deleteImage.run(eventId).changes > 0;
     },
     findRegistration(eventId, id) {
       return mapRegistration(stmt.registrationWithBooking.get(eventId, id));
@@ -506,6 +567,7 @@ function mapRegistration(row) {
     email: row.email,
     answers: JSON.parse(row.answers),
     code: row.ticket_code,
+    doorCode: row.door_code,
     checkedInAt: row.checked_in_at,
     checkedInBy: row.checked_in_by,
     createdAt: row.created_at,

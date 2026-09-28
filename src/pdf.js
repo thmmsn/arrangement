@@ -39,7 +39,7 @@ const hexColor = (value, fallback) => (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(valu
  * @param {object} opts.site       Nettstedet (språk, tema)
  * @param {string} opts.timeZone
  * @param {string} opts.eventUrl
- * @param {{ name: string, code: string, url: string }[]} opts.tickets  Én side per billett
+ * @param {{ name: string, code: string, doorCode: string, url: string }[]} opts.tickets  Én side per billett
  * @returns {Promise<Buffer>}
  */
 export function ticketsPdf({ event, site, timeZone, eventUrl, tickets }) {
@@ -111,10 +111,11 @@ export function ticketsPdf({ event, site, timeZone, eventUrl, tickets }) {
     }
     doc.fill('#000000');
 
-    doc.font('Courier-Bold').fontSize(15).fillColor(colors.text)
-      .text(formatCode(ticket.code), left, qrY + size + 6, { width: contentWidth, align: 'center' });
+    // Dørkoden stort under QR-koden, så den kan leses opp og tastes inn hvis QR-koden ikke virker.
     doc.font('Helvetica').fontSize(8).fillColor(colors.muted)
-      .text(pdfSafe(t('ticket.number')), { width: contentWidth, align: 'center' });
+      .text(pdfSafe(t('ticket.doorCode').toUpperCase()), left, qrY + size + 8, { width: contentWidth, align: 'center', characterSpacing: 1 });
+    doc.font('Courier-Bold').fontSize(26).fillColor(colors.text)
+      .text(ticket.doorCode || formatCode(ticket.code), { width: contentWidth, align: 'center', characterSpacing: 4 });
 
     // Nederst: arrangør og lenke til arrangementssiden.
     const footer = [t('ticket.organizer', { name: event.organizerName }), eventUrl].map(pdfSafe).join('   ·   ');

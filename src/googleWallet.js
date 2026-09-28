@@ -18,7 +18,7 @@ const b64url = (value) => Buffer.from(typeof value === 'string' ? value : JSON.s
 const safeId = (value) => String(value).replace(/[^\w.-]/g, '_');
 
 /** JWT-ens innhold (før signering). Eksportert for testene. */
-export function googleClaims({ config, event, site, eventUrl, tickets, now = new Date() }) {
+export function googleClaims({ config, event, site, eventUrl, tickets, heroImage = null, now = new Date() }) {
   const { t, theme, lang } = site;
   const text = (value) => ({ defaultValue: { language: lang, value } });
   const classId = `${config.issuerId}.${safeId(`event-${event.slug}`)}`;
@@ -34,6 +34,8 @@ export function googleClaims({ config, event, site, eventUrl, tickets, now = new
     dateTime: { start: event.startsAt, ...(event.endsAt && { end: event.endsAt }) },
     ...(event.location && { venue: { name: text(event.location), address: text(event.location) } }),
     ...(logo && { logo: { sourceUri: { uri: logo } } }),
+    // Forsidebildet øverst på kortet (Google henter det, så det må være en https-adresse).
+    ...(/^https:\/\//.test(heroImage || '') && { heroImage: { sourceUri: { uri: heroImage } } }),
     ...(color && { hexBackgroundColor: color }),
     linksModuleData: {
       uris: [
@@ -48,8 +50,9 @@ export function googleClaims({ config, event, site, eventUrl, tickets, now = new
     classId,
     state: 'ACTIVE',
     ticketHolderName: ticket.name,
-    ticketNumber: formatCode(ticket.code),
-    barcode: { type: 'QR_CODE', value: ticket.url, alternateText: formatCode(ticket.code) },
+    // Dørkoden er det som tastes inn i døra; den står under QR-koden.
+    ticketNumber: ticket.doorCode || formatCode(ticket.code),
+    barcode: { type: 'QR_CODE', value: ticket.url, alternateText: ticket.doorCode || formatCode(ticket.code) },
     ...(color && { hexBackgroundColor: color }),
     linksModuleData: { uris: [{ id: 'ticket', uri: ticket.url, description: t('wallet.showTicket') }] },
   }));

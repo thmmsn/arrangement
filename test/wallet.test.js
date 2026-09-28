@@ -27,8 +27,8 @@ const event = {
   organizerName: 'Arrangør',
 };
 const tickets = [
-  { name: 'Ola Nordmann', code: 'k7hq2mxpr9', url: 'https://booking.example.com/t/k7hq2mxpr9AAAA', index: 1, total: 2 },
-  { name: 'Kari Nordmann', code: 'p3wn8zqrt2', url: 'https://booking.example.com/t/p3wn8zqrt2BBBB', index: 2, total: 2 },
+  { name: 'Ola Nordmann', code: 'k7hq2mxpr9', doorCode: 'KMRTW', url: 'https://booking.example.com/t/k7hq2mxpr9AAAA', index: 1, total: 2 },
+  { name: 'Kari Nordmann', code: 'p3wn8zqrt2', doorCode: 'PLSXB', url: 'https://booking.example.com/t/p3wn8zqrt2BBBB', index: 2, total: 2 },
 ];
 
 // ---------- Testsertifikater: en «WWDR»-CA og et kortsertifikat utstedt av den ----------
@@ -86,7 +86,10 @@ describe('Apple Wallet', () => {
     assert.equal(pass.passTypeIdentifier, 'pass.no.example.booking');
     assert.equal(pass.teamIdentifier, 'ABCDE12345');
     assert.equal(pass.serialNumber, 'k7hq2mxpr9');
-    assert.deepEqual(pass.barcodes, [{ format: 'PKBarcodeFormatQR', message: tickets[0].url, messageEncoding: 'iso-8859-1', altText: 'K7HQ-2MXP-R9' }]);
+    // Under QR-koden står dørkoden, som dørvakten kan taste inn.
+    assert.deepEqual(pass.barcodes, [{ format: 'PKBarcodeFormatQR', message: tickets[0].url, messageEncoding: 'iso-8859-1', altText: 'KMRTW' }]);
+    assert.equal(pass.eventTicket.secondaryFields.find((f) => f.key === 'door').value, 'KMRTW');
+    assert.equal(pass.eventTicket.backFields.find((f) => f.key === 'code').value, 'K7HQ-2MXP-R9');
     // Tid: vises på låseskjermen fra tre timer før start til slutt.
     assert.equal(pass.relevantDate, event.startsAt);
     assert.deepEqual(pass.relevantDates, [{ startDate: '2030-08-26T13:00:00.000Z', endDate: event.endsAt }]);
@@ -196,7 +199,9 @@ describe('Google Wallet', () => {
   });
 
   test('klassen har tid, sted og veibeskrivelse; hvert objekt har QR med billettlenken', () => {
-    const { payload } = googleClaims(opts);
+    const { payload } = googleClaims({ ...opts, heroImage: 'https://booking.example.com/abcdefghjkmn/bilde/0123456789abcdef.jpg' });
+    assert.deepEqual(payload.eventTicketClasses[0].heroImage, { sourceUri: { uri: 'https://booking.example.com/abcdefghjkmn/bilde/0123456789abcdef.jpg' } });
+    assert.equal(googleClaims({ ...opts, heroImage: 'http://localhost:3000/x.jpg' }).payload.eventTicketClasses[0].heroImage, undefined);
     const [cls] = payload.eventTicketClasses;
     assert.equal(cls.id, '3388000000012345678.event-abcdefghjkmn');
     assert.deepEqual(cls.dateTime, { start: event.startsAt, end: event.endsAt });
@@ -208,7 +213,8 @@ describe('Google Wallet', () => {
     const [obj] = payload.eventTicketObjects;
     assert.equal(obj.id, '3388000000012345678.ticket-k7hq2mxpr9');
     assert.equal(obj.classId, cls.id);
-    assert.deepEqual(obj.barcode, { type: 'QR_CODE', value: tickets[0].url, alternateText: 'K7HQ-2MXP-R9' });
+    assert.deepEqual(obj.barcode, { type: 'QR_CODE', value: tickets[0].url, alternateText: 'KMRTW' });
+    assert.equal(obj.ticketNumber, 'KMRTW');
     assert.equal(obj.ticketHolderName, 'Ola Nordmann');
   });
 });

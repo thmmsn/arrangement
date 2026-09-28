@@ -1,5 +1,5 @@
 import {
-  api, copyToClipboard, formatAnswer, formatEventTime, formatShort, h, notice, secretFromHash, slugFromPath, t,
+  api, copyToClipboard, uploadImage, formatAnswer, formatEventTime, formatShort, h, notice, secretFromHash, slugFromPath, t,
 } from './common.js';
 import { createEventForm } from './event-form.js';
 
@@ -53,8 +53,13 @@ function eventPayload(overrides = {}) {
     showCount, isOpen, allowLate, organizerName, organizerEmail, fields, features, skin, ...overrides };
 }
 
-async function save(payload, message) {
+async function save(payload, message, image = {}) {
   ({ event } = await api(`/admin/events/${slug}`, { method: 'PUT', body: payload, headers: auth }));
+  if (image.upload) event.uploadedImage = (await uploadImage(slug, key, image.upload)).uploadedImage;
+  if (image.removeUpload) {
+    await api(`/admin/events/${slug}/image`, { method: 'DELETE', headers: auth });
+    event.uploadedImage = null;
+  }
   flash = notice('success', message);
   render();
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -161,6 +166,7 @@ function guestsCard() {
           h('td', {}, r.name,
             r.position > 0 ? h('span', { class: 'by' }, t('admin.addedBy', { name: r.contactName })) : null,
             r.late ? h('span', { class: 'by late' }, t('admin.lateTag')) : null,
+            r.doorCode ? h('span', { class: 'by' }, t('admin.doorCode', { code: r.doorCode })) : null,
             r.ticketUrl ? h('a', { class: 'by', href: r.ticketUrl, target: '_blank', rel: 'noopener' }, t('admin.ticket')) : null),
           h('td', {}, r.email ? h('a', { href: `mailto:${r.email}` }, r.email) : h('span', { class: 'muted' }, '–')),
           event.fields.map((f) => h('td', { class: 'answer' }, formatAnswer(f, r.answers))),
@@ -303,7 +309,7 @@ function editCard() {
     skins,
     editing: true,
     submitLabel: t('admin.save'),
-    onSubmit: (payload) => save(payload, t('admin.saved')),
+    onSubmit: (payload, extras) => save(payload, t('admin.saved'), extras.image),
   });
   return h('details', { class: 'card section' }, h('summary', {}, t('admin.edit')), form);
 }

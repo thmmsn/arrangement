@@ -132,6 +132,8 @@ function personRows(ui, event, person) {
     [t('email.name'), person.name],
     [t('email.email'), person.email],
     ...event.fields.map((field) => [field.label, formatAnswer(field, person.answers, ui.lang)]),
+    // Bare i bekreftelsen til gjesten (når arrangementet har billetter): koden som tastes inn i døra.
+    [t('ticket.doorCode'), person.doorCode],
   ];
 }
 

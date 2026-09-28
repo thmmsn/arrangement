@@ -1,4 +1,4 @@
-import { api, copyToClipboard, h, notice, t } from './common.js';
+import { api, copyToClipboard, h, notice, t, uploadImage } from './common.js';
 import { createEventForm } from './event-form.js';
 
 const root = document.getElementById('form-root');
@@ -21,9 +21,18 @@ const { form } = createEventForm({
   // Innlogget via Access: foreslå den e-postadressen som arrangør.
   initial: accessEmail ? { organizerEmail: accessEmail } : {},
   submitLabel: t('create.submit'),
-  async onSubmit(payload) {
+  async onSubmit(payload, { image }) {
     const result = await api('/admin/events', { method: 'POST', body: payload });
-    showResult(result, payload);
+    // Arrangementet er opprettet selv om bildet skulle feile – da vises en advarsel.
+    let imageError = null;
+    if (image.upload) {
+      try {
+        await uploadImage(result.slug, result.adminKey, image.upload);
+      } catch (err) {
+        imageError = err.message;
+      }
+    }
+    showResult(result, payload, imageError);
   },
 });
 root.append(form);
@@ -38,10 +47,11 @@ function linkBox(label, url) {
     h('div', { class: 'linkbox' }, field, copy));
 }
 
-function showResult(result, payload) {
+function showResult(result, payload, imageError) {
   document.querySelector('h1').textContent = t('create.ready');
   root.replaceChildren(
     h('div', { class: 'card' },
+      imageError ? notice('error', imageError) : null,
       h('h2', {}, payload.title),
       linkBox(t('create.eventLink'), result.eventUrl),
       linkBox(t('create.adminLink'), result.adminUrl),

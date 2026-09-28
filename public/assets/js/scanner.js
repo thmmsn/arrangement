@@ -159,6 +159,8 @@ async function checkInOffline(body) {
   if (body.token) {
     const hash = await sha256(body.token);
     entry = status.offline.find((e) => e.token === hash);
+  } else if (body.code && doorCode(body.code)) {
+    entry = status.offline.find((e) => e.door === doorCode(body.code));
   } else if (body.code) {
     const hash = await sha256(normalizeCode(body.code));
     entry = status.offline.find((e) => e.code === hash);
@@ -290,17 +292,29 @@ function parseScan(value) {
     const match = /^\/t\/([A-Za-z0-9_-]+)$/.exec(new URL(value).pathname);
     if (match) return { token: match[1] };
   } catch { /* ikke en lenke */ }
+  if (doorCode(value)) return { code: doorCode(value) };
   const code = normalizeCode(value);
   return code.length === 10 ? { code } : null;
 }
 
 const normalizeCode = (value) => String(value).toLowerCase().replace(/[^a-z0-9]/g, '');
+// Dørkode: 5 bokstaver (uten I og O). Samme regel som på serveren (ids.js).
+const doorCode = (value) => {
+  const code = String(value ?? '').toUpperCase().replace(/[\s-]/g, '');
+  return /^[A-HJ-NP-Z]{5}$/.test(code) ? code : null;
+};
 
 // ---------- Billettnummer og navnesøk ----------
 
 function codeForm() {
+  // Store bokstaver uten autokorrektur. Dørkoden (5 bokstaver) sendes så snart den er skrevet – ingen
+  // knapp å trykke på. Billettnummer fra eldre billetter (10 tegn med tall) sendes med Enter.
   const input = h('input', {
-    id: 'ticket-code', type: 'text', autocomplete: 'off', autocapitalize: 'characters', spellcheck: false, maxLength: 20,
+    id: 'ticket-code', type: 'text', autocomplete: 'off', autocapitalize: 'characters', autocorrect: 'off',
+    spellcheck: false, maxLength: 20, enterKeyHint: 'go',
+  });
+  input.addEventListener('input', () => {
+    if (doorCode(input.value) && input.value.replace(/[\s-]/g, '').length === 5) form.requestSubmit();
   });
   const form = h('form', { class: 'form-row scan-code' },
     h('label', { for: 'ticket-code' }, t('scanner.codeLabel')),

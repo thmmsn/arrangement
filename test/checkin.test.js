@@ -173,7 +173,7 @@ test('admin: innsjekking og angre fra listen, med teller og CSV', async () => {
   assert.ok(done.json.registration.checkedInAt);
   assert.equal(done.json.stats.checkedIn, 1);
   const csv = await app.request({ path: `/api/admin/events/${slug}/registrations.csv`, headers: admin });
-  assert.match(csv.text.split('\r\n')[1], /;\d\d\.\d\d\.\d{4}, \d\d:\d\d$/);
+  assert.match(csv.text.split('\r\n')[1], /;\d\d\.\d\d\.\d{4}, \d\d:\d\d;[A-HJ-NP-Z]{5}$/);
   const undo = await app.request({ method: 'DELETE', path: `/api/admin/events/${slug}/registrations/${ola.id}/checkin`, headers: admin });
   assert.equal(undo.json.registration.checkedInAt, null);
   // Uten admin-nøkkel: ingen tilgang.
@@ -185,4 +185,47 @@ test('uten billetter finnes verken dørvaktlenke eller innsjekking for dørvakte
   const created = await createEvent(app, { features: { tickets: false } });
   assert.equal(created.scannerUrl, null);
   assert.equal((await app.request({ method: 'POST', path: `/api/events/${created.slug}/scanner/login`, body: { key: 'x' } })).status, 401);
+});
+
+test('dørkode: 5 bokstaver per person, unik i arrangementet, i e-posten og i døra', async () => {
+  const { app, slug, checkin, booking, staff, admin } = await setup();
+  const codes = booking.tickets.map((t) => t.doorCode);
+  for (const code of codes) assert.match(code, /^[A-HJ-NP-Z]{5}$/, 'bare bokstaver, uten I og O');
+  assert.notEqual(codes[0], codes[1]);
+
+  // Bekreftelsen har dørkoden til hver person – varselet til arrangøren har den ikke.
+  const guestMail = app.sent.find((m) => m.to === 'ola@example.com');
+  for (const code of codes) assert.match(guestMail.text, new RegExp(`Dørkode: ${code}`));
+  const organizerMail = app.sent.find((m) => m.to === 'arrangor@example.com' && m.subject.startsWith('Ny påmelding'));
+  assert.doesNotMatch(organizerMail.text, /Dørkode/);
+
+  // Tastet inn med små bokstaver og mellomrom – som en dørvakt ville gjort i farten.
+  const res = await checkin({ code: `${codes[1].slice(0, 2).toLowerCase()} ${codes[1].slice(2).toLowerCase()}` });
+  assert.equal(res.json.result, 'checked_in');
+  assert.equal(res.json.person.name, 'Kari Nordmann');
+
+  // Dørkoden gjelder bare sitt eget arrangement.
+  const other = await createEvent(app);
+  const reg = await register(app, other.slug, { email: 'annen@example.com' });
+  const data = await app.request({ path: pathOf(reg.json.ticketsUrl).replace('/b/', '/api/bookings/') });
+  const foreign = data.json.tickets[0].doorCode;
+  if (!codes.includes(foreign)) assert.equal((await checkin({ code: foreign })).json.result, 'invalid');
+
+  // Listen for bruk uten nett har dørkodene.
+  const status = await app.request({ path: `/api/events/${slug}/scanner`, headers: staff });
+  assert.deepEqual(status.json.offline.map((e) => e.door), codes);
+
+  // Admin ser dørkoden, og den står i CSV-filen.
+  const list = await app.request({ path: `/api/admin/events/${slug}`, headers: admin });
+  assert.deepEqual(list.json.registrations.map((r) => r.doorCode), codes);
+});
+
+test('et billettnummer med tall tolkes aldri som dørkode', async () => {
+  const { parseDoorCode } = await import('../src/ids.js');
+  assert.equal(parseDoorCode('abc de'), 'ABCDE');
+  assert.equal(parseDoorCode('ab-cde'), 'ABCDE');
+  assert.equal(parseDoorCode('K7HQ-2MXP-R9'), null);
+  assert.equal(parseDoorCode('KHQMX2'), null);
+  assert.equal(parseDoorCode('ABCIO'), null, 'I og O finnes ikke i dørkoder');
+  assert.equal(parseDoorCode('ABCD'), null);
 });

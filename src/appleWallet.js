@@ -36,7 +36,8 @@ export function passJson({ config, event, site, timeZone, eventUrl, ticket }) {
   const light = luminance(background) < 0.4;
   const foreground = light ? [255, 255, 255] : [30, 30, 30];
   const label = light ? [235, 235, 235] : [70, 70, 70];
-  const code = formatCode(ticket.code);
+  // Dørkoden vises under QR-koden og kan tastes inn i døra.
+  const code = ticket.doorCode || formatCode(ticket.code);
   const directions = appleDirectionsUrl(event);
   const start = new Date(event.startsAt);
   const end = event.endsAt ? new Date(event.endsAt) : null;
@@ -79,7 +80,10 @@ export function passJson({ config, event, site, timeZone, eventUrl, ticket }) {
         dateStyle: 'PKDateStyleShort', timeStyle: 'PKDateStyleShort',
       }],
       primaryFields: [{ key: 'event', label: t('wallet.event'), value: event.title }],
-      secondaryFields: [{ key: 'name', label: t('ticket.holder'), value: ticket.name }],
+      secondaryFields: [
+        { key: 'name', label: t('ticket.holder'), value: ticket.name },
+        { key: 'door', label: t('ticket.doorCode'), value: code, textAlignment: 'PKTextAlignmentRight' },
+      ],
       auxiliaryFields: [
         event.location ? { key: 'location', label: t('email.where'), value: event.location } : null,
         ticket.total > 1 ? { key: 'position', label: t('wallet.ticket'), value: `${ticket.index} / ${ticket.total}` } : null,
@@ -88,7 +92,7 @@ export function passJson({ config, event, site, timeZone, eventUrl, ticket }) {
         { key: 'when', label: t('email.when'), value: formatEventTime(event.startsAt, event.endsAt, timeZone, site.lang) },
         event.location ? { key: 'where', label: t('email.where'), value: event.location } : null,
         directions ? link('directions', t('ticket.directions'), directions, t('ticket.directions')) : null,
-        { key: 'code', label: t('ticket.number'), value: code },
+        { key: 'code', label: t('ticket.number'), value: formatCode(ticket.code) },
         link('ticket', t('wallet.showTicket'), ticket.url, t('wallet.showTicket')),
         link('eventPage', t('wallet.eventPage'), eventUrl, eventUrl),
         { key: 'organizer', label: t('email.organizer'), value: event.organizerName },

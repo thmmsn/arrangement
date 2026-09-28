@@ -143,3 +143,39 @@ test('versjon 3-database migreres: billettnumre, hemmelighet og brytere – inge
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Versjon 5: dørkode per person og tabell for opplastede bilder.
+test('versjon 4-database migreres: alle får en dørkode, unik innenfor arrangementet', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'booking-migrering-'));
+  const path = join(dir, 'booking.db');
+  try {
+    const old = new Database(path);
+    for (const migration of MIGRATIONS.slice(0, 4)) {
+      if (typeof migration === 'function') migration(old);
+      else old.exec(migration);
+    }
+    old.pragma('user_version = 4');
+    const now = '2026-09-01T10:00:00.000Z';
+    old.prepare(`INSERT INTO events (id, slug, admin_key_hash, title, starts_at, organizer_name, organizer_email, created_at, updated_at)
+      VALUES (1, 'abcdefghjkmn', 'x', 'Arrangement', '2099-01-01T10:00:00.000Z', 'Kari', 'kari@example.com', ?, ?)`).run(now, now);
+    old.prepare(`INSERT INTO bookings (id, event_id, contact_name, contact_email, cancel_token_hash, code, created_at)
+      VALUES (1, 1, 'Ola', 'ola@example.com', 'h', 'bbbbbbbbbb', ?)`).run(now);
+    const insert = old.prepare(`INSERT INTO registrations (event_id, booking_id, position, name, email, answers, ticket_code, created_at)
+      VALUES (1, 1, ?, ?, '', '{}', ?, ?)`);
+    for (let i = 0; i < 40; i++) insert.run(i, `Person ${i}`, `cccccccc${String.fromCharCode(97 + Math.floor(i / 20))}${'abcdefghjkmnpqrstuvw'[i % 20]}`, now);
+    old.close();
+
+    const db = openDatabase(path);
+    assert.equal(db.pragma('user_version', { simple: true }), MIGRATIONS.length);
+    const repo = createRepository(db);
+    const codes = repo.listRegistrations(1).map((r) => r.doorCode);
+    assert.equal(codes.length, 40);
+    for (const code of codes) assert.match(code, /^[A-HJ-NP-Z]{5}$/);
+    assert.equal(new Set(codes).size, 40, 'ingen like dørkoder i samme arrangement');
+    assert.equal(repo.findRegistrationByDoorCode(1, codes[7]).name, 'Person 7');
+    assert.equal(repo.imageMeta(1), null);
+    db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

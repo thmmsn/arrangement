@@ -24,6 +24,18 @@ export async function api(path, { method = 'GET', body, headers = {} } = {}) {
   return data;
 }
 
+/** Laster opp et forsidebilde til et arrangement (selve bildet som body). */
+export async function uploadImage(slug, adminKey, blob) {
+  const res = await fetch(`/api/admin/events/${slug}/image`, {
+    method: 'PUT',
+    headers: { 'Content-Type': blob.type, Authorization: `Bearer ${adminKey}` },
+    body: blob,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || t('common.genericError', { status: res.status }));
+  return data;
+}
+
 /**
  * Lager DOM-elementer: h('p', { class: 'x' }, 'tekst', h('b', {}, 'fet')).
  * Tekst settes alltid som tekstnoder, så innhold fra brukere kan aldri tolkes som HTML.
