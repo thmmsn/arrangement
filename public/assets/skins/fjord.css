@@ -1,0 +1,20 @@
+/*
+  name: Fjord
+  name.en: Fjord
+  preview: #eef3f6 #ffffff #1b2b36 #1f6f8b
+*/
+/* Kjølig og rolig: blågrått, sjøblått og hvitt. */
+:root {
+  --bg: #eef3f6;
+  --surface: #ffffff;
+  --ink: #1b2b36;
+  --muted: #5b6f7c;
+  --line: #d6e1e8;
+  --accent: #1f6f8b;
+  --accent-ink: #ffffff;
+  --gold: #9cc3d5;
+  --green: #2f7d62;
+}
+.band {
+  background: repeating-linear-gradient(90deg, var(--accent) 0 30px, var(--gold) 30px 34px, #3d93b2 34px 64px, var(--gold) 64px 68px);
+}

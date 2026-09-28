@@ -1,6 +1,7 @@
 // All konfigurasjon leses fra miljøvariabler (se .env.example).
 
 import { loadSites, normalizeHost } from './sites.js';
+import { loadWalletConfig } from './walletConfig.js';
 
 export function loadConfig(rawEnv = process.env) {
   const env = unquoteAll(rawEnv);
@@ -8,6 +9,9 @@ export function loadConfig(rawEnv = process.env) {
   // Nettstedene: hovednettstedet fra DOMAIN/BASE_URL/tema-variablene, pluss eventuelle SITE_<ID>_*.
   // Ugyldige verdier ignoreres og havner i `warnings`; alvorlige feil kaster SiteConfigError.
   const { sites, mainSite, warnings } = loadSites(env, { port });
+  // Apple Wallet og Google Wallet: valgfrie, og slås av med en advarsel hvis oppsettet er ufullstendig.
+  const wallet = loadWalletConfig(env);
+  warnings.push(...wallet.warnings);
 
   return {
     port,
@@ -18,7 +22,14 @@ export function loadConfig(rawEnv = process.env) {
     theme: mainSite.theme,
     emailFrom: mainSite.emailFrom,
     warnings,
+    wallet: { apple: wallet.apple, google: wallet.google },
     databasePath: env.DATABASE_PATH || 'data/booking.db',
+    // Alle data om et arrangement (påmeldinger, navn, e-post, svar) slettes så mange dager etter
+    // at det er over. Standard 30.
+    deleteAfterDays: parseDays(env.DELETE_AFTER_DAYS, warnings),
+    // Tjenesteadministratoren: får e-post med alle lenkene når et arrangement opprettes eller avlyses.
+    // Flere adresser skilles med komma.
+    adminEmails: parseEmails(env.ADMIN_EMAIL, warnings),
     // Oppretting av arrangementer uten Cloudflare Access. BARE for lokal utvikling – da kan alle som
     // når /admin opprette arrangementer.
     adminNoAuth: ['true', '1', 'yes', 'ja'].includes((env.ADMIN_NO_AUTH || '').trim().toLowerCase()),
@@ -55,6 +66,21 @@ function unquoteAll(env) {
     out[key] = quoted ? value.slice(1, -1) : value;
   }
   return out;
+}
+
+function parseEmails(value, warnings) {
+  const emails = String(value ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const valid = emails.filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+  for (const e of emails) if (!valid.includes(e)) warnings.push(`ADMIN_EMAIL: «${e}» er ikke en gyldig e-postadresse og ignoreres.`);
+  return valid;
+}
+
+function parseDays(value, warnings) {
+  if (value === undefined || String(value).trim() === '') return 30;
+  const n = Number(value);
+  if (Number.isInteger(n) && n >= 1 && n <= 3650) return n;
+  warnings.push(`DELETE_AFTER_DAYS=${JSON.stringify(value)} ignoreres: må være et helt antall dager fra 1 til 3650. Bruker 30.`);
+  return 30;
 }
 
 function parseTrustProxy(value) {

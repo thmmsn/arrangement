@@ -1,0 +1,21 @@
+/*
+  name: Mørk
+  name.en: Dark
+  preview: #15171c #20232a #ece8e1 #e0776b
+*/
+/* Mørk bakgrunn og lys tekst. Aksentfargen gjøres lysere, så knapper og lenker synes godt. */
+:root {
+  color-scheme: dark;
+  --bg: #15171c;
+  --surface: #20232a;
+  --ink: #ece8e1;
+  --muted: #a39d94;
+  --line: #343842;
+  --accent: #e0776b;
+  --accent-ink: #1a1112;
+  --green: #7fc28f;
+  --gold: #d9b46a;
+  --error: #ff8a80;
+}
+.notice.warning { background: #3a3020; border-color: #6b5530; color: #f3dfb0; }
+.hero { background: var(--line); }

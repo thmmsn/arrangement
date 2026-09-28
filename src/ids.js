@@ -6,11 +6,36 @@ const SLUG_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
 export const SLUG_LENGTH = 12;
 export const SLUG_PATTERN = /^[a-z0-9]{8,32}$/;
 
-export function newSlug() {
-  let slug = '';
+function randomCode(length) {
+  let code = '';
   // randomInt bruker rejection sampling, så hvert tegn er uniformt fordelt (ingen modulo-skjevhet).
-  for (let i = 0; i < SLUG_LENGTH; i++) slug += SLUG_ALPHABET[randomInt(SLUG_ALPHABET.length)];
-  return slug;
+  for (let i = 0; i < length; i++) code += SLUG_ALPHABET[randomInt(SLUG_ALPHABET.length)];
+  return code;
+}
+
+export function newSlug() {
+  return randomCode(SLUG_LENGTH);
+}
+
+// Billettnummer (én per person) og påmeldingsnummer: 10 tegn fra samme alfabet, 31^10 ≈ 2^49
+// muligheter. Nummeret alene gir ingen tilgang – lenken til billetten har i tillegg en signatur
+// (se tickets.js). Nummeret vises på billetten, så døra kan taste det inn om QR-koden ikke virker.
+export const CODE_LENGTH = 10;
+export const CODE_PATTERN = new RegExp(`^[${SLUG_ALPHABET}]{${CODE_LENGTH}}$`);
+
+export function newCode() {
+  return randomCode(CODE_LENGTH);
+}
+
+/** «k7hq2mxpr9» → «K7HQ-2MXP-R9», lettere å lese opp og taste inn. */
+export function formatCode(code) {
+  return code.toUpperCase().replace(/^(.{4})(.{4})(.+)$/, '$1-$2-$3');
+}
+
+/** Det dørvakten taster inn («k7hq 2mxp-r9») → «k7hq2mxpr9», eller null hvis det ikke kan være et nummer. */
+export function parseCode(input) {
+  const code = String(input ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return CODE_PATTERN.test(code) ? code : null;
 }
 
 // Hemmelige nøkler (admin-nøkkel og avmeldingsnøkkel). Bare SHA-256-hashen lagres i databasen,

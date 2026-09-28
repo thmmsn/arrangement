@@ -1,0 +1,35 @@
+/*
+  name: Glød
+  name.en: Glow
+  preview: #0c0b14 #16142280 #f1eefe #ff4fd8
+*/
+/* Mørkt, med neonaktig glød rundt knapper, kort og overskrifter. */
+:root {
+  color-scheme: dark;
+  --bg: #0c0b14;
+  --surface: #161422;
+  --ink: #f1eefe;
+  --muted: #a8a2c7;
+  --line: #2b2742;
+  --accent: #ff4fd8;
+  --accent-ink: #13000f;
+  --gold: #5ee7ff;
+  --green: #5effb1;
+  --error: #ff6b8b;
+  --radius: 12px;
+}
+body {
+  background:
+    radial-gradient(50rem 30rem at 15% 0%, rgb(255 79 216 / 0.18), transparent 60%),
+    radial-gradient(40rem 30rem at 90% 20%, rgb(94 231 255 / 0.14), transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+}
+h1 { text-shadow: 0 0 24px rgb(255 79 216 / 0.45); }
+.card, .ticket-card { box-shadow: 0 0 0 1px rgb(255 79 216 / 0.15), 0 0 40px rgb(255 79 216 / 0.12); }
+.btn:not(.secondary):not(.danger) { box-shadow: 0 0 18px rgb(255 79 216 / 0.55); }
+.btn:not(.secondary):not(.danger):hover { box-shadow: 0 0 28px rgb(255 79 216 / 0.8); }
+.band { background: linear-gradient(90deg, var(--accent), var(--gold)); box-shadow: 0 0 20px var(--accent); height: 4px; }
+.badge { box-shadow: 0 0 12px currentColor; }
+.progress > span { box-shadow: 0 0 12px var(--accent); }
+.notice.warning { background: #2a2310; border-color: #5c4a1a; color: #ffe39a; }

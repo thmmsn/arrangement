@@ -8,25 +8,40 @@ import * as templates from './email.js';
 import { accessTokenFrom, AccessError, createAccessVerifier } from './cfAccess.js';
 import { hashSecret, newSecret, newSlug, secretMatches, SLUG_PATTERN } from './ids.js';
 import { rateLimit } from './rateLimit.js';
+import { createPlaceSearch } from './places.js';
 import { loadSites } from './sites.js';
+import { loadSkins, skinName } from './skins.js';
 import { themeCspSources, themeCss } from './theme.js';
+import { createTicketFeature } from './tickets.js';
+import { createTokens } from './tokens.js';
 import { createViews } from './views.js';
-import { registrationStatus, translateErrors, validateBooking, validateEvent, ValidationError } from './validation.js';
+import {
+  deadlineOf, isLate, registrationStatus, translateErrors, validateBooking, validateEvent, ValidationError,
+} from './validation.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VIEWS = path.join(ROOT, 'views');
 const ASSETS = path.join(ROOT, 'public', 'assets');
 // Egne filer (logo, favicon, CSS) fra ./branding, tilgjengelige som /assets/custom/<fil>.
 const BRANDING = path.join(ROOT, 'branding');
+// Skins (utseender per arrangement): de innebygde, og eierens egne i ./skins (se docs/skins.md).
+const BUILTIN_SKINS = path.join(ASSETS, 'skins');
+const CUSTOM_SKINS = path.join(ROOT, 'skins');
+// jsQR leser QR-koder i nettleseren på skannersiden (når nettleseren ikke har BarcodeDetector).
+const JSQR = path.join(ROOT, 'node_modules', 'jsqr', 'dist', 'jsQR.js');
+const DAY = 86_400_000;
 
 // Maks antall forespørsler per IP-adresse innenfor tidsvinduet. Kan overstyres via config.rateLimits.
 const DEFAULT_RATE_LIMITS = {
   register: { windowMs: 10 * 60_000, max: 30 },
   cancel: { windowMs: 10 * 60_000, max: 30 },
   create: { windowMs: 15 * 60_000, max: 20 },
+  scanner: { windowMs: 10 * 60_000, max: 30 }, // innlogging med dørvaktlenken
 };
 
-export function createApp({ repo, mailer, config, logger = console, accessVerifier = defaultAccessVerifier(config) }) {
+export function createApp({
+  repo, mailer, config, logger = console, accessVerifier = defaultAccessVerifier(config), placeSearch = createPlaceSearch(),
+}) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy);
@@ -58,6 +73,9 @@ export function createApp({ repo, mailer, config, logger = console, accessVerifi
     themeFiles.set(file, css);
   }
   const views = createViews(VIEWS);
+  const { skins, warnings: skinWarnings } = loadSkins({ dirs: config.skinDirs ?? [BUILTIN_SKINS, CUSTOM_SKINS] });
+  for (const warning of skinWarnings) logger.warn?.(`ADVARSEL: ${warning}`);
+  const skinFiles = new Map([...skins.values()].map((skin) => [skin.file, skin.css]));
   const csp = themeCspSources(sites.map((site) => site.theme));
 
   // ---------- Lenker ----------
@@ -69,6 +87,8 @@ export function createApp({ repo, mailer, config, logger = console, accessVerifi
   // Med eget admin-vertsnavn peker admin-lenkene dit; ellers til arrangementets domene.
   const adminBaseUrl = (event) => (config.adminHost ? `https://${config.adminHost}` : siteOf(event).baseUrl);
   const adminUrl = (event, key) => `${adminBaseUrl(event)}/admin/${event.slug}#${key}`;
+  // Samme admin-side, åpnet rett på «Avlys arrangement».
+  const cancelEventUrl = (event, key) => `${adminBaseUrl(event)}/admin/${event.slug}/avlys#${key}`;
 
   // ---------- Svar uten innhold ----------
   // Uten en gyldig arrangementslenke skal et offentlig domene ikke avsløre noe som helst: forsiden,
@@ -80,8 +100,28 @@ export function createApp({ repo, mailer, config, logger = console, accessVerifi
     .type('text/plain')
     .send('Not Found');
 
-  const sendPage = (res, name, site, status = 200) =>
-    res.status(status).type('html').send(views(name, { ...site, cssHref: cssHref.get(site.id) }));
+  // `event` (valgfritt) gir arrangementets skin, lagt oppå nettstedets tema.
+  const sendPage = (res, name, site, status = 200, event = null) => {
+    const skinHref = (event?.skin && skins.get(event.skin)?.href) || '';
+    res.status(status).type('html').send(views(name, { ...site, cssHref: cssHref.get(site.id), skinHref }));
+  };
+
+  // ---------- Oppbevaring ----------
+  // Alle data om et arrangement slettes så mange dager etter at det er over (DELETE_AFTER_DAYS).
+  const deleteAfterDays = config.deleteAfterDays ?? 30;
+  const deleteAt = (event) => new Date(Date.parse(event.endsAt || event.startsAt) + deleteAfterDays * DAY);
+
+  // Klientens IP til rate limiting. Bak Cloudflare Tunnel kommer alle forespørsler fra cloudflared,
+  // så den ekte adressen må hentes fra headeren Cloudflare setter (CLIENT_IP_HEADER).
+  const clientKey = (req) => (config.clientIpHeader && req.get(config.clientIpHeader)) || req.ip;
+  const limits = { ...DEFAULT_RATE_LIMITS, ...config.rateLimits };
+  const limiter = (options) => rateLimit({ ...options, key: clientKey, message: (req) => req.t('errors.rateLimited') });
+
+  // ---------- Billetter, kalender, Wallet og innsjekking (se tickets.js) ----------
+  const tokens = createTokens(repo.secret());
+  const tickets = createTicketFeature({
+    repo, config, tokens, siteOf, eventUrl, findEventBySlug, notFound, sendPage, logger, adminT, placeSearch, limiter, limits,
+  });
 
   // ---------- Felles mellomvare ----------
 
@@ -119,6 +159,12 @@ export function createApp({ repo, mailer, config, logger = console, accessVerifi
     if (!css) return notFound(req, res);
     res.type('text/css').set('Cache-Control', 'public, max-age=31536000, immutable').send(css);
   });
+  app.get('/assets/skins/:file', (req, res) => {
+    const css = skinFiles.get(req.params.file);
+    if (!css) return notFound(req, res);
+    res.type('text/css').set('Cache-Control', 'public, max-age=31536000, immutable').send(css);
+  });
+  app.get('/assets/vendor/jsqr.js', (req, res) => res.set('Cache-Control', 'public, max-age=86400').type('text/javascript').sendFile(JSQR));
   app.use('/assets', express.static(ASSETS, { maxAge: '1h' }));
   app.get('/robots.txt', (req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /\n'));
 
@@ -149,10 +195,12 @@ export function createApp({ repo, mailer, config, logger = console, accessVerifi
 
   app.get('/admin', adminGate('page'), (req, res) => res.redirect('/admin/ny'));
   app.get('/admin/ny', adminGate('page'), (req, res) => sendPage(res, 'new', mainSite));
-  app.get('/admin/:slug', adminGate('page'), (req, res) => {
+  const adminPage = (req, res) => {
     if (!findEventBySlug(req.params.slug)) return notFound(req, res);
     sendPage(res, 'admin', mainSite);
-  });
+  };
+  app.get('/admin/:slug', adminGate('page'), adminPage);
+  app.get('/admin/:slug/avlys', adminGate('page'), adminPage);
 
   function findEventBySlug(value) {
     const slug = String(value).toLowerCase();
@@ -167,6 +215,8 @@ export function createApp({ repo, mailer, config, logger = console, accessVerifi
     res.redirect(301, `${config.adminHost ? adminBaseUrl(event) : ''}/admin/${event.slug}`);
   });
 
+  tickets.mountPages(app);
+
   // Arrangementssiden og avmeldingssiden. Åpnes et arrangement på feil domene, sendes nettleseren
   // videre til arrangementets eget domene (301), med samme sti – og nettleseren tar med #nøkkelen.
   const eventPage = (view) => (req, res) => {
@@ -174,7 +224,7 @@ export function createApp({ repo, mailer, config, logger = console, accessVerifi
     if (!event) return notFound(req, res);
     const site = siteOf(event);
     if (site !== req.site) return res.redirect(301, `${site.baseUrl}${req.originalUrl}`);
-    sendPage(res, view, site);
+    sendPage(res, view, site, 200, event);
   };
   app.get('/:slug', eventPage('event'));
   app.get('/:slug/avmelding', eventPage('cancel'));
@@ -190,11 +240,6 @@ export function createApp({ repo, mailer, config, logger = console, accessVerifi
   const adminApi = express.Router({ caseSensitive: true });
   adminApi.use(adminGate('api'), express.json({ limit: '100kb' }), noStore);
 
-  // Klientens IP til rate limiting. Bak Cloudflare Tunnel kommer alle forespørsler fra cloudflared,
-  // så den ekte adressen må hentes fra headeren Cloudflare setter (CLIENT_IP_HEADER).
-  const clientKey = (req) => (config.clientIpHeader && req.get(config.clientIpHeader)) || req.ip;
-  const limits = { ...DEFAULT_RATE_LIMITS, ...config.rateLimits };
-  const limiter = (options) => rateLimit({ ...options, key: clientKey, message: (req) => req.t('errors.rateLimited') });
   const registerLimiter = limiter(limits.register);
   const cancelLimiter = limiter(limits.cancel);
   const createLimiter = limiter(limits.create);
@@ -251,7 +296,13 @@ export function createApp({ repo, mailer, config, logger = console, accessVerifi
       fields: event.fields,
       maxPerBooking: event.maxPerBooking,
       timeZone: config.timeZone,
+      geo: event.geo,
+      // Kalender og veibeskrivelse: bare offentlig informasjon, samme for alle.
+      links: publicLinks(event),
       status: registrationStatus(event, count),
+      // Åpen etter fristen fordi arrangøren tillater etteranmelding.
+      late: registrationStatus(event, count) === 'open' && isLate(event),
+      cancelled: Boolean(event.cancelledAt),
       // Arrangøren kan skjule antallet. Da skjules også kapasiteten, siden den sammen med
       // «fullt»-statusen ellers ville røpet mye av det samme.
       count: showCount ? count : null,
@@ -260,9 +311,18 @@ export function createApp({ repo, mailer, config, logger = console, accessVerifi
     };
   }
 
+  function publicLinks(event) {
+    const { ics, googleCalendar, directions, appleDirections } = tickets.links(event, '');
+    return { ics, googleCalendar, directions, appleDirections };
+  }
+
   function adminEvent(event, count) {
     return {
       ...publicEvent(event, count),
+      features: event.features,
+      // Dørvaktlenken kan alltid vises på nytt: nøkkelen er avledet (se tokens.js).
+      scannerUrl: event.features.tickets ? tickets.scannerUrl(event) : null,
+      checkedIn: repo.countCheckedIn(event.id),
       count,
       capacity: event.capacity,
       spotsLeft: event.capacity != null ? Math.max(0, event.capacity - count) : null,
@@ -270,6 +330,13 @@ export function createApp({ repo, mailer, config, logger = console, accessVerifi
       isOpen: event.isOpen,
       organizerEmail: event.organizerEmail,
       site: siteOf(event).id,
+      allowLate: event.allowLate,
+      skin: event.skin,
+      cancelledAt: event.cancelledAt,
+      cancelMessage: event.cancelMessage,
+      reportAt: deadlineOf(event).toISOString(),
+      reportSentAt: event.deadlineReportSentAt,
+      deleteAt: deleteAt(event).toISOString(),
       createdAt: event.createdAt,
     };
   }
@@ -326,30 +393,40 @@ export function createApp({ repo, mailer, config, logger = console, accessVerifi
     const { contact, persons } = validateBooking(req.body, event.fields, event.maxPerBooking);
     const cancelToken = newSecret(18);
     const booking = { contactName: contact.name, contactEmail: contact.email, persons };
+    // Etter fristen (når arrangøren tillater det): merkes, og arrangøren får «Etteranmelding» i emnet.
+    const late = isLate(event);
 
     let result;
     try {
-      result = repo.register(event, { ...booking, cancelTokenHash: hashSecret(cancelToken) });
+      result = repo.register(event, { ...booking, late, cancelTokenHash: hashSecret(cancelToken) });
     } catch (err) {
       if (err instanceof CapacityError) return res.status(409).json(notEnoughSpots(req, err.spotsLeft));
       throw err;
     }
 
+    // Billettside, Wallet, kalender og PDF-vedlegg – etter arrangementets brytere.
+    const extras = await tickets.confirmationExtras(event, result.bookingCode);
     const [guestSent] = await sendEmails([
-      templates.guestConfirmation({
-        event,
-        booking,
-        eventUrl: eventUrl(event),
-        cancelUrl: cancelUrl(event, cancelToken),
-        timeZone: config.timeZone,
-        site,
-      }),
-      templates.organizerNotification({ event, booking, count: result.count, site }),
+      {
+        ...templates.guestConfirmation({
+          event,
+          booking,
+          eventUrl: eventUrl(event),
+          cancelUrl: cancelUrl(event, cancelToken),
+          timeZone: config.timeZone,
+          site,
+          links: extras.links,
+        }),
+        attachments: extras.attachments,
+      },
+      templates.organizerNotification({ event, booking, count: result.count, site, late }),
     ]);
 
     res.status(201).json({
       booking: { contactName: contact.name, contactEmail: contact.email, persons: persons.map(({ name }) => ({ name })) },
       emailSent: guestSent,
+      // Den som meldte på, får billettene med én gang – samme lenke som i e-posten.
+      ticketsUrl: extras.links.tickets,
       event: publicEvent(event, result.count),
     });
   });
@@ -403,6 +480,8 @@ export function createApp({ repo, mailer, config, logger = console, accessVerifi
     });
   });
 
+  tickets.mountApi(api, { loadPublicEvent });
+
   // ---------- API: administrasjon ----------
 
   const siteIds = sites.map((site) => site.id);
@@ -412,34 +491,103 @@ export function createApp({ repo, mailer, config, logger = console, accessVerifi
     accessEmail: req.accessUser?.email ?? null,
     // Nettstedene arrangøren kan velge mellom. Hovednettstedet først.
     sites: sites.map(({ id, label, lang, baseUrl }) => ({ id, label, lang, baseUrl })),
+    // Utseender arrangøren kan velge, med navn på admin-språket og farger til forhåndsvisningen.
+    skins: [...skins.values()].map((skin) => ({ id: skin.id, name: skinName(skin, mainSite.lang), preview: skin.preview })),
+    deleteAfterDays,
+    // Wallet-bryterne vises bare når tjenesten er satt opp.
+    wallets: { apple: Boolean(config.wallet?.apple), google: Boolean(config.wallet?.google) },
   }));
 
+  const skinIds = [...skins.keys()];
+
+  // Til tjenesteadministratoren(e) (ADMIN_EMAIL): samme innhold, med adressen byttet ut.
+  const toAdmins = (message) => config.adminEmails?.length
+    ? config.adminEmails.map((to) => ({ ...message, to, replyTo: undefined }))
+    : [];
+
   adminApi.post('/events', createLimiter, requireCreator, async (req, res) => {
-    const data = validateEvent(req.body, { siteIds });
+    const data = validateEvent(req.body, { siteIds, skinIds });
     let slug = newSlug();
     while (repo.findEvent(slug)) slug = newSlug(); // Kollisjon er svært usannsynlig, men sjekkes likevel.
     const adminKey = newSecret();
 
     const event = repo.createEvent({ ...data, slug, adminKeyHash: hashSecret(adminKey) });
     const urls = { eventUrl: eventUrl(event), adminUrl: adminUrl(event, adminKey) };
+    // Den første e-posten inneholder alt arrangøren trenger senere: admin-lenken finnes bare her.
+    const details = {
+      event,
+      ...urls,
+      cancelEventUrl: cancelEventUrl(event, adminKey),
+      scannerUrl: event.features.tickets ? tickets.scannerUrl(event) : null,
+      reportAt: deadlineOf(event),
+      deleteAt: deleteAt(event),
+      timeZone: config.timeZone,
+    };
     const [emailSent] = await sendEmails([
-      templates.eventCreated({ event, ...urls, timeZone: config.timeZone, site: siteOf(event) }),
+      templates.eventCreated({ ...details, site: siteOf(event) }),
+      // Tjenesteadministratoren varsles om hvert nye arrangement, med de samme lenkene – på
+      // hovednettstedets språk.
+      ...toAdmins(templates.eventCreated({ ...details, site: mainSite, forAdmin: true, createdBy: req.accessUser?.email ?? null })),
     ]);
 
-    res.status(201).json({ slug, adminKey, ...urls, emailSent });
+    res.status(201).json({ slug, adminKey, ...urls, scannerUrl: details.scannerUrl, emailSent });
+  });
+
+  // Avlys arrangementet: påmeldingen stenges, billettene slutter å virke og kalenderfilen blir
+  // «avlyst». body: { notify: boolean, message?: string } – med notify får hver påmelding en e-post
+  // med arrangørens melding. Arrangøren og tjenesteadministratoren får en kvittering.
+  const MAX_CANCEL_MESSAGE = 2000;
+  adminApi.post('/events/:slug/cancel', loadAdminEvent, requireEventAdmin, async (req, res) => {
+    const { event } = req;
+    const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+    if (message.length > MAX_CANCEL_MESSAGE) {
+      throw new ValidationError({ cancelMessage: { key: 'cancelMessageTooLong', vars: { max: MAX_CANCEL_MESSAGE } } });
+    }
+    if (event.cancelledAt) return res.json({ event: adminEvent(event, repo.countRegistrations(event.id)), notified: 0 });
+
+    repo.setCancelled(event.id, new Date().toISOString(), message || null);
+    const cancelled = repo.findEventById(event.id);
+    const site = siteOf(cancelled);
+
+    // Én e-post per påmelding, til den som meldte på.
+    const bookings = [...new Map(repo.listRegistrations(event.id).map((r) => [r.bookingId, r])).values()]
+      .map((r) => ({ contactName: r.contactName, contactEmail: r.contactEmail }));
+    const guestResults = req.body?.notify
+      ? await sendEmails(bookings.map((booking) =>
+        templates.eventCancelledGuest({ event: cancelled, booking, message, timeZone: config.timeZone, site })))
+      : [];
+    const notified = guestResults.filter(Boolean).length;
+
+    const receipt = { event: cancelled, notified, deleteAt: deleteAt(cancelled), timeZone: config.timeZone };
+    await sendEmails([
+      templates.eventCancelledOrganizer({ ...receipt, site }),
+      ...toAdmins(templates.eventCancelledOrganizer({ ...receipt, site: mainSite })),
+    ]);
+    res.json({ event: adminEvent(cancelled, repo.countRegistrations(event.id)), notified });
+  });
+
+  // Opphev avlysningen (f.eks. ved et feiltrykk). Ingen får e-post om dette.
+  adminApi.delete('/events/:slug/cancel', loadAdminEvent, requireEventAdmin, (req, res) => {
+    repo.setCancelled(req.event.id, null);
+    const event = repo.findEventById(req.event.id);
+    res.json({ event: adminEvent(event, repo.countRegistrations(event.id)) });
   });
 
   adminApi.get('/events/:slug', loadAdminEvent, requireEventAdmin, (req, res) => {
     const registrations = repo.listRegistrations(req.event.id);
     res.json({
       event: adminEvent(req.event, registrations.length),
-      registrations: registrations.map(({ id, bookingId, position, name, email, answers, createdAt, contactName, contactEmail }) =>
-        ({ id, bookingId, position, name, email, answers, createdAt, contactName, contactEmail })),
+      registrations: registrations.map(({
+        id, bookingId, position, name, email, answers, createdAt, contactName, contactEmail, code, checkedInAt, checkedInBy, late,
+      }) => ({
+        id, bookingId, position, name, email, answers, createdAt, contactName, contactEmail, checkedInAt, checkedInBy, late,
+        ticketUrl: req.event.features.tickets ? tickets.ticketUrl(req.event, code) : null,
+      })),
     });
   });
 
   adminApi.put('/events/:slug', loadAdminEvent, requireEventAdmin, (req, res) => {
-    const data = validateEvent(req.body, { siteIds });
+    const data = validateEvent(req.body, { siteIds, skinIds });
     repo.updateEvent(req.event.id, data);
     const event = repo.findEvent(req.event.slug);
     res.json({ event: adminEvent(event, repo.countRegistrations(event.id)) });
@@ -464,6 +612,8 @@ export function createApp({ repo, mailer, config, logger = console, accessVerifi
     res.attachment(adminT('csv.filename', { slug: req.event.slug }));
     res.send(csv);
   });
+
+  tickets.mountAdminApi(adminApi, { loadAdminEvent, requireEventAdmin });
 
   // Feil i API-et blir alltid til JSON, med melding på språket forespørselen gjelder (req.t).
   const apiErrors = (err, req, res, next) => {
@@ -491,6 +641,45 @@ export function createApp({ repo, mailer, config, logger = console, accessVerifi
 
   // Alt annet – også forsiden – finnes ikke.
   app.use(notFound);
+
+  // ---------- Vedlikehold (kjøres jevnlig av server.js) ----------
+
+  /**
+   * 1. Rapport til arrangøren for hvert arrangement der påmeldingsfristen er nådd.
+   * 2. Sletter alle data om arrangementer som var over for mer enn DELETE_AFTER_DAYS dager siden.
+   * Returnerer hva som ble gjort, for logg og tester.
+   */
+  app.runMaintenance = async (now = new Date()) => {
+    const reported = [];
+    for (const event of repo.eventsDueForReport(now)) {
+      // Avlyste arrangementer får ingen rapport.
+      if (event.cancelledAt) {
+        repo.markReportSent(event.id, now);
+        continue;
+      }
+      const site = siteOf(event);
+      const registrations = repo.listRegistrations(event.id);
+      const message = templates.deadlineReport({
+        event, registrations, count: registrations.length, site, timeZone: config.timeZone,
+        scannerUrl: event.features.tickets ? tickets.scannerUrl(event) : null, deleteAt: deleteAt(event),
+      });
+      if (registrations.length) {
+        message.attachments = [{
+          filename: site.t('csv.filename', { slug: event.slug }),
+          content: Buffer.from(registrationsToCsv(event, registrations, config.timeZone, site.lang)),
+          contentType: 'text/csv; charset=utf-8',
+        }];
+      }
+      const [sent] = await sendEmails([message]);
+      // Går sendingen galt, prøves det igjen ved neste kjøring – men ikke i mer enn to døgn.
+      if (sent || now - deadlineOf(event) > 2 * DAY) {
+        repo.markReportSent(event.id, now);
+        if (sent) reported.push(event.slug);
+      }
+    }
+    const deleted = repo.deleteEventsEndedBefore(new Date(now.getTime() - deleteAfterDays * DAY));
+    return { reported, deleted };
+  };
 
   return app;
 }

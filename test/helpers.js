@@ -14,23 +14,28 @@ const noRateLimits = {
   register: { windowMs: 60_000, max: 10_000 },
   cancel: { windowMs: 60_000, max: 10_000 },
   create: { windowMs: 60_000, max: 10_000 },
+  scanner: { windowMs: 60_000, max: 10_000 },
 };
 
 /**
- * Starter appen med `env` som miljøvariabler. Returnerer { request, repo, sent, config }.
- * `sent` samler alle e-postene som ville blitt sendt.
+ * Starter appen med `env` som miljøvariabler. Returnerer { request, repo, sent, config, app }.
+ * `sent` samler alle e-postene som ville blitt sendt. `placeSearch` erstatter Kartverket-oppslaget.
  */
-export async function startApp(env = {}, { configOverrides = {}, accessVerifier } = {}) {
+export async function startApp(env = {}, { configOverrides = {}, accessVerifier, placeSearch, mailer: customMailer } = {}) {
   const sent = [];
   const config = { ...loadConfig(env), rateLimits: noRateLimits, ...configOverrides };
   const repo = createRepository(openDatabase(':memory:'));
-  const mailer = { send: async (message) => { sent.push(message); return { id: 'test' }; } };
-  const app = createApp({ repo, mailer, config, logger: quiet, ...(accessVerifier !== undefined && { accessVerifier }) });
+  const mailer = customMailer ?? { send: async (message) => { sent.push(message); return { id: 'test' }; } };
+  const app = createApp({
+    repo, mailer, config, logger: quiet,
+    ...(accessVerifier !== undefined && { accessVerifier }),
+    ...(placeSearch && { placeSearch }),
+  });
   const server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   servers.push(server);
   const port = server.address().port;
-  return { request: (options) => request(port, options), repo, sent, config };
+  return { request: (options) => request(port, options), repo, sent, config, app };
 }
 
 /** `body` sendes som JSON; `raw` sendes som den er (f.eks. for å teste ugyldig JSON). */
@@ -65,6 +70,19 @@ export function eventInput(overrides = {}) {
     fields: [],
     ...overrides,
   };
+}
+
+/** Påmelding via det offentlige API-et. `guests`: navn på personer som legges til. */
+export async function register(app, slug, { name = 'Ola Nordmann', email = 'ola@example.com', guests = [], headers = {} } = {}) {
+  return app.request({
+    method: 'POST', path: `/api/events/${slug}/registrations`, headers,
+    body: { name, email, guests: guests.map((g) => ({ name: g })) },
+  });
+}
+
+/** «a=1; Path=/; HttpOnly» ×n → «a=1; b=2», klar til å sendes som Cookie-header. */
+export function cookieHeader(res) {
+  return (res.headers['set-cookie'] ?? []).map((c) => c.split(';')[0]).join('; ');
 }
 
 /** Oppretter et arrangement via admin-API-et og returnerer { slug, adminKey, eventUrl, adminUrl }. */

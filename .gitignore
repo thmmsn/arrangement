@@ -4,3 +4,5 @@ data/
 *.db
 *.db-shm
 *.db-wal
+secrets/*
+!secrets/.gitkeep

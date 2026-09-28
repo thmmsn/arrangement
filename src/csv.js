@@ -19,6 +19,7 @@ export function registrationsToCsv(event, registrations, timeZone, lang = 'nb') 
   const header = [
     '#', t('csv.registeredAt'), t('csv.name'), t('csv.email'), t('csv.bookedBy'), t('csv.contactEmail'),
     ...event.fields.map((f) => f.label),
+    t('csv.late'), t('csv.checkedIn'),
   ];
   const rows = registrations.map((r, i) => [
     i + 1,
@@ -28,6 +29,8 @@ export function registrationsToCsv(event, registrations, timeZone, lang = 'nb') 
     r.contactName,
     r.contactEmail,
     ...event.fields.map((f) => formatAnswer(f, r.answers, lang)),
+    r.late ? t('answer.yes') : '',
+    r.checkedInAt ? formatDateTime(r.checkedInAt, timeZone, lang) : '',
   ]);
   return '\uFEFF' + [header, ...rows].map((row) => row.map(cell).join(SEPARATOR)).join('\r\n') + '\r\n';
 }

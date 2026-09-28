@@ -75,7 +75,6 @@ test('versjon 2-database migreres: eksisterende arrangementer havner på hovedne
 
     const db = openDatabase(path);
     assert.equal(db.pragma('user_version', { simple: true }), MIGRATIONS.length);
-    assert.equal(MIGRATIONS.length, 3);
     const repo = createRepository(db);
     const event = repo.findEvent('abcdefghjkmn');
     assert.equal(event.site, 'main');
@@ -83,6 +82,62 @@ test('versjon 2-database migreres: eksisterende arrangementer havner på hovedne
     assert.equal(repo.countRegistrations(1), 1);
     assert.ok(repo.findBookingByToken(1, hashSecret('nokkel')), 'avmeldingslenken virker fortsatt');
     assert.deepEqual(repo.countEventsBySite(), { main: 1 });
+    db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Versjon 4: billetter, innsjekking, kartpunkt, etteranmelding, skin og avlysning.
+test('versjon 3-database migreres: billettnumre, hemmelighet og brytere – ingen rapport for gamle frister', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'booking-migrering-'));
+  const path = join(dir, 'booking.db');
+  try {
+    const old = new Database(path);
+    for (const migration of MIGRATIONS.slice(0, 3)) old.exec(migration);
+    old.pragma('user_version = 3');
+    const now = '2026-09-01T10:00:00.000Z';
+    const insertEvent = old.prepare(`INSERT INTO events (id, slug, admin_key_hash, title, starts_at, organizer_name, organizer_email, created_at, updated_at)
+      VALUES (?, ?, 'x', 'Arrangement', ?, 'Kari', 'kari@example.com', ?, ?)`);
+    insertEvent.run(1, 'abcdefghjkmn', '2020-01-01T10:00:00.000Z', now, now); // fristen er for lengst passert
+    insertEvent.run(2, 'pqrstuvwxyza', '2099-01-01T10:00:00.000Z', now, now); // fristen er i fremtiden
+    old.prepare(`INSERT INTO bookings (id, event_id, contact_name, contact_email, cancel_token_hash, created_at)
+      VALUES (1, 2, 'Ola', 'ola@example.com', ?, ?)`).run(hashSecret('nokkel'), now);
+    const insertPerson = old.prepare(`INSERT INTO registrations (event_id, booking_id, position, name, email, answers, created_at)
+      VALUES (2, 1, ?, ?, '', '{}', ?)`);
+    insertPerson.run(0, 'Ola', now);
+    insertPerson.run(1, 'Kari', now);
+    old.close();
+
+    const db = openDatabase(path);
+    assert.equal(db.pragma('user_version', { simple: true }), MIGRATIONS.length);
+    const repo = createRepository(db);
+    assert.match(repo.secret(), /^[0-9a-f]{64}$/);
+
+    const persons = repo.listRegistrations(2);
+    assert.equal(persons.length, 2);
+    for (const p of persons) {
+      assert.match(p.code, /^[a-hj-km-np-z2-9]{10}$/);
+      assert.equal(p.checkedInAt, null);
+      assert.equal(p.late, false);
+    }
+    assert.notEqual(persons[0].code, persons[1].code);
+    assert.match(persons[0].bookingCode, /^[a-z0-9]{10}$/);
+    assert.equal(repo.findRegistrationByCode(persons[1].code).name, 'Kari');
+    assert.equal(repo.findBookingByCode(persons[0].bookingCode).persons.length, 2);
+
+    const future = repo.findEvent('pqrstuvwxyza');
+    assert.deepEqual(future.features, { tickets: true, calendar: true, pdf: true, googleWallet: true, appleWallet: true });
+    assert.equal(future.scannerVersion, 1);
+    assert.equal(future.allowLate, false);
+    assert.equal(future.skin, null);
+    assert.equal(future.geo, null);
+    assert.equal(future.cancelledAt, null);
+    assert.equal(future.deadlineReportSentAt, null);
+    // Et gammelt arrangement får ingen rapport i det øyeblikket appen oppgraderes.
+    assert.ok(repo.findEvent('abcdefghjkmn').deadlineReportSentAt);
+    assert.deepEqual(repo.eventsDueForReport(new Date('2030-01-01T00:00:00Z')).map((e) => e.slug), []);
+    assert.equal(db.pragma('secure_delete', { simple: true }), 1);
     db.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });

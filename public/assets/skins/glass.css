@@ -1,0 +1,37 @@
+/*
+  name: Glass
+  name.en: Glass
+  preview: #6d5bd0 #ffffffb3 #1c1a2e #6d5bd0
+*/
+/* Fargerik bakgrunn med halvgjennomsiktige kort som gjør bakgrunnen uskarp bak seg («frostet glass»). */
+:root {
+  --bg: #e9e6f7;
+  --surface: rgb(255 255 255 / 0.62);
+  --ink: #1c1a2e;
+  --muted: #55517a;
+  --line: rgb(255 255 255 / 0.7);
+  --accent: #6d5bd0;
+  --gold: #f0a6c8;
+  --green: #2f8f6f;
+  --input-border: rgb(28 26 46 / 0.18);
+  --radius: 18px;
+}
+body {
+  background:
+    radial-gradient(60rem 40rem at 10% -10%, #b9a8ff 0%, transparent 60%),
+    radial-gradient(50rem 40rem at 110% 10%, #ffc2dd 0%, transparent 55%),
+    radial-gradient(60rem 50rem at 50% 120%, #9fe3ff 0%, transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+}
+.card, .person, .field-item, .notice, .ticket-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  backdrop-filter: blur(18px) saturate(160%);
+  box-shadow: 0 10px 40px rgb(40 30 90 / 0.12);
+}
+input[type='text'], input[type='email'], input[type='tel'], input[type='number'], input[type='url'],
+input[type='datetime-local'], select, textarea { background: rgb(255 255 255 / 0.75); }
+.band { display: none; }
+.meta { border-color: rgb(28 26 46 / 0.1); }

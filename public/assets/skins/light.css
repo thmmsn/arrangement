@@ -1,0 +1,18 @@
+/*
+  name: Lys
+  name.en: Light
+  preview: #f7f7f5 #ffffff #1d1d1f #2f5bd3
+*/
+/* Rent og lyst, med nøytrale gråtoner. Aksentfargen fra nettstedet beholdes. */
+:root {
+  color-scheme: light;
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --ink: #1d1d1f;
+  --muted: #6e6e73;
+  --line: #e5e5e2;
+  --gold: #c9c9c4;
+  --green: #2e7d4f;
+}
+.band { height: 4px; background: var(--accent); }
+.card { box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.04); }

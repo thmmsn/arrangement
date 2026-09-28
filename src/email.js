@@ -1,4 +1,4 @@
-import { formatAnswer, formatEventTime, nameList as formatNames } from './format.js';
+import { formatAnswer, formatDateTime, formatEventTime, nameList as formatNames } from './format.js';
 import { escapeHtml } from './html.js';
 import { DEFAULT_COLORS } from './theme.js';
 import { translator } from '../public/assets/i18n/index.js';
@@ -10,15 +10,28 @@ const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 // `from` er standardavsenderen; hver melding kan ha sin egen (nettstedets EMAIL_FROM).
 export function createMailer({ apiKey, from: defaultFrom, fetchImpl = fetch, logger = console }) {
   return {
-    async send({ from = defaultFrom, to, subject, html, text, replyTo }) {
+    // attachments: [{ filename, content: Buffer, contentType }] – f.eks. kalenderfil og PDF-billett.
+    async send({ from = defaultFrom, to, subject, html, text, replyTo, attachments = [] }) {
       if (!apiKey) {
-        logger.log(`\n[e-post – ikke sendt, RESEND_API_KEY mangler]\nFra: ${from}\nTil: ${to}\nEmne: ${subject}\n\n${text}\n`);
+        const files = attachments.length ? `\nVedlegg: ${attachments.map((a) => `${a.filename} (${a.content.length} byte)`).join(', ')}` : '';
+        logger.log(`\n[e-post – ikke sendt, RESEND_API_KEY mangler]\nFra: ${from}\nTil: ${to}\nEmne: ${subject}${files}\n\n${text}\n`);
         return { id: 'dev' };
       }
       const res = await fetchImpl(RESEND_ENDPOINT, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from, to: [to], subject, html, text, ...(replyTo && { reply_to: replyTo }) }),
+        body: JSON.stringify({
+          from, to: [to], subject, html, text,
+          ...(replyTo && { reply_to: replyTo }),
+          // Resend vil ha innholdet som base64.
+          ...(attachments.length && {
+            attachments: attachments.map((a) => ({
+              filename: a.filename,
+              content: Buffer.from(a.content).toString('base64'),
+              ...(a.contentType && { content_type: a.contentType }),
+            })),
+          }),
+        }),
         signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) throw new Error(`Resend svarte ${res.status}: ${await res.text()}`);
@@ -148,11 +161,25 @@ function countText(ui, event, count) {
     : ui.t('email.countWithoutCapacity', { count });
 }
 
+// Lenkene under billettknappen: Wallet, kalender, veibeskrivelse og arrangementssiden.
+function extraLinks(ui, links, eventUrl) {
+  const { t } = ui;
+  return [
+    [links.apple, t('links.appleWallet')],
+    [links.google, t('links.googleWallet')],
+    [links.ics, t('links.calendar')],
+    [links.googleCalendar, t('links.googleCalendar')],
+    [links.directions, t('links.directions')],
+    [links.tickets ? eventUrl : null, t('email.confirmation.viewEvent')],
+  ].filter(([href]) => href);
+}
+
 /**
  * Bekreftelse til den som meldte på. Én e-post for hele påmeldingen, med alle personene.
  * Svar på e-posten går til arrangøren.
+ * `links` (valgfritt): billettside, Wallet, kalender og veibeskrivelse, etter arrangementets brytere.
  */
-export function guestConfirmation({ event, booking, eventUrl, cancelUrl, timeZone, site = DEFAULT_SITE }) {
+export function guestConfirmation({ event, booking, eventUrl, cancelUrl, timeZone, site = DEFAULT_SITE, links = {} }) {
   const ui = emailUi(site);
   const { t } = ui;
   const { persons, contactName, contactEmail } = booking;
@@ -162,13 +189,16 @@ export function guestConfirmation({ event, booking, eventUrl, cancelUrl, timeZon
     ? t('email.confirmation.introMany', { count: persons.length, names: nameList(persons, ui.lang) })
     : t('email.confirmation.introOne');
   const cancelKey = several ? 'email.confirmation.cancelMany' : 'email.confirmation.cancelOne';
+  const ticketsLabel = t(several ? 'email.confirmation.viewTickets' : 'email.confirmation.viewTicket');
+  const extras = extraLinks(ui, links, eventUrl);
 
   const html = ui.layout(subject, `
     ${ui.h1(event.title)}
     ${ui.p(`${escapeHtml(t('email.greeting', { name: contactName }))} ${escapeHtml(intro)}`)}
     ${ui.detailsTable(eventRows(ui, event, timeZone))}
     ${personsHtml(ui, event, persons)}
-    ${ui.button(eventUrl, t('email.confirmation.viewEvent'))}
+    ${links.tickets ? ui.button(links.tickets, ticketsLabel) : ui.button(eventUrl, t('email.confirmation.viewEvent'))}
+    ${extras.length ? ui.p(extras.map(([href, label]) => ui.link(href, escapeHtml(label))).join(' &nbsp;·&nbsp; ')) : ''}
     ${ui.small(ui.sentenceWithLink(cancelKey, {}, cancelUrl, escapeHtml(t('email.linkHere'))))}
   `);
   const text = `${t('email.greeting', { name: contactName })}
@@ -179,26 +209,30 @@ ${detailsText(eventRows(ui, event, timeZone))}
 
 ${personsText(ui, event, persons)}
 
-${t('email.confirmation.viewEventText', { url: eventUrl })}
+${[
+    links.tickets ? `${ticketsLabel}: ${links.tickets}` : t('email.confirmation.viewEventText', { url: eventUrl }),
+    ...extras.map(([href, label]) => `${label}: ${href}`),
+  ].join('\n')}
 
 ${t(`${cancelKey}Text`, { url: cancelUrl })}`;
   return { from: site.emailFrom, to: contactEmail, subject, html, text, replyTo: event.organizerEmail };
 }
 
 /** Varsel til arrangøren om ny påmelding. Svar på e-posten går til den som meldte på. */
-export function organizerNotification({ event, booking, count, site = DEFAULT_SITE }) {
+// `late`: påmeldingen kom etter fristen (etteranmelding) – da står det tydelig i emne og overskrift.
+export function organizerNotification({ event, booking, count, site = DEFAULT_SITE, late = false }) {
   const ui = emailUi(site);
   const { t } = ui;
   const { persons, contactName, contactEmail } = booking;
   const extra = persons.length > 1 ? ` +${persons.length - 1}` : '';
-  const subject = t('email.notification.subject', { name: contactName, extra, title: event.title });
+  const subject = t(late ? 'email.notification.subjectLate' : 'email.notification.subject', { name: contactName, extra, title: event.title });
   const intro = persons.length > 1
     ? t('email.notification.introMany', { name: contactName, email: contactEmail, count: persons.length, title: event.title })
     : t('email.notification.introOne', { name: contactName, title: event.title });
   const status = t('email.status', { text: countText(ui, event, count) });
 
   const html = ui.layout(subject, `
-    ${ui.h1(t('email.notification.heading'))}
+    ${ui.h1(t(late ? 'email.notification.headingLate' : 'email.notification.heading'))}
     ${ui.p(escapeHtml(intro))}
     ${personsHtml(ui, event, persons)}
     ${ui.p(escapeHtml(status))}
@@ -255,31 +289,162 @@ ${status}`;
   return { from: site.emailFrom, to: event.organizerEmail, subject, html, text, replyTo: booking.contactEmail };
 }
 
-/** Sendes til arrangøren når arrangementet opprettes – inneholder den hemmelige admin-lenken. */
-export function eventCreated({ event, eventUrl, adminUrl, timeZone, site = DEFAULT_SITE }) {
+// «Dette skjer videre»: e-post per påmelding, rapport ved fristen, etteranmelding og sletting.
+function lifecycleLines(ui, { event, timeZone, reportAt, deleteAt }) {
+  const { t } = ui;
+  const date = (d) => formatDateTime(d.toISOString(), timeZone, ui.lang);
+  return [
+    t('email.eventCreated.perRegistration'),
+    t('email.eventCreated.report', { date: date(reportAt) }),
+    event.allowLate ? t('email.eventCreated.lateAllowed') : t('email.eventCreated.lateNotAllowed'),
+    t('email.eventCreated.deletion', { date: date(deleteAt) }),
+  ];
+}
+
+/**
+ * Sendes når arrangementet opprettes: til arrangøren, og (forAdmin) til tjenesteadministratoren.
+ * Inneholder alt som trengs senere – påmeldingslenke, den hemmelige admin-lenken, dørvaktlenken,
+ * lenken for å avlyse, når rapporten kommer og når dataene slettes. Admin-lenken finnes bare her:
+ * appen lagrer bare en hash av nøkkelen og kan aldri vise den igjen.
+ */
+export function eventCreated({
+  event, eventUrl, adminUrl, cancelEventUrl, scannerUrl, reportAt, deleteAt, timeZone, site = DEFAULT_SITE,
+  forAdmin = false, createdBy = null,
+}) {
   const ui = emailUi(site);
   const { t } = ui;
-  const subject = t('email.eventCreated.subject', { title: event.title });
+  const subject = t(forAdmin ? 'email.eventCreated.adminSubject' : 'email.eventCreated.subject', { title: event.title });
   // «… endre arrangementet. <strong>Ikke del den</strong> – alle som har lenken, er administrator.»
   const [before, after = ''] = t('email.eventCreated.adminInfo', { warning: '\u0000' }).split('\u0000');
   const adminInfo = `${escapeHtml(before)}<strong>${escapeHtml(t('email.eventCreated.adminWarning'))}</strong>${escapeHtml(after)}`;
+  const intro = forAdmin
+    ? t('email.eventCreated.adminIntro', { name: event.organizerName, email: event.organizerEmail, title: event.title })
+    : t('email.eventCreated.intro');
+  const by = forAdmin && createdBy ? t('email.eventCreated.createdBy', { email: createdBy }) : '';
+  const lines = reportAt && deleteAt ? lifecycleLines(ui, { event, timeZone, reportAt, deleteAt }) : [];
+  const h2 = (text) => `<h2 style="font-weight:normal;font-size:19px;margin:24px 0 4px;">${escapeHtml(text)}</h2>`;
 
   const html = ui.layout(subject, `
     ${ui.h1(event.title)}
-    ${ui.p(escapeHtml(t('email.eventCreated.intro')))}
+    ${ui.p(escapeHtml(intro))}
+    ${by ? ui.small(escapeHtml(by)) : ''}
     ${ui.p(ui.link(eventUrl, escapeHtml(eventUrl)))}
     ${ui.detailsTable(eventRows(ui, event, timeZone))}
     ${ui.p(adminInfo)}
     ${ui.button(adminUrl, t('email.eventCreated.adminButton'))}
+    ${scannerUrl ? `${h2(t('email.eventCreated.scannerHeading'))}${ui.p(escapeHtml(t('email.eventCreated.scannerInfo')))}${ui.p(ui.link(scannerUrl, escapeHtml(scannerUrl)))}` : ''}
+    ${lines.length ? `${h2(t('email.eventCreated.nextHeading'))}<ul style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;padding-left:20px;">${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>` : ''}
+    ${cancelEventUrl ? ui.small(ui.sentenceWithLink('email.eventCreated.cancelEvent', {}, cancelEventUrl, escapeHtml(t('email.linkHere')))) : ''}
   `);
-  const text = `${t('email.eventCreated.introText', { title: event.title })}
+  const text = [
+    forAdmin ? intro : t('email.eventCreated.introText', { title: event.title }),
+    by,
+    '',
+    t('email.eventCreated.shareText'),
+    eventUrl,
+    '',
+    detailsText(eventRows(ui, event, timeZone)),
+    '',
+    t('email.eventCreated.adminLinkText'),
+    adminUrl,
+    ...(scannerUrl ? ['', `${t('email.eventCreated.scannerHeading')}: ${t('email.eventCreated.scannerInfo')}`, scannerUrl] : []),
+    ...(lines.length ? ['', `${t('email.eventCreated.nextHeading')}:`, ...lines.map((l) => `- ${l}`)] : []),
+    ...(cancelEventUrl ? ['', t('email.eventCreated.cancelEventText', { url: cancelEventUrl })] : []),
+  ].filter((line, i, all) => line !== '' || all[i - 1] !== '').join('\n').replace(/^\n+/, '');
+  return { from: site.emailFrom, to: event.organizerEmail, subject, html, text };
+}
 
-${t('email.eventCreated.shareText')}
-${eventUrl}
+/**
+ * Rapport til arrangøren når påmeldingsfristen er nådd: antall, alle påmeldte og CSV med alle svar
+ * (legges ved av kalleren). Admin-lenken kan ikke tas med – den finnes bare i den første e-posten.
+ */
+export function deadlineReport({ event, registrations, count, scannerUrl, deleteAt, timeZone, site = DEFAULT_SITE }) {
+  const ui = emailUi(site);
+  const { t } = ui;
+  const subject = t('email.report.subject', { title: event.title });
+  const bookings = new Set(registrations.map((r) => r.bookingId)).size;
+  const status = t('email.status', { text: countText(ui, event, count) });
+  const summary = t('email.report.summary', { persons: count, bookings });
+  const who = (r) => [r.name, r.email || (r.position > 0 ? t('email.report.bookedBy', { name: r.contactName }) : '')].filter(Boolean);
+  const late = event.allowLate ? t('email.report.lateAllowed') : t('email.report.lateNotAllowed');
+  const deletion = t('email.eventCreated.deletion', { date: formatDateTime(deleteAt.toISOString(), timeZone, ui.lang) });
 
-${detailsText(eventRows(ui, event, timeZone))}
+  const list = registrations.length
+    ? `<ol style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;padding-left:22px;">${registrations
+      .map((r) => { const [name, extra] = who(r); return `<li>${escapeHtml(name)}${extra ? ` <span style="color:${site.theme.colors.muted};">– ${escapeHtml(extra)}</span>` : ''}</li>`; })
+      .join('')}</ol>`
+    : ui.p(escapeHtml(t('email.report.none')));
 
-${t('email.eventCreated.adminLinkText')}
-${adminUrl}`;
+  const html = ui.layout(subject, `
+    ${ui.h1(event.title)}
+    ${ui.p(escapeHtml(t('email.report.intro')))}
+    ${ui.detailsTable(eventRows(ui, event, timeZone))}
+    ${ui.p(`<strong>${escapeHtml(summary)}</strong> ${escapeHtml(status)}`)}
+    ${list}
+    ${registrations.length ? ui.small(escapeHtml(t('email.report.csv'))) : ''}
+    ${ui.p(escapeHtml(late))}
+    ${scannerUrl ? ui.p(`${escapeHtml(t('email.eventCreated.scannerHeading'))}: ${ui.link(scannerUrl, escapeHtml(scannerUrl))}`) : ''}
+    ${ui.small(escapeHtml(deletion))}
+  `);
+  const text = [
+    t('email.report.intro'),
+    '',
+    detailsText(eventRows(ui, event, timeZone)),
+    '',
+    `${summary} ${status}`,
+    ...registrations.map((r, i) => `${i + 1}. ${who(r).join(' – ')}`),
+    ...(registrations.length ? ['', t('email.report.csv')] : [t('email.report.none')]),
+    '',
+    late,
+    ...(scannerUrl ? [`${t('email.eventCreated.scannerHeading')}: ${scannerUrl}`] : []),
+    '',
+    deletion,
+  ].join('\n');
+  return { from: site.emailFrom, to: event.organizerEmail, subject, html, text };
+}
+
+/** Til hver påmelding når arrangementet avlyses, med arrangørens melding. Svar går til arrangøren. */
+export function eventCancelledGuest({ event, booking, message, timeZone, site = DEFAULT_SITE }) {
+  const ui = emailUi(site);
+  const { t } = ui;
+  const subject = t('email.eventCancelled.subject', { title: event.title });
+  const intro = t('email.eventCancelled.intro', { title: event.title, when: formatEventTime(event.startsAt, event.endsAt, timeZone, ui.lang) });
+  const quote = message
+    ? `<blockquote style="margin:16px 0;padding:12px 16px;border-left:3px solid ${site.theme.colors.accent};background:${site.theme.colors.background};font-family:Arial,sans-serif;font-size:15px;line-height:1.5;white-space:pre-line;">${escapeHtml(message)}</blockquote>`
+    : '';
+  const html = ui.layout(subject, `
+    ${ui.h1(event.title)}
+    ${ui.p(`${escapeHtml(t('email.greeting', { name: booking.contactName }))} ${escapeHtml(intro)}`)}
+    ${message ? ui.p(escapeHtml(t('email.eventCancelled.messageFrom', { name: event.organizerName }))) : ''}
+    ${quote}
+    ${ui.small(escapeHtml(t('email.eventCancelled.reply')))}
+  `);
+  const text = [
+    t('email.greeting', { name: booking.contactName }),
+    '',
+    intro,
+    ...(message ? ['', t('email.eventCancelled.messageFrom', { name: event.organizerName }), '', message] : []),
+    '',
+    t('email.eventCancelled.reply'),
+  ].join('\n');
+  return { from: site.emailFrom, to: booking.contactEmail, subject, html, text, replyTo: event.organizerEmail };
+}
+
+/** Kvittering til arrangøren (og tjenesteadministratoren) når arrangementet er avlyst. */
+export function eventCancelledOrganizer({ event, notified, deleteAt, timeZone, site = DEFAULT_SITE }) {
+  const ui = emailUi(site);
+  const { t } = ui;
+  const subject = t('email.eventCancelled.organizerSubject', { title: event.title });
+  const result = notified > 0
+    ? t('email.eventCancelled.notified', { count: notified })
+    : t('email.eventCancelled.notNotified');
+  const deletion = t('email.eventCreated.deletion', { date: formatDateTime(deleteAt.toISOString(), timeZone, ui.lang) });
+  const html = ui.layout(subject, `
+    ${ui.h1(t('email.eventCancelled.organizerHeading'))}
+    ${ui.p(escapeHtml(t('email.eventCancelled.organizerIntro', { title: event.title, name: event.organizerName, email: event.organizerEmail })))}
+    ${ui.p(escapeHtml(result))}
+    ${ui.small(escapeHtml(deletion))}
+  `);
+  const text = [t('email.eventCancelled.organizerIntro', { title: event.title, name: event.organizerName, email: event.organizerEmail }), '', result, '', deletion].join('\n');
   return { from: site.emailFrom, to: event.organizerEmail, subject, html, text };
 }

@@ -30,7 +30,7 @@ function render() {
     h('h1', {}, event.title),
     h('dl', { class: 'meta' },
       h('dt', {}, t('event.when')), h('dd', {}, formatEventTime(event.startsAt, event.endsAt, tz)),
-      event.location ? [h('dt', {}, t('event.where')), h('dd', {}, event.location)] : null,
+      event.location ? [h('dt', {}, t('event.where')), h('dd', {}, event.location, ' ', directionsLink())] : null,
       h('dt', {}, t('event.organizer')), h('dd', {}, event.organizerName),
       event.registrationDeadline
         ? [h('dt', {}, t('event.deadline')), h('dd', {}, t('event.deadlineText', { date: formatShort(event.registrationDeadline, tz) }))]
@@ -42,9 +42,25 @@ function render() {
   ].filter(Boolean));
 }
 
+/** «Veibeskrivelse»: Apple Kart på iPhone/iPad/Mac, ellers Google Maps. */
+function directionsLink() {
+  const { directions, appleDirections } = event.links ?? {};
+  const href = (/iPhone|iPad|Macintosh/.test(navigator.userAgent) && appleDirections) || directions;
+  return href ? h('a', { class: 'directions', href, target: '_blank', rel: 'noopener' }, t('links.directions')) : null;
+}
+
+function calendarLinks() {
+  const { ics, googleCalendar } = event.links ?? {};
+  if (!ics && !googleCalendar) return null;
+  return h('div', { class: 'actions' },
+    ics ? h('a', { class: 'btn secondary small', href: ics }, t('links.calendar')) : null,
+    googleCalendar ? h('a', { class: 'btn secondary small', href: googleCalendar, target: '_blank', rel: 'noopener' }, t('links.googleCalendar')) : null);
+}
+
 function attendance() {
   const open = event.status === 'open';
-  const badge = h('span', { class: `badge ${open ? '' : 'closed'}` }, t(`event.badge.${event.status}`));
+  // Åpen etter fristen (etteranmelding) vises som «Etteranmelding».
+  const badge = h('span', { class: `badge ${open ? '' : 'closed'}` }, t(`event.badge.${open && event.late ? 'late' : event.status}`));
 
   if (event.count === null) return h('div', { class: 'attendance' }, badge);
 
@@ -284,7 +300,7 @@ function registrationForm() {
   return form;
 }
 
-function showSuccess({ booking, emailSent }) {
+function showSuccess({ booking, emailSent, ticketsUrl }) {
   const section = document.getElementById('registration');
   const names = booking.persons.map((p) => p.name);
   section.replaceChildren(
@@ -292,6 +308,11 @@ function showSuccess({ booking, emailSent }) {
       h('div', { class: 'check', 'aria-hidden': 'true' }, '✓'),
       h('h2', {}, t('form.thanks', { name: booking.contactName })),
       h('p', {}, names.length > 1 ? t('form.registeredMany', { names: nameList(names) }) : t('form.registeredOne')),
+      // Billettene kan vises med én gang – samme lenke som i e-posten.
+      ticketsUrl
+        ? h('p', {}, h('a', { class: 'btn', href: ticketsUrl }, names.length > 1 ? t('form.viewTickets') : t('form.viewTicket')))
+        : null,
+      calendarLinks(),
       emailSent
         ? h('p', { class: 'muted' }, t('form.emailSent', { email: booking.contactEmail }))
         : notice('warning', t('form.emailFailed')),

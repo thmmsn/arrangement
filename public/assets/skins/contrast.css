@@ -1,0 +1,25 @@
+/*
+  name: Høy kontrast
+  name.en: High contrast
+  preview: #ffffff #ffffff #000000 #0033cc
+*/
+/* Maksimal lesbarhet: svart på hvitt, tydelige rammer og understrekede lenker. */
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --ink: #000000;
+  --muted: #333333;
+  --line: #000000;
+  --accent: #0033cc;
+  --accent-ink: #ffffff;
+  --green: #005a1e;
+  --gold: #000000;
+  --error: #b00000;
+  --input-border: #000000;
+}
+body { font-size: 18px; }
+a { text-decoration: underline; text-underline-offset: 2px; }
+.card, .person, .field-item { border-width: 2px; }
+input, select, textarea { border-width: 2px !important; }
+:focus-visible, input:focus, select:focus, textarea:focus { outline: 3px solid #ffbf00 !important; outline-offset: 2px; }

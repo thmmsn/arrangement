@@ -31,6 +31,10 @@ services:
       # Egne filer (logo, favicon, CSS) i ./branding blir tilgjengelige som /assets/custom/…
       # f.eks. LOGO_URL=/assets/custom/logo.svg
       - ./branding:/app/branding:ro
+      # Egne skins (utseender arrangøren kan velge): CSS-filer i ./skins. Se docs/skins.md.
+      - ./skins:/app/skins:ro
+      # Sertifikater og nøkler til Apple Wallet og Google Wallet (valgfritt). Se .env.example.
+      - ./secrets:/secrets:ro
     # Ingen «ports:» – appen skal bare kunne nås via cloudflared.
 
   cloudflared:

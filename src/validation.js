@@ -1,3 +1,4 @@
+import { FEATURES } from './db.js';
 import { newFieldId } from './ids.js';
 
 // Validering skjer alltid på serveren. Frontend validerer også, men det er bare for brukervennlighet –
@@ -48,7 +49,7 @@ function parseDate(value) {
  * @param {object} [opts]
  * @param {string[]} [opts.siteIds]  Gyldige nettsteder; det første er standard når «site» mangler.
  */
-export function validateEvent(input, { siteIds = ['main'] } = {}) {
+export function validateEvent(input, { siteIds = ['main'], skinIds = [] } = {}) {
   const errors = {};
   const body = input && typeof input === 'object' ? input : {};
 
@@ -118,6 +119,29 @@ export function validateEvent(input, { siteIds = ['main'] } = {}) {
   const { fields, errors: fieldErrors } = validateFieldDefinitions(body.fields);
   if (fieldErrors) errors.fields = fieldErrors;
 
+  // Kartpunkt for stedet (fra Kartverket-søket i skjemaet), eller null.
+  let geo = null;
+  if (body.geo !== undefined && body.geo !== null) {
+    const lat = Number(body.geo?.lat);
+    const lon = Number(body.geo?.lon);
+    if (typeof body.geo !== 'object' || !Number.isFinite(lat) || !Number.isFinite(lon)
+      || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+      errors.location = msg('geoInvalid');
+    } else {
+      // Seks desimaler ≈ 10 cm – mer enn nok, og holder tallene korte i lenker og Wallet-kort.
+      geo = { lat: Math.round(lat * 1e6) / 1e6, lon: Math.round(lon * 1e6) / 1e6 };
+    }
+  }
+
+  // Utseende: en av skinnene som finnes (se skins.js), eller tomt for nettstedets eget tema.
+  const skin = str(body.skin) || null;
+  if (skin && !skinIds.includes(skin)) errors.skin = msg('skinUnknown');
+
+  // Brytere for billett, kalenderfil, PDF og Wallet. Alt er på når ingenting er sagt.
+  const rawFeatures = body.features && typeof body.features === 'object' ? body.features : {};
+  const features = Object.fromEntries(FEATURES.map((key) =>
+    [key, rawFeatures[key] === undefined ? true : Boolean(rawFeatures[key])]));
+
   if (Object.keys(errors).length) throw new ValidationError(errors);
 
   return {
@@ -133,10 +157,15 @@ export function validateEvent(input, { siteIds = ['main'] } = {}) {
     // Standardverdier: vis antall påmeldte, og påmeldingen er åpen.
     showCount: body.showCount === undefined ? true : Boolean(body.showCount),
     isOpen: body.isOpen === undefined ? true : Boolean(body.isOpen),
+    // Påmelding etter fristen (etteranmelding). Av som standard.
+    allowLate: Boolean(body.allowLate),
     organizerName,
     organizerEmail,
     imageUrl,
     fields,
+    geo,
+    features,
+    skin,
   };
 }
 
@@ -266,11 +295,25 @@ export function validateBooking(input, fields, maxPerBooking = 1) {
 
 // ---------- Status ----------
 
+/** Påmeldingsfristen: den som er satt, ellers når arrangementet starter. */
+export function deadlineOf(event) {
+  return new Date(event.registrationDeadline || event.startsAt);
+}
+
+/** Er fristen passert? Da er en påmelding en etteranmelding (hvis arrangøren tillater det). */
+export function isLate(event, now = new Date()) {
+  return now >= deadlineOf(event);
+}
+
 // Én kilde til sannhet for om påmeldingen er åpen. Brukes både av API-et og av påmeldingen selv.
+// Med etteranmelding holder påmeldingen seg åpen etter fristen, fram til arrangementet er over
+// (slutttidspunktet, eller starten hvis det ikke har noe slutttidspunkt).
 export function registrationStatus(event, count, now = new Date()) {
+  if (event.cancelledAt) return 'cancelled';
   if (!event.isOpen) return 'closed';
-  const deadline = new Date(event.registrationDeadline || event.startsAt);
-  if (now >= deadline) return 'deadline_passed';
+  if (isLate(event, now)) {
+    if (!event.allowLate || now >= new Date(event.endsAt || event.startsAt)) return 'deadline_passed';
+  }
   if (event.capacity != null && count >= event.capacity) return 'full';
   return 'open';
 }

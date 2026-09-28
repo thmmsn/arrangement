@@ -23,3 +23,25 @@ test('TRUST_PROXY tolkes som tall eller boolsk verdi', () => {
   assert.equal(loadConfig({ TRUST_PROXY: '1' }).trustProxy, 1);
   assert.equal(loadConfig({ TRUST_PROXY: 'true' }).trustProxy, true);
 });
+
+test('DELETE_AFTER_DAYS: 30 som standard, ugyldige verdier gir advarsel', () => {
+  assert.equal(loadConfig({}).deleteAfterDays, 30);
+  assert.equal(loadConfig({ DELETE_AFTER_DAYS: '90' }).deleteAfterDays, 90);
+  const bad = loadConfig({ DELETE_AFTER_DAYS: '0' });
+  assert.equal(bad.deleteAfterDays, 30);
+  assert.ok(bad.warnings.some((w) => w.startsWith('DELETE_AFTER_DAYS="0" ignoreres')));
+});
+
+test('ADMIN_EMAIL: én eller flere adresser skilt med komma', () => {
+  assert.deepEqual(loadConfig({}).adminEmails, []);
+  assert.deepEqual(loadConfig({ ADMIN_EMAIL: 'a@example.com, b@example.com' }).adminEmails, ['a@example.com', 'b@example.com']);
+});
+
+test('alle innstillingene appen leser, er beskrevet i .env.example', async () => {
+  const { readFileSync } = await import('node:fs');
+  const example = readFileSync(new URL('../.env.example', import.meta.url), 'utf8');
+  for (const key of ['ADMIN_EMAIL', 'DELETE_AFTER_DAYS', 'APPLE_WALLET_PASS_TYPE_ID', 'APPLE_WALLET_TEAM_ID', 'APPLE_WALLET_CERT_FILE',
+    'APPLE_WALLET_CERT_PASSWORD', 'APPLE_WALLET_WWDR_FILE', 'GOOGLE_WALLET_ISSUER_ID', 'GOOGLE_WALLET_KEY_FILE']) {
+    assert.match(example, new RegExp(`^#? ?${key}=`, 'm'), key);
+  }
+});

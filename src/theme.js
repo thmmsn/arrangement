@@ -172,14 +172,19 @@ export function themeCss(theme) {
 
 // ---------- Deler som flettes inn i HTML-sidene ----------
 
-/** Stilark, fonter og favicon. `cssHref` er adressen til nettstedets genererte temastilark. */
-export function themeHead(theme, { cssHref }) {
+/**
+ * Stilark, fonter og favicon. `cssHref` er adressen til nettstedets genererte temastilark,
+ * `skinHref` til arrangementets skin (tom = ingen).
+ */
+export function themeHead(theme, { cssHref, skinHref = '' }) {
   return [
     theme.googleFonts ? '<link rel="preconnect" href="https://fonts.googleapis.com">' : '',
     theme.googleFonts ? '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' : '',
     '<link rel="stylesheet" href="/assets/css/style.css">',
     `<link rel="stylesheet" href="${escapeHtml(cssHref)}">`,
     theme.customCssUrl ? `<link rel="stylesheet" href="${escapeHtml(theme.customCssUrl)}">` : '',
+    // Arrangementets skin til slutt, så den vinner over både standardstilen og nettstedets tema.
+    skinHref ? `<link rel="stylesheet" href="${escapeHtml(skinHref)}">` : '',
     theme.faviconUrl ? `<link rel="icon" href="${escapeHtml(theme.faviconUrl)}">` : '',
   ].filter(Boolean).join('\n  ');
 }

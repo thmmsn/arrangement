@@ -12,6 +12,19 @@ Et lite og enkelt alternativ til Hoopla for påmelding til arrangementer:
 - **Utseendet styres med miljøvariabler**: navn, logo, farger, fonter, hjørneradius og tekster.
 - **Flere domener, én database og én admin**: hvert domene er et *nettsted* med eget språk (norsk eller engelsk), tema, avsender og base-URL.
 - **Helt lukket uten lenke**: forsiden og alle ukjente adresser svarer bare `404 Not Found` – uten logo, navn eller språk.
+- **Mobilbillett med QR-kode** per person, med billettnummer, PDF-billett i e-posten, **Apple Wallet** og **Google Wallet** – som Hoopla.
+- **Innsjekking i døra**: en egen dørvaktlenke. Dørvakten kan skanne QR-koden med vanlig kamera på iPhone, bruke skanneren på siden, taste inn billettnummeret eller søke på navn. Det gir grønt, gult eller rødt svar med «Angre», og innsjekking virker også uten nett.
+- **Kalenderfil (.ics)** til deltakerne, og lenke til Google Kalender.
+- **Sted fra Kartverket** (adresse, stedsnavn eller gnr/bnr) med kartpunkt, som gir **veibeskrivelse** på sidene, i e-posten og i Wallet. Wallet-kortet dukker opp av seg selv når tiden nærmer seg og man er i nærheten.
+- **Brytere per arrangement**: billett, kalender, PDF og Wallet er på som standard og kan slås av hver for seg.
+- **Skins**: arrangøren velger utseende per arrangement (Mørk, Lys, Glass, Glød, Fjord, Høy kontrast). Eieren kan legge til egne, se [docs/skins.md](docs/skins.md).
+- **Livsløpet er automatisk**:
+  - Den første e-posten har alle lenkene: admin, dørvakt og avlys.
+  - Tjenesteadministratoren (`ADMIN_EMAIL`) får kopi.
+  - Arrangøren får en rapport ved påmeldingsfristen.
+  - Etteranmelding kan tillates.
+  - Arrangementet kan avlyses, med en valgfri melding til alle påmeldte.
+  - Alle data slettes 30 dager etter at arrangementet er over.
 
 Backend: Node.js, Express og SQLite. Frontend: ren HTML, CSS og JavaScript uten byggesteg.
 Produksjon: `docker compose` med Cloudflare Tunnel – ingen åpne porter på serveren.
@@ -25,7 +38,12 @@ Produksjon: `docker compose` med Cloudflare Tunnel – ingen åpne porter på se
 | `/<hash>` | Alle som får lenken | Arrangementsside med påmelding |
 | `/<hash>/avmelding#<nøkkel>` | Den som meldte på (lenke i e-posten) | Avmelding av hele eller deler av påmeldingen |
 | `/admin/ny` | Administrator | Opprett nytt arrangement |
-| `/admin/<hash>#<nøkkel>` | Arrangøren (lenke i e-posten) | Påmeldte, redigering, CSV, stenging, sletting |
+| `/admin/<hash>#<nøkkel>` | Arrangøren (lenke i e-posten) | Påmeldte, innsjekking, dørvaktlenke, redigering, CSV, stenging, avlysning, sletting |
+| `/admin/<hash>/avlys#<nøkkel>` | Arrangøren og tjenesteadministratoren (lenke i e-posten) | Samme side, åpnet på «Avlys arrangement» |
+| `/b/<nøkkel>` | Den som meldte på (lenke i e-posten) | Alle billettene i påmeldingen, med Wallet, PDF og kalender |
+| `/t/<nøkkel>` | Gjesten – og det QR-koden peker på | Én billett. For en innlogget dørvakt: innsjekking |
+| `/<hash>/kalender.ics` | Alle som har lenken til arrangementet | Kalenderfil |
+| `/<hash>/skanner#<nøkkel>` | Dørvakter (lenke fra arrangøren) | Innsjekking: skanner, billettnummer og navnesøk |
 
 Alt annet – også forsiden `/` – svarer med det samme nakne `404 Not Found` (ren tekst, uten logo, navn eller språk). Det gjelder også ugyldige lenker, både for sider og API. Uten en gyldig hash kan man dermed ikke se hvilket nettsted eller system som ligger på domenet. Statiske filer (CSS og JavaScript) må være tilgjengelige for at arrangementssidene skal virke, men de inneholder ingen data. Temastilarket har et navn som er en hash av innholdet, så det kan ikke gjettes.
 
@@ -40,6 +58,8 @@ $$31^{12} \approx 7{,}9 \cdot 10^{17} \approx 2^{59{,}4}$$
 Selv med 1000 gjett i sekundet tar det i snitt $\frac{31^{12}}{2 \cdot 1000 \cdot N}$ sekunder å treffe ett av $N$ arrangementer. Med $N = 1000$ er det rundt $4 \cdot 10^{11}$ sekunder, altså over 12 000 år.
 
 Admin-nøkkelen er 24 tilfeldige byte, altså $2^{192}$ muligheter – den kan ikke gjettes.
+
+Billettlenkene (`/t/…` og `/b/…`) består av et nummer på 10 tegn fra det samme alfabetet og en signatur på 128 bit, altså $2^{128} \approx 3{,}4 \cdot 10^{38}$ muligheter. Signaturen er en HMAC-SHA-256 av nummeret med en hemmelighet som bare finnes i databasen (se [Billetter og innsjekking](#billetter-og-innsjekking)). Nummeret alene gir ingen tilgang.
 
 Nøklene etter `#` sendes **aldri** til serveren av nettleseren. De havner derfor ikke i serverlogger, proxy-logger eller `Referer`-headere. JavaScript på siden leser nøkkelen og sender den i `Authorization`-headeren. I databasen lagres bare SHA-256-hashen av nøklene.
 
@@ -84,7 +104,9 @@ Alt styres fra **én `.env`-fil** ved siden av `docker-compose.yml`.
 server
 ├── docker-compose.yml
 ├── .env              ← alle innstillinger og hemmeligheter (kopi av .env.example)
-└── branding/         ← valgfritt: logo, favicon, eget stilark
+├── branding/         ← valgfritt: logo, favicon, eget stilark
+├── skins/            ← valgfritt: egne skins (se docs/skins.md)
+└── secrets/          ← valgfritt: sertifikater og nøkler til Apple Wallet og Google Wallet
 ```
 
 `docker-compose.yml` starter to containere:
@@ -225,6 +247,162 @@ En test sjekker at alle språk har nøyaktig de samme nøklene og plassholderne,
 
 ---
 
+## Billetter og innsjekking
+
+### Billetten
+
+Hver person i en påmelding får en billett med QR-kode og et billettnummer, for eksempel `K7HQ-2MXP-R9`. Bekreftelses-e-posten har en knapp til siden med alle billettene i påmeldingen (`/b/…`). Der kan man bla mellom billettene (1 / 3), laste ned PDF, legge dem i Apple Wallet eller Google Wallet og legge arrangementet i kalenderen. PDF-billetten (én side per person) og kalenderfilen ligger også ved e-posten. Etter påmeldingen vises knappen «Vis billettene» med én gang.
+
+**QR-koden er en lenke:** `https://booking.domain.com/t/<billettnummer><signatur>`. Da kan den skannes med vanlig kamera på alle telefoner. Signaturen er
+
+$$\text{signatur} = \mathrm{HMAC\text{-}SHA256}(\text{hemmelighet},\ \texttt{ticket:} \,\|\, \text{nummer})$$
+
+forkortet til 128 bit. Hemmeligheten lages tilfeldig i databasen første gang appen starter. Serveren lagrer bare nummeret og regner ut lenken på nytt når den trengs (e-post, PDF, Wallet). En lekket database gir dermed ikke billettlenkene. En falsk eller endret lenke gir den nakne 404-en. Påmeldingslenken (`/b/…`) signeres med et annet formål, så den ene kan aldri brukes som den andre.
+
+Billettlenken gir bare rett til å *se* billetten, altså navnet og arrangementet. Innsjekking krever i tillegg at telefonen er logget inn som dørvakt.
+
+### Dørvaktlenken
+
+På admin-siden og i den første e-posten til arrangøren står en **dørvaktlenke** (`/<hash>/skanner#<nøkkel>`). Arrangøren deler den med dem som skal stå i døra.
+
+1. Dørvakten åpner lenken én gang og skriver eventuelt navnet sitt. Telefonen får en informasjonskapsel for arrangementet. Den er `HttpOnly`, `SameSite=Lax` og gyldig til to døgn etter at arrangementet er over. Nøkkelen fjernes fra adresselinjen.
+2. **Med vanlig kamera** (iPhone eller Android): QR-koden åpner billetten, siden ser at telefonen tilhører en dørvakt og sjekker gjesten inn. Skjermen blir grønn («Sjekket inn»), gul («Allerede sjekket inn 18:02 av Kari») eller rød («Ugyldig billett», «Feil arrangement» eller «Avlyst»), med lyd og vibrasjon. «Angre» retter et feiltrykk.
+3. **Skanneren på siden** (`/<hash>/skanner`) bruker kameraet direkte. Den bruker nettleserens innebygde QR-leser når den finnes, ellers [jsQR](https://github.com/cozmo/jsQR). Siden har også felt for **billettnummeret** og **søk på navn** (minst to tegn, maks ti treff) for gjester uten billett på telefonen.
+4. **Hele familien på én gang:** etter en innsjekking vises de andre i samme påmelding med en «Sjekk inn»-knapp.
+
+Innsjekkingen skjer alltid med en `POST` fra siden, aldri bare ved at lenken åpnes. E-postprogrammer og forhåndsvisninger åpner nemlig lenker av seg selv. Den er også atomisk (`UPDATE … WHERE checked_in_at IS NULL`), så to dørvakter som skanner samme billett samtidig aldri begge får «Sjekket inn».
+
+**Dørvaktmodus:** dørvakten ser bare navn, hvem som meldte på og status, aldri e-post, telefonnummer eller svar på skjemaet.
+
+**Uten nett:** skannersiden har en liste med navn og SHA-256-hasher av alle billettlenker og -numre. Forsvinner nettet, kjenner siden igjen en ekte billett selv og legger innsjekkingen i kø. Køen sendes, med riktig tidspunkt, så snart nettet er tilbake. Hashene kan ikke brukes til å lage billetter.
+
+**Ny dørvaktlenke:** «Lag ny lenke» på admin-siden gjør den gamle ugyldig og logger ut alle telefoner som brukte den. Nøkkelen er avledet av arrangementet og et versjonsnummer, så den kan alltid vises på nytt.
+
+På admin-siden er det en kolonne «Innsjekket» med tidspunkt og dørvakt, «Sjekk inn» og «Angre», og en teller. CSV-eksporten har kolonnene «Etteranmelding» og «Innsjekket».
+
+---
+
+## Kalender, sted og Wallet
+
+### Kalenderfil
+
+`/<hash>/kalender.ics` og vedlegget i e-posten følger iCalendar (RFC 5545):
+
+- Tidene er i UTC, så ingen tidssoneblokk trengs, og sommertid blir riktig.
+- UID er fast og SEQUENCE øker ved hver endring, så en ny import oppdaterer avtalen i stedet for å lage en kopi.
+- Tekst escapes, og linjer brettes ved 75 byte uten å dele «æøå».
+- Med kartpunkt kommer `GEO` og Apples `X-APPLE-STRUCTURED-LOCATION` (kart og reisetid i Apple Kalender) med.
+- Et avlyst arrangement får `STATUS:CANCELLED` og «AVLYST:» foran tittelen.
+- Filen inneholder **bare offentlig informasjon**, aldri billett- eller avmeldingslenker. Kalendere deles ofte med familie og kolleger.
+
+Android har ingen innebygd import av .ics fra e-post, så det finnes også en «Google Kalender»-lenke.
+
+### Sted fra Kartverket
+
+Stedsfeltet i skjemaet søker hos Kartverket mens man skriver, via appens egen proxy (`/api/admin/places`). Nettleseren snakker aldri med Kartverket direkte. Oppslaget går til to åpne tjenester uten nøkkel:
+
+| Søk | Kartverket |
+|---|---|
+| Adresse, f.eks. «Osloveien 15» | `ws.geonorge.no/adresser/v1/sok` |
+| Matrikkel, f.eks. `5001/5/422` (kommunenr/gnr/bnr) | Samme tjeneste, med `kommunenummer`, `gardsnummer` og `bruksnummer` |
+| Stedsnavn, f.eks. «Oppdal» | `ws.geonorge.no/stedsnavn/v1/navn` |
+
+Adresser vises først, deretter stedsnavn. Eksakte treff kommer først, deretter tettsteder og bygninger, og til slutt fjell og annet. Koordinatene er i EUREF89 (EPSG:4258), som i praksis er det samme som WGS84. Svarer ikke Kartverket innen 10 sekunder, kan stedet skrives inn fritt. Oppslaget dekker bare Norge. Et valgt kartpunkt gir:
+
+- **Veibeskrivelse** på arrangementssiden, billetten og i e-posten: Apple Kart på iPhone, iPad og Mac, ellers Google Maps. Uten kartpunkt søkes det på stedsteksten.
+- **Wallet-kort som dukker opp av seg selv** nær stedet (se under), og kart i kalenderen.
+
+### Apple Wallet
+
+Kortet (`.pkpass`) har QR-koden, navnet, tid og sted, og på baksiden lenker til billetten, arrangementet og veibeskrivelse. Flere billetter lastes ned som én `.pkpasses`, så hele familien legges til med ett trykk (iOS 15+).
+
+- **Tid:** `relevantDates` (og `relevantDate` for eldre iOS) gjør at kortet vises på låseskjermen fra tre timer før start til slutt.
+- **Sted:** `locations` med kartpunktet gjør at kortet vises når telefonen er i nærheten av stedet.
+- **`semantics`** (arrangementsnavn, tid, sted og koordinater) brukes av iOS til forslag, kart og veibeskrivelse.
+
+Oppsett (krever Apple Developer Program):
+
+1. *Certificates, Identifiers & Profiles → Identifiers → Pass Type IDs*: lag en id, f.eks. `pass.no.domain.booking`.
+2. Lag et sertifikat for den (*Create Certificate*), last det ned, åpne det i Nøkkelring og eksporter sertifikat og nøkkel som `.p12` med passord.
+3. Last ned Apples mellomsertifikat *Worldwide Developer Relations – G4* fra <https://www.apple.com/certificateauthority/>.
+4. Legg filene i `./secrets` og sett `APPLE_WALLET_*` i `.env` (se `.env.example`). Team ID står øverst til høyre i utviklerkontoen.
+
+Kortet signeres med PKCS#7 (SHA-256), med både kortsertifikatet og mellomsertifikatet. Ved oppstart sjekkes det at filene kan leses, og det varsles hvis sertifikatet er utløpt.
+
+### Google Wallet
+
+«Lagre i Google Wallet» er en lenke med en signert JWT (RS256). Den inneholder både arrangementet og billettene, så Google oppretter dem første gang noen lagrer, og appen trenger ingen egne kall mot Google. `dateTime` gjør at Google Wallet varsler når arrangementet nærmer seg, og `venue` viser stedet. Veibeskrivelsen er en lenke på kortet, fordi Google ikke lenger bruker kartpunkter til varsler.
+
+Oppsett:
+
+1. Opprett en utstederkonto i [Google Pay & Wallet Console](https://pay.google.com/business/console) og noter *Issuer ID*.
+2. Lag en tjenestekonto i Google Cloud med Google Wallet API slått på, og last ned nøkkelfilen (JSON).
+3. Legg tjenestekontoen til som bruker i Wallet Console.
+4. Legg nøkkelfilen i `./secrets` og sett `GOOGLE_WALLET_*` i `.env`.
+
+Til Google har godkjent kontoen for produksjon, kan bare testbrukerne du legger til i Wallet Console lagre kortene.
+
+**Brytere:** Wallet-bryterne vises i skjemaet bare når tjenesten er satt opp. Mangler en fil eller variabel, slås Wallet av med en advarsel i loggen, og resten virker som før.
+
+---
+
+## Arrangementets livsløp
+
+### Første e-post
+
+Når et arrangement opprettes, får arrangøren én e-post med alt som trengs senere:
+
+- påmeldingslenken;
+- **admin-lenken**, som bare finnes her, fordi appen lagrer bare en hash av nøkkelen;
+- **dørvaktlenken**;
+- **lenken for å avlyse**;
+- når **rapporten** kommer;
+- om **etteranmelding** er tillatt;
+- datoen da **alle data slettes**.
+
+**Tjenesteadministratoren** (`ADMIN_EMAIL`, gjerne flere adresser skilt med komma) får en kopi med de samme lenkene, pluss arrangørens navn og e-post og hvem som opprettet arrangementet via Cloudflare Access. Det er en ekstra sikkerhet: det finnes ingen oversikt over alle arrangementer, men administratoren vet om hvert eneste ett og kan avlyse eller slette det. Administratoren får også kvittering når et arrangement avlyses.
+
+### Underveis
+
+- Arrangøren får e-post for hver påmelding og avmelding.
+- **Etteranmelding:** Bryteren «Tillat påmelding etter fristen» holder påmeldingen åpen etter fristen og fram til arrangementet er over (slutttidspunktet, eller starten hvis det ikke har noe slutttidspunkt). Hver slik påmelding kommer til arrangøren med emnet «Etteranmelding: …». Den merkes også i admin-listen og i CSV-filen. Uten bryteren stenger påmeldingen ved fristen.
+
+### Rapport ved påmeldingsfristen
+
+Når fristen er nådd (satt frist, ellers når arrangementet starter), får arrangøren en rapport med:
+
+- antall personer og påmeldinger;
+- alle navn med e-post, eller hvem som meldte dem på;
+- CSV med alle svar, vedlagt;
+- dørvaktlenken;
+- datoen da dataene slettes.
+
+Rapporten sendes én gang. Flyttes fristen fram i tid, sendes en ny ved den nye fristen. Svikter e-posten, prøves den igjen i opptil to døgn. Avlyste arrangementer får ingen rapport.
+
+### Avlysning
+
+«Avlys arrangement» ligger på admin-siden og som lenke i den første e-posten. Arrangøren kan skrive en melding og velge om de påmeldte skal få e-post. Hver påmelding får da én e-post med meldingen, og svar går til arrangøren. Etter avlysningen:
+
+- påmeldingen er stengt;
+- billettene gir «Avlyst» i døra;
+- kalenderfilen blir `CANCELLED`;
+- arrangøren og tjenesteadministratoren får kvittering.
+
+Avlysningen kan oppheves (uten e-post), for eksempel etter et feiltrykk.
+
+### Sletting
+
+Alle data om et arrangement slettes automatisk `DELETE_AFTER_DAYS` dager (standard 30) etter at det er over, det vil si slutttidspunktet, eller starten hvis det ikke har noe slutttidspunkt. Det gjelder påmeldinger, navn, e-post, svar og innsjekkinger, og også avlyste arrangementer. Datoen står i den første e-posten, i rapporten og på admin-siden.
+
+SQLite kjøres med `secure_delete`, så slettede data overskrives i databasefilen i stedet for å bli liggende i ledige sider. To steder ligger kopier utenfor appens kontroll:
+
+- **sikkerhetskopier du selv har tatt**;
+- **e-postloggen hos Resend** (se Resends innstillinger for hvor lenge den lagres).
+
+Vedlikeholdet, altså rapporter og sletting, kjøres ved oppstart og deretter hvert tiende minutt.
+
+---
+
 ## Sette opp Resend
 
 1. Opprett konto på <https://resend.com>.
@@ -238,7 +416,12 @@ Svar på e-postene går dit det gir mening (feltet `reply_to`):
 |---|---|---|
 | Bekreftelse på påmelding (alle personene) | Den som meldte på | Arrangøren |
 | Ny påmelding (alle personene) | Arrangøren | Den som meldte på |
-| Arrangementet er opprettet (med admin-lenke) | Arrangøren | – |
+| Bekreftelse: vedlegg | Kalenderfil (.ics) og PDF-billett, etter arrangementets brytere | – |
+| Arrangementet er opprettet (admin-, dørvakt- og avlys-lenke) | Arrangøren, og kopi til `ADMIN_EMAIL` | – |
+| Etteranmelding | Arrangøren | Den som meldte på |
+| Rapport ved påmeldingsfristen (med CSV) | Arrangøren | – |
+| Avlyst (med arrangørens melding) | Hver påmelding | Arrangøren |
+| Arrangementet er avlyst (kvittering) | Arrangøren og `ADMIN_EMAIL` | – |
 | Avmelding (kvittering og varsel) | Gjesten og arrangøren | Hverandre |
 
 Hvis Resend feiler, blir påmeldingen likevel lagret. Feilen logges, og gjesten får beskjed om at bekreftelsen ikke kom frem.
@@ -269,6 +452,22 @@ Alt settes i `.env` – se `.env.example` for hele lista med forklaringer. Ugyld
 
 Nyanser som hover-farger og lyse bakgrunner på meldinger regnes ut fra grunnfargene med CSS `color-mix()`, så hele siden følger med når du bytter `COLOR_ACCENT`.
 
+### Skins per arrangement
+
+Variablene over gir nettstedets tema. I tillegg kan arrangøren velge et **utseende (skin)** for hvert arrangement i skjemaet:
+
+- Standard
+- Lys
+- Mørk
+- Glass
+- Glød
+- Fjord
+- Høy kontrast
+
+Skinnen legges oppå temaet og gjelder sidene gjestene og dørvaktene ser. Admin-sidene, e-postene, PDF og Wallet beholder nettstedets tema.
+
+**Egne skins:** Eieren legger en CSS-fil i mappen `./skins`, som i Docker er montert som `/app/skins`, og starter appen på nytt. Hvordan en skin lages, hvilke variabler som finnes, og hva som er lov (fonter, bilder), står i [docs/skins.md](docs/skins.md).
+
 ---
 
 ## Sikkerhet og personvern
@@ -283,16 +482,21 @@ Nyanser som hover-farger og lyse bakgrunner på meldinger regnes ut fra grunnfar
 - **Plassene kan ikke overbookes.** Påmeldingen teller og lagrer i én `BEGIN IMMEDIATE`-transaksjon (testet med 10 samtidige påmeldinger til 3 plasser, og 6 samtidige grupper på 2 til 5 plasser). En gruppe får plass samlet eller ikke i det hele tatt – det blir aldri halve påmeldinger.
 - **Spam-vern:** rate limiting per klient-IP (30 påmeldinger per 10 min) og et skjult honningkrukke-felt som roboter fyller ut.
 - **CSV-eksporten** nøytraliserer celler som begynner med `= + - @`, slik at Excel ikke tolker dem som formler.
-- Avmelding og sletting fjerner personopplysningene helt fra databasen.
+- Avmelding og sletting fjerner personopplysningene helt fra databasen (`secure_delete`), og alt slettes automatisk 30 dager etter arrangementet.
+- **Billettlenker** er signert med HMAC (128 bit) og kan ikke forfalskes eller gjettes. Innsjekking krever dørvaktinnlogging, en `POST` fra siden (aldri bare en åpnet lenke) og samme `Origin` som nettstedet (CSRF-vern i tillegg til `SameSite=Lax`).
+- **Dørvakter** ser bare navn og status, og dørvaktlenken kan byttes når som helst.
+- **Kalenderfiler** inneholder aldri billett- eller avmeldingslenker.
 
 ---
 
 ## Datamodell
 
 ```
-events          Arrangementet (nettsted, tittel, tid, kapasitet, maks per påmelding, felter …)
- └─ bookings    Én påmelding: kontaktperson (navn + e-post) og avmeldingsnøkkel
-     └─ registrations   Én rad per gjest: navn, valgfri e-post og svar på feltene
+meta            Hemmeligheten billett-, påmeldings- og dørvaktnøklene avledes fra
+events          Arrangementet (nettsted, tittel, tid, sted med kartpunkt, kapasitet, felter, brytere,
+                skin, etteranmelding, avlysning, dørvaktversjon, når rapporten ble sendt …)
+ └─ bookings    Én påmelding: kontaktperson, påmeldingsnummer, avmeldingsnøkkel (hash), etteranmelding
+     └─ registrations   Én rad per gjest: navn, valgfri e-post, svar, billettnummer og innsjekking
 ```
 
 Antall påmeldte er antall rader i `registrations`. Hvis alle personene i en påmelding meldes av eller fjernes, slettes også påmeldingen, og avmeldingslenken slutter å virke.
@@ -304,6 +508,7 @@ Databasen oppgraderes automatisk ved oppstart (`PRAGMA user_version`):
 | 1 | Arrangementer og påmeldinger (én person per påmelding) |
 | 2 | Påmeldinger med flere personer (`bookings`). Eksisterende påmeldinger beholdes, og avmeldingslenker som allerede er sendt ut, virker fortsatt. |
 | 3 | Nettsted per arrangement (`events.site`). Eksisterende arrangementer havner på hovednettstedet (`main`). |
+| 4 | Billetter, innsjekking, kartpunkt, brytere, etteranmelding, skin og avlysning. Eksisterende påmeldinger får billettnummer, og arrangementer med passert frist får ingen rapport ved oppgraderingen. |
 
 ## Prosjektstruktur
 
@@ -318,7 +523,19 @@ src/
   db.js          SQLite: tabeller, migreringer og spørringer
   validation.js  Validering av arrangementer og påmeldinger, og påmeldingsstatus
   email.js       Resend-klient og e-postmaler
-  ids.js         Tilfeldige lenker og nøkler, hashing
+  ids.js         Tilfeldige lenker, nøkler og billettnumre, hashing
+  tokens.js      Signerte billett-, påmeldings- og dørvaktnøkler (HMAC)
+  tickets.js     Billettsider, PDF, Wallet, kalender og innsjekking (sider og API)
+  qr.js          QR-koder (SVG og rutenett til PDF)
+  pdf.js         PDF-billett
+  calendar.js    Kalenderfil (.ics) og Google Kalender-lenke
+  appleWallet.js Apple Wallet-kort (.pkpass/.pkpasses) med PKCS#7-signatur
+  googleWallet.js Google Wallet-lenke (JWT)
+  walletConfig.js Sertifikater og nøkler til Wallet fra filer
+  zip.js, png.js Minimal ZIP-skriver og PNG-koder (til Wallet-kortene)
+  places.js      Stedsoppslag mot Kartverket og kartlenker
+  skins.js       Innebygde og egne skins
+  filename.js    Filnavn til vedlegg og nedlastinger
   csv.js         CSV-eksport
   format.js      Datoer og svar på nettstedets språk
   html.js        HTML-escaping
@@ -327,7 +544,11 @@ src/
 views/           HTML-sidene (med plassholdere for tema og tekst)
 public/assets/   CSS og JavaScript for frontend
   i18n/          Ordbøkene (nb.js, en.js), oversetter og datoformatering – delt med serveren
+  skins/         De innebygde skinnene
 branding/        Egne filer (logo o.l.), serveres som /assets/custom/
+skins/           Eierens egne skins (se docs/skins.md)
+secrets/         Sertifikater og nøkler til Wallet (holdes utenfor git)
+docs/            Dokumentasjon (skins)
 test/            Tester (node:test)
 ```
 
@@ -344,6 +565,14 @@ test/            Tester (node:test)
 | `GET` / `PUT` / `DELETE` | `/api/admin/events/:slug` | Admin-porten + `Authorization: Bearer <admin-nøkkel>` |
 | `DELETE` | `/api/admin/events/:slug/registrations/:id` | Admin-porten + `Authorization: Bearer <admin-nøkkel>` |
 | `GET` | `/api/admin/events/:slug/registrations.csv` | Admin-porten + `Authorization: Bearer <admin-nøkkel>` |
+| `POST` / `DELETE` | `/api/admin/events/:slug/registrations/:id/checkin` | Admin-porten + admin-nøkkel. Sjekk inn / angre |
+| `POST` | `/api/admin/events/:slug/scanner/rotate` | Admin-porten + admin-nøkkel. Ny dørvaktlenke |
+| `POST` / `DELETE` | `/api/admin/events/:slug/cancel` | Admin-porten + admin-nøkkel. Avlys (`{ notify, message }`) / opphev |
+| `GET` | `/api/admin/places?q=` | Admin-porten. Stedsoppslag hos Kartverket |
+| `GET` | `/api/tickets/:nøkkel`, `/api/bookings/:nøkkel` | Billettlenken. Billetten(e), lenker og om telefonen er dørvakt |
+| `POST` | `/api/events/:slug/scanner/login` | Dørvaktnøkkel i body. Setter informasjonskapselen |
+| `GET` | `/api/events/:slug/scanner`, `…/scanner/search?q=` | Dørvakt. Status og liste for bruk uten nett; navnesøk |
+| `POST` | `/api/events/:slug/scanner/checkin`, `…/scanner/undo` | Dørvakt. `{ token }`, `{ code }` eller `{ id }`; angre med `{ id }` |
 
 *Admin-porten* = riktig vertsnavn (hvis `ADMIN_HOST` er satt) og gyldig Cloudflare Access-token (hvis `CF_ACCESS_*` er satt).
 
@@ -357,5 +586,7 @@ test/            Tester (node:test)
 - Gjest kan endre svarene sine, eller legge til personer i en eksisterende påmelding
 - Felter som bare spørres én gang per påmelding (f.eks. telefon til kontaktpersonen), ikke per person
 - Egen bekreftelse til personer som er lagt til med e-postadresse
-- Opplasting av forsidebilde (i dag er det en lenke)
+- Opplasting av forsidebilde (i dag er det en lenke) – står i kø
+- Kort dørkode på 4–5 bokstaver for raskere manuell innskriving – til vurdering
+- Oppdatering av Wallet-kort som allerede er lagt til (Apples push-tjeneste og Googles API)
 - Betaling (f.eks. Vipps eller Stripe)

@@ -11,11 +11,13 @@ try {
   root.replaceChildren(notice('error', err.message));
   throw err;
 }
-const { timeZone, accessEmail, sites } = adminConfig;
+const { timeZone, accessEmail, sites, wallets, skins } = adminConfig;
 
 const { form } = createEventForm({
   timeZone,
   sites,
+  wallets,
+  skins,
   // Innlogget via Access: foreslå den e-postadressen som arrangør.
   initial: accessEmail ? { organizerEmail: accessEmail } : {},
   submitLabel: t('create.submit'),
@@ -43,6 +45,7 @@ function showResult(result, payload) {
       h('h2', {}, payload.title),
       linkBox(t('create.eventLink'), result.eventUrl),
       linkBox(t('create.adminLink'), result.adminUrl),
+      result.scannerUrl ? linkBox(t('admin.scannerHeading'), result.scannerUrl) : null,
       notice('warning',
         h('strong', {}, `${t('create.keepWarning')} `),
         t('create.keepWarningText'),
