@@ -507,10 +507,21 @@ export function createApp({
 
   // E-post skal aldri stoppe en påmelding: feil logges, og svaret forteller om sendingen gikk bra.
   // Logoen bygges inn i hver e-post (se emailLogo.js); kan den ikke det, står lenken til den igjen.
+  //
+  // Sikkerhetsnett: avviser Resend avsenderen fordi domenet ikke er verifisert ennå (typisk rett etter at
+  // et nytt domene er lagt til), sendes e-posten på nytt fra hovednettstedets avsender – så gjesten får
+  // bekreftelsen likevel – og loggen sier tydelig fra.
   async function sendEmails(messages) {
     const results = await Promise.allSettled(messages.map(async (m) => {
       const { site, ...message } = templates.embedLogo(m, await emailLogoFor(m.site?.theme));
-      return mailer.send(message);
+      try {
+        return await mailer.send(message);
+      } catch (err) {
+        const fallback = mainSite.emailFrom;
+        if (!message.from || message.from === fallback || !/not verified/i.test(err.message)) throw err;
+        logger.error(`ADVARSEL: Resend godtar ikke avsenderen ${message.from} (domenet er ikke verifisert). E-posten til ${message.to} sendes fra ${fallback} i stedet. Verifiser domenet på https://resend.com/domains, eller sett EMAIL_FROM for nettstedet.`);
+        return mailer.send({ ...message, from: fallback });
+      }
     }));
     results.forEach((result, i) => {
       if (result.status === 'rejected') logger.error(`Kunne ikke sende e-post til ${messages[i].to}:`, result.reason);
@@ -704,9 +715,11 @@ export function createApp({
 
   const skinIds = [...skins.keys()];
 
-  // Til tjenesteadministratoren(e) (ADMIN_EMAIL): samme innhold, med adressen byttet ut.
-  const toAdmins = (message) => config.adminEmails?.length
-    ? config.adminEmails.map((to) => ({ ...message, to, replyTo: undefined }))
+  // Til tjenesteadministratoren(e) (ADMIN_EMAIL): samme innhold, med adressen byttet ut. Teksten er på
+  // hovednettstedets språk, men avsenderen er arrangementets nettsted – e-post om et arrangement kommer
+  // alltid fra domenet arrangementet hører til.
+  const toAdmins = (message, event) => config.adminEmails?.length
+    ? config.adminEmails.map((to) => ({ ...message, to, from: siteOf(event).emailFrom, replyTo: undefined }))
     : [];
 
   adminApi.post('/events', createLimiter, requireCreator, async (req, res) => {
@@ -731,7 +744,7 @@ export function createApp({
       templates.eventCreated({ ...details, site: siteOf(event) }),
       // Tjenesteadministratoren varsles om hvert nye arrangement, med de samme lenkene – på
       // hovednettstedets språk.
-      ...toAdmins(templates.eventCreated({ ...details, site: mainSite, forAdmin: true, createdBy: req.accessUser?.email ?? null })),
+      ...toAdmins(templates.eventCreated({ ...details, site: mainSite, forAdmin: true, createdBy: req.accessUser?.email ?? null }), event),
     ]);
 
     res.status(201).json({ slug, adminKey, ...urls, scannerUrl: details.scannerUrl, emailSent });
@@ -765,7 +778,7 @@ export function createApp({
     const receipt = { event: cancelled, notified, deleteAt: deleteAt(cancelled), timeZone: config.timeZone };
     await sendEmails([
       templates.eventCancelledOrganizer({ ...receipt, site }),
-      ...toAdmins(templates.eventCancelledOrganizer({ ...receipt, site: mainSite })),
+      ...toAdmins(templates.eventCancelledOrganizer({ ...receipt, site: mainSite }), cancelled),
     ]);
     res.json({ event: adminEvent(cancelled, repo.countRegistrations(event.id)), notified });
   });

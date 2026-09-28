@@ -79,7 +79,7 @@ const maintenanceTimer = setInterval(maintenance, 10 * 60_000);
 
 const server = app.listen(config.port, () => {
   for (const site of config.sites) {
-    console.log(`Nettsted «${site.id}»: ${site.baseUrl} (${site.lang})`);
+    console.log(`Nettsted «${site.id}»: ${site.baseUrl} (${site.lang}), e-post fra ${site.emailFrom}`);
   }
   console.log(`Arrangement ${version ?? '(ukjent versjon)'} kjører på port ${config.port}`);
 });

@@ -364,6 +364,15 @@ ADMIN_HOST=arrangement-admin.domain.no
 
 - **Hovednettstedet** kommer fra de vanlige variablene (`DOMAIN`, `BASE_URL`, `EMAIL_FROM`, `SITE_LANG` og temavariablene). Eksisterende installasjoner fortsetter å virke uten endringer, og de får ID-en `main`.
 - **Et ekstra nettsted** defineres med prefikset `SITE_<ID>_` og finnes så snart `SITE_<ID>_DOMAIN` er satt. ID-en kan bare inneholde A–Z og 0–9. Det kan sette `DOMAIN`, `BASE_URL`, `LANG`, `EMAIL_FROM` og alle temavariablene.
+- **Avsenderen følger domenet.** Første ledd i domenet blir adressen, resten blir e-postdomenet, og nettstedets `SITE_NAME` blir navnet (uten `SITE_NAME`: «Påmelding» eller «Registration», etter språket):
+
+  | Domene | Avsender |
+  |---|---|
+  | `arrangement.arkitekt-thommesen.no` | `Thommesen Arkitekter <arrangement@arkitekt-thommesen.no>` |
+  | `event.thommesenarchitecture.com` | `Thommesen Arkitekter <event@thommesenarchitecture.com>` |
+  | `arkitekt-thommesen.no` (bare to ledd) | `Thommesen Arkitekter <arrangement@arkitekt-thommesen.no>` |
+
+  `EMAIL_FROM` (hovednettstedet) og `SITE_<ID>_EMAIL_FROM` overstyrer. Avsenderen arves aldri fra et annet nettsted, og en avsender på et annet domene enn nettstedet gir en advarsel ved oppstart. Oppstartsloggen viser avsenderen for hvert nettsted («Nettsted «no»: … e-post fra …»).
 - **Arv:** Det nettstedet ikke setter selv, arves fra hovednettstedet. Unntaket er `FOOTER_TEXT`, som bare arves når språket er det samme – en norsk bunntekst skal ikke havne på et engelsk nettsted.
 - **Språk:** `nb` (norsk bokmål, standard) eller `en` (engelsk). Hovednettstedets språk heter `SITE_LANG`, ikke `LANG`, fordi `LANG` er en standard miljøvariabel i Linux som ofte allerede er satt (f.eks. `en_US.UTF-8`).
 - Legg hvert domene til under *Public Hostname* i Cloudflare-tunnelen, og verifiser avsenderdomenet i Resend.
@@ -378,7 +387,7 @@ Oppsettet sjekkes ved oppstart. To nettsteder med samme domene, en `SITE_<ID>_BA
 | **Opprette arrangementer** | Nettstedet velges i skjemaet (vises når det finnes mer enn ett) og kan endres ved redigering. De ferdige feltene («Telefon», «Allergier» …) får etiketter på nettstedets språk. |
 | **Feil domene** | Åpnes et arrangement – eller avmeldingssiden – på feil domene, sendes nettleseren med `301` til riktig domene, med samme sti. `#nøkkelen` i avmeldingslenker følger med. |
 | **Språk på sidene** | Arrangementssiden, påmeldingen, feilmeldingene og avmeldingen er på nettstedets språk, og `<html lang>` følger nettstedet. Datoer formateres etter språket («lørdag 26. oktober 2030 kl. 18:00» / «Saturday, 26 October 2030 at 18:00»). |
-| **E-post** | Alle lenker og logoer bygges fra arrangementets nettsted, aldri fra `DOMAIN`. Avsenderen er nettstedets `EMAIL_FROM`, og teksten er på nettstedets språk. |
+| **E-post** | Alle lenker og logoer bygges fra arrangementets nettsted, aldri fra `DOMAIN`. Avsenderen er nettstedets (se over) – også i kopien til tjenesteadministratoren – og teksten er på nettstedets språk. |
 | **Admin** | Adminsidene, admin-API-et og CSV-eksporten bruker hovednettstedets språk og tema, uansett domene. Admin-lenken peker til `ADMIN_HOST` hvis den er satt, ellers til arrangementets domene. |
 
 Databasen oppgraderes automatisk: eksisterende arrangementer havner på hovednettstedet. Fjerner du et nettsted fra oppsettet, vises arrangementene dets på hovednettstedet, og appen varsler om dem ved oppstart.
@@ -629,7 +638,8 @@ Vedlikeholdet, altså rapporter og sletting, kjøres ved oppstart og deretter hv
 1. Opprett konto på <https://resend.com>.
 2. **Domains → Add Domain**: legg til `domain.no` (eller et underdomene som `mail.domain.no`). Med et engelsk nettsted på `events.domain.com` legges også `domain.com` til. Resend viser noen DNS-poster (SPF/MX og DKIM, gjerne også DMARC) som du legger inn hos Cloudflare DNS. Vent til domenet står som *Verified*.
 3. **API Keys → Create API Key** med tilgangen *Sending access*. Sett den som `RESEND_API_KEY`.
-4. Sett `EMAIL_FROM` til en adresse på det verifiserte domenet, f.eks. `Påmelding <arrangement@domain.no>`.
+4. Avsenderen følger domenet (`arrangement.domain.no` gir `arrangement@domain.no`, se [Flere nettsteder](#flere-nettsteder)). Vil du ha en annen adresse, setter du `EMAIL_FROM` til en adresse på det verifiserte domenet, f.eks. `Påmelding <arrangement@domain.no>`.
+5. **Hvert domene må verifiseres** – med flere nettsteder på ulike domener legges hvert av dem til under **Domains**. Er et domene ikke verifisert ennå, avviser Resend avsenderen. Da sendes e-posten fra hovednettstedets avsender i stedet, så ingen går glipp av bekreftelsen, og loggen skriver «ADVARSEL: Resend godtar ikke avsenderen …». Lenkene i e-posten er fortsatt nettstedets egne.
 
 Svar på e-postene går dit det gir mening (feltet `reply_to`):
 
