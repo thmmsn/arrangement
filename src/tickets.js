@@ -59,7 +59,8 @@ export function parseCookies(header) {
 export function createTicketFeature(ctx) {
   const { repo, config, tokens, siteOf, eventUrl, findEventBySlug, notFound, sendPage, logger, adminT } = ctx;
   const imageUrlOf = ctx.imageUrlOf ?? ((event) => event.imageUrl);
-  const { logoFor } = ctx;
+  const { logoFor, redirectToSite } = ctx;
+  const isLan = ctx.isLan ?? (() => false);
   const wallet = config.wallet ?? { apple: null, google: null };
 
   // ---------- Brytere og lenker ----------
@@ -278,11 +279,12 @@ export function createTicketFeature(ctx) {
 
   // ---------- Sider og filer ----------
 
-  // Samme regler som arrangementssiden: feil domene → 301 til riktig, med samme sti.
+  // Samme regler som arrangementssiden: feil domene → 301 til riktig, med samme sti (på LAN: samme
+  // adresse med ?site=<id>, se redirectToSite i app.js).
   const onRightSite = (req, res, event) => {
     const site = siteOf(event);
     if (site === req.site) return true;
-    res.redirect(301, `${site.baseUrl}${req.originalUrl}`);
+    redirectToSite(req, res, site);
     return false;
   };
 
@@ -440,7 +442,11 @@ export function createTicketFeature(ctx) {
       // billett med sin egen avmeldingslenke. Enkeltbilletten (/t/, det QR-koden peker på) får
       // aldri avmelding – se tokens.js.
       payload.links.cancel = cancelBookingPath(event, booking.code);
-      payload.tickets.forEach((ticket, i) => { ticket.cancel = absolute(event, cancelTicketPath(event, booking.persons[i].code)); });
+      payload.tickets.forEach((ticket, i) => {
+        ticket.cancel = absolute(event, cancelTicketPath(event, booking.persons[i].code));
+        // «Del billetten» deler den offentlige lenken – også når siden er åpnet på LAN.
+        ticket.url = ticketUrl(event, booking.persons[i].code);
+      });
       // Dørvakten får også id-ene, så hver billett kan sjekkes inn fra siden.
       if (payload.staff) payload.tickets.forEach((ticket, i) => { ticket.id = booking.persons[i].id; });
       res.json(payload);
@@ -460,7 +466,10 @@ export function createTicketFeature(ctx) {
       // Gyldig til to døgn etter at arrangementet er over (minst ett døgn fra nå).
       const endsAt = Date.parse(event.endsAt || event.startsAt) + 2 * DAY;
       const maxAge = Math.max(DAY, endsAt - Date.now());
-      const options = { httpOnly: true, sameSite: 'lax', secure: siteOf(event).baseUrl.startsWith('https:'), path: '/', maxAge };
+      // Secure når nettstedet er på https – men ikke på LAN-porten, som er vanlig http. Der ville
+      // nettleseren ellers forkastet informasjonskapselen, og dørvakten aldri blitt logget inn.
+      const secure = !isLan(req) && siteOf(event).baseUrl.startsWith('https:');
+      const options = { httpOnly: true, sameSite: 'lax', secure, path: '/', maxAge };
       res.cookie(STAFF_COOKIE + event.slug, key, options);
       if (name) res.cookie(STAFF_NAME_COOKIE + event.slug, name, options);
       else res.clearCookie(STAFF_NAME_COOKIE + event.slug, { path: '/' });

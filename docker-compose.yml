@@ -3,12 +3,17 @@
 #   cp .env.example .env     # fyll inn DOMAIN, TUNNEL_TOKEN, RESEND_API_KEY, EMAIL_FROM …
 #   docker compose up -d --build
 #
-# Ingen porter åpnes på serveren: cloudflared kobler seg UT til Cloudflare, og Cloudflare sender
-# trafikken for domenene dine inn gjennom tunnelen. HTTPS håndteres av Cloudflare.
+# Ingen porter åpnes på serveren for internett: cloudflared kobler seg UT til Cloudflare, og Cloudflare
+# sender trafikken for domenene dine inn gjennom tunnelen. HTTPS håndteres av Cloudflare.
 #
 # I Cloudflare-dashbordet (Zero Trust → Networks → Tunnels → din tunnel → Public Hostname):
 #   arrangement.domain.no        → HTTP  arrangement:3000
 #   arrangement-admin.domain.no  → HTTP  arrangement:3000   (hvis du bruker eget admin-vertsnavn, ADMIN_HOST)
+# Tunnelen skal ALLTID gå til port 3000 – aldri til LAN-porten (3001).
+#
+# Kontorets LAN (valgfritt): med LAN_PORT=3001 i .env svarer appen også på port 3001 inne i containeren.
+# Den porten er BETRODD (admin uten Access, ingen rate limiting), og er den ENESTE som publiseres på
+# verten – se «ports:» under. Port 3000 publiseres aldri.
 #
 # Alle innstillinger ligger i .env. Etter endringer i .env: `docker compose up -d` på nytt.
 
@@ -35,7 +40,14 @@ services:
       - ./skins:/app/skins:ro
       # Sertifikater og nøkler til Apple Wallet og Google Wallet (valgfritt). Se .env.example.
       - ./secrets:/secrets:ro
-    # Ingen «ports:» – appen skal bare kunne nås via cloudflared.
+    # Port 3000 publiseres ALDRI – den skal bare kunne nås via cloudflared.
+    #
+    # Kontorets LAN: fjern # foran linjene under, og sett LAN_PORT=3001 i .env. Da når maskiner på LAN
+    # appen på http://<serverens-LAN-IP>:9067, med admin uten Cloudflare Access.
+    # NB: Docker publiserer porten på ALLE nettverkskortene til verten og går forbi brannmurer som ufw.
+    # Har serveren en offentlig IP, bind porten til LAN-adressen i stedet: "192.168.1.10:9067:3001".
+    # ports:
+    #   - "9067:3001"
 
   cloudflared:
     image: cloudflare/cloudflared:latest

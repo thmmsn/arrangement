@@ -115,7 +115,7 @@ server
 `docker-compose.yml` starter to containere:
 
 - **arrangement** – appen. Databasen ligger i volumet `arrangement-data`, så den overlever nye versjoner.
-- **cloudflared** – kobler seg *ut* til Cloudflare. Ingen porter åpnes på serveren; appen kan bare nås gjennom tunnelen.
+- **cloudflared** – kobler seg *ut* til Cloudflare. Ingen porter åpnes på serveren mot internett; de offentlige sidene kan bare nås gjennom tunnelen. (Vil du bruke appen fra kontorets LAN uten Access, se [4. Kontorets LAN](#4-kontorets-lan-uten-cloudflare-access-valgfritt).)
 
 ### 1. Opprett tunnelen
 
@@ -168,6 +168,39 @@ Access er den eneste innloggingen – det finnes ikke noe passord. Uten C er opp
 
 **Arrangører:** Admin-lenken per arrangement (`/admin/<hash>#<nøkkel>`) krever fortsatt sin egen nøkkel. Med Access må arrangørene i tillegg slippes inn av Access-policyen – legg til e-postadressene deres der, eller behold administrasjonen for deg selv.
 
+### 4. Kontorets LAN uten Cloudflare Access (valgfritt)
+
+Appen kan brukes fullt ut fra kontorets nett, også admin og oppretting av arrangementer, uten Cloudflare Access. Da starter appen en **ekstra HTTP-lytter** i samme prosess, med samme app og database:
+
+```
+Internett ──► Cloudflare ──► tunnel ──► arrangement:3000   (PORT – som før: Access, ADMIN_HOST, rate limiting)
+Kontorets LAN ──────────► verten:9067 ──► arrangement:3001   (LAN_PORT – betrodd)
+```
+
+**Tilliten følger porten forespørselen kom inn på, aldri headere.** `Host`, `X-Forwarded-*`, `cf-connecting-ip` og query-parametere kan klienten sette fritt, så ingen av dem kan gjøre en forespørsel på `PORT` betrodd. Teknisk merker LAN-lytteren hver forespørsel med et privat `Symbol` før appen ser den. Det kan ikke settes av noe klienten sender. En test (`test/lan.test.js`) prøver å lure `PORT` med alle kombinasjoner av falske `Host`, `X-Forwarded-*`, `Forwarded`, `cf-connecting-ip` og query, og viser at admin fortsatt avvises.
+
+| | `PORT` (3000, tunnelen) | `LAN_PORT` (f.eks. 3001) |
+|---|---|---|
+| Admin (`/admin`, `/api/admin`) | Access-token og `ADMIN_HOST`, som før | Slipper inn uten Access og uten `ADMIN_HOST` |
+| Opprette arrangementer | Krever Access | Tillatt |
+| Admin-nøkkel per arrangement | Kreves | Kreves fortsatt – LAN erstatter Access, ikke nøkkelen |
+| Rate limiting | Per klient-IP (`CLIENT_IP_HEADER` bak tunnelen) | Av. Klient-IP leses alltid fra socketen |
+| Nettsted | Fra `Host` | Fra `Host`, eller `?site=<id>` (f.eks. `?site=com`) |
+| Arrangement på et annet nettsted | `301` til det offentlige domenet | `302` til samme adresse på LAN med `?site=<id>` |
+| Dørvakt-informasjonskapsel | `Secure` (https) | Uten `Secure`, fordi LAN er vanlig http |
+
+**Lenker er alltid de offentlige.** E-post, Wallet, kalender, PDF, dørvaktlenken og «Del billetten» bygges fra nettstedets offentlige adresse (`DOMAIN` / `SITE_<ID>_DOMAIN`), også når handlingen skjedde på LAN. Admin-siden viser de offentlige lenkene, så det er dem som kopieres og deles videre. Admin-lenken i e-posten peker til det offentlige admin-vertsnavnet. På LAN åpner du den samme siden ved å bytte ut starten: `http://<server>:9067/admin/<hash>#<nøkkel>`.
+
+**Oppsett med docker compose:**
+
+1. Sett `LAN_PORT=3001` i `.env`.
+2. I `docker-compose.yml`, fjern `#` foran `ports:` og `- "9067:3001"`. **Bare LAN-porten publiseres på verten.** Port 3000 publiseres aldri.
+3. Tunnelen går fortsatt til `arrangement:3000`. Pek den **aldri** til `3001`.
+4. `docker compose up -d`. Oppstartsloggen sier tydelig at LAN-porten er betrodd.
+5. Fra kontoret: `http://<serverens-LAN-IP>:9067/admin/ny`. .com-sidene forhåndsvises med `?site=com`.
+
+> **Viktig:** Docker publiserer porter på *alle* vertens nettverkskort og går forbi brannmurer som `ufw`. Har serveren en offentlig IP-adresse, bind porten til LAN-adressen: `"192.168.1.10:9067:3001"`. Alle som når LAN-porten, er administrator.
+
 ### Lagene som beskytter administrasjonen
 
 | Lag | Beskytter mot |
@@ -178,6 +211,7 @@ Access er den eneste innloggingen – det finnes ikke noe passord. Uten C er opp
 | Admin-nøkkel per arrangement | At én arrangør ser andres arrangementer |
 | Oppretting slått av uten Access | At en glemt innstilling åpner for oppretting |
 | Rate limiting per ekte klient-IP | Masseoppretting og spam (maks 20 nye arrangementer per 15 min) |
+| `LAN_PORT` bare på kontorets nett | At noen utenfor kontoret når den betrodde porten (tilliten følger porten – aldri headere) |
 
 ### Oppgradering fra «booking»
 
@@ -211,7 +245,7 @@ docker compose cp arrangement:/data/backup.db ./backup-$(date +%F).db
 
 ### Uten Docker eller Cloudflare
 
-Appen er en vanlig Node-server (`npm start`) og kan kjøres bak hvilken som helst reverse proxy (nginx, Caddy …). Sett da `TRUST_PROXY=1` (ikke `CLIENT_IP_HEADER`) og `DATABASE_PATH` til en fil på en persistent disk.
+Appen er en vanlig Node-server (`npm start`) og kan kjøres bak hvilken som helst reverse proxy (nginx, Caddy …). Sett da `TRUST_PROXY=1` (ikke `CLIENT_IP_HEADER`) og `DATABASE_PATH` til en fil på en persistent disk. `LAN_PORT` virker på samme måte: la proxyen bare sende til `PORT`, og la LAN-porten bare være tilgjengelig på kontorets nett.
 
 ---
 
@@ -555,6 +589,7 @@ Skinnen legges oppå temaet og gjelder sidene gjestene og dørvaktene ser. Admin
 - **Lukket uten lenke:** forsiden, ukjente adresser og ugyldige lenker gir alle det samme nakne `404 Not Found`. `OPTIONS` besvares også med 404, så det ikke røper hvilke adresser som finnes.
 - **Hemmelige nøkler** lagres bare som SHA-256-hash og sammenlignes i konstant tid.
 - **Nettstedet og admin-vertsnavnet** avgjøres av `Host`-headeren, ikke `X-Forwarded-Host` (som en klient kan sette selv).
+- **LAN-porten** (`LAN_PORT`) er betrodd fordi forespørselen kom inn på den lytteren – ingen header, query eller informasjonskapsel kan gjøre en forespørsel på `PORT` betrodd.
 - **`Referrer-Policy: no-referrer`**, slik at arrangementets adresse ikke lekker til eksterne nettsteder, f.eks. der forsidebildet ligger.
 - **Content-Security-Policy** tillater bare egne skript, og all brukertekst settes som tekst i DOM-en (aldri `innerHTML`). Tekst i e-postene og i temaet HTML-escapes, og farger/fonter fra `.env` valideres før de settes inn i CSS.
 - **Avmelding krever et klikk på en knapp.** Mange e-posttjenester åpner lenker automatisk for å sjekke dem for virus, og det skal ikke melde noen av.
@@ -597,7 +632,7 @@ Migreringene kjøres med fremmednøkler slått av, og hver migrering kjører `PR
 
 ```
 src/
-  server.js      Starter serveren
+  server.js      Starter serveren (PORT, og den betrodde LAN-lytteren når LAN_PORT er satt)
   app.js         Ruter: sider, offentlig API og admin-API bak admin-porten
   cfAccess.js    Verifisering av Cloudflare Access-token (JWT)
   sites.js       Nettsteder fra miljøvariabler (hovednettsted + SITE_<ID>_*, arv)

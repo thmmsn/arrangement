@@ -124,7 +124,7 @@ function ticketTools(ticket, event, links) {
 async function shareTicket(ticket, event, button) {
   const text = [
     t('ticket.shareText', { title: event.title, name: ticket.name }),
-    new URL(ticket.path, location.origin).href,
+    ticket.url, // offentlig lenke fra serveren – aldri adressen siden er åpnet på (f.eks. LAN)
     ticket.cancel ? t('ticket.shareCancel', { url: ticket.cancel }) : null,
   ].filter(Boolean).join('\n');
   if (navigator.share) {

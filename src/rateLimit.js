@@ -2,7 +2,10 @@
 // Holder for én serverprosess. Kjører du flere instanser, bør dette flyttes til f.eks. Redis.
 // `key` avgjør hvem som telles sammen – standard er IP-adressen Express har funnet (req.ip).
 // `message` kan være en funksjon av forespørselen, slik at feilmeldingen kommer på riktig språk.
-export function rateLimit({ windowMs, max, key = (req) => req.ip, message = 'For mange forespørsler. Vent litt og prøv igjen.' }) {
+// `skip(req)` = true slipper forespørselen forbi uten å telle den (f.eks. den betrodde LAN-porten).
+export function rateLimit({
+  windowMs, max, key = (req) => req.ip, skip = () => false, message = 'For mange forespørsler. Vent litt og prøv igjen.',
+}) {
   const hits = new Map(); // nøkkel (IP) -> { count, resetAt }
 
   // Rydd bort utløpte oppføringer jevnlig, så minnebruken ikke vokser over tid.
@@ -13,6 +16,7 @@ export function rateLimit({ windowMs, max, key = (req) => req.ip, message = 'For
   cleanup.unref();
 
   return (req, res, next) => {
+    if (skip(req)) return next();
     const now = Date.now();
     const id = key(req);
     let entry = hits.get(id);

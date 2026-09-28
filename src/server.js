@@ -1,3 +1,4 @@
+import http from 'node:http';
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { adoptLegacyDatabase, createRepository, openDatabase } from './db.js';
@@ -15,6 +16,8 @@ for (const warning of config.warnings) console.warn(`ADVARSEL: ${warning}`);
 const accessEnabled = Boolean(config.cfAccessTeamDomain && config.cfAccessAudiences.length);
 if (!accessEnabled && config.adminNoAuth) {
   console.warn('ADVARSEL: ADMIN_NO_AUTH=true – alle som når /admin kan opprette arrangementer. Bare for lokal utvikling!');
+} else if (!accessEnabled && config.lanPort) {
+  console.warn(`ADVARSEL: Cloudflare Access er ikke satt opp (CF_ACCESS_TEAM_DOMAIN og CF_ACCESS_AUD) – nye arrangementer kan bare opprettes via LAN-porten ${config.lanPort}.`);
 } else if (!accessEnabled) {
   console.warn('ADVARSEL: Cloudflare Access er ikke satt opp (CF_ACCESS_TEAM_DOMAIN og CF_ACCESS_AUD) – ingen kan opprette nye arrangementer.');
 }
@@ -72,11 +75,28 @@ const server = app.listen(config.port, () => {
   console.log(`Arrangement kjører på port ${config.port}`);
 });
 
+// Betrodd LAN-port (LAN_PORT): samme app og database, men alt som kommer inn her er betrodd – admin
+// uten ADMIN_HOST og Access, og ingen rate limiting. Tilliten følger porten, ikke headere.
+let lanServer = null;
+if (config.lanPort) {
+  lanServer = http.createServer(app.lanHandler);
+  lanServer.listen(config.lanPort, () => {
+    console.warn([
+      `ADVARSEL: LAN-porten ${config.lanPort} er BETRODD. Alle som når den, kan administrere og opprette`,
+      '  arrangementer – uten Cloudflare Access, uten ADMIN_HOST og uten rate limiting.',
+      `  Port ${config.lanPort} må ALDRI rutes gjennom Cloudflare-tunnelen eller publiseres mot internett.`,
+      `  Tunnelen skal fortsatt gå til port ${config.port}. Publiser LAN-porten bare på kontorets nett.`,
+      `  Nettsted på LAN: velges fra Host, eller med ?site=<id> (${config.sites.map((site) => site.id).join(', ')}).`,
+    ].join('\n'));
+  });
+}
+
 // Avslutt pent (f.eks. ved ny deploy), slik at SQLite får lukket filen ordentlig.
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
     clearInterval(maintenanceTimer);
-    server.close(() => {
+    // Begge lytterne lukkes før databasen, så ingen forespørsel treffer en lukket database.
+    Promise.all([server, lanServer].filter(Boolean).map((s) => new Promise((resolve) => s.close(resolve)))).then(() => {
       db.close();
       process.exit(0);
     });

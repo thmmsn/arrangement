@@ -62,7 +62,9 @@ function showResult(result, payload, imageError) {
         ` ${result.emailSent ? t('create.emailSentTo', { email: payload.organizerEmail }) : t('create.emailFailed')}`),
       h('div', { class: 'actions' },
         h('a', { class: 'btn', href: result.eventUrl }, t('create.openEvent')),
-        h('a', { class: 'btn secondary', href: result.adminUrl }, t('create.goAdmin')),
+        // Relativ: blir på samme vertsnavn og port (admin-vertsnavnet, eller LAN). Kopifeltene over
+        // viser de offentlige lenkene – det er dem som deles videre.
+        h('a', { class: 'btn secondary', href: `/admin/${result.slug}#${result.adminKey}` }, t('create.goAdmin')),
         h('a', { class: 'btn secondary', href: '/admin/ny' }, t('create.createAnother')),
       ),
     ),

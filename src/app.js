@@ -42,6 +42,16 @@ const DEFAULT_RATE_LIMITS = {
   scanner: { windowMs: 10 * 60_000, max: 30 }, // innlogging med dørvaktlenken
 };
 
+// ---------- Betrodd LAN-port ----------
+// Med LAN_PORT starter server.js en ekstra lytter for kontorets LAN, som sender forespørslene inn via
+// app.lanHandler. Den merker forespørselen med dette symbolet FØR appen ser den. Symbolet er privat for
+// modulen: ingen header, query, body eller informasjonskapsel kan sette det. En forespørsel er dermed
+// betrodd bare hvis den faktisk kom inn på LAN-lytteren – det er porten som avgjør, aldri noe klienten
+// sender (Host, X-Forwarded-*, cf-connecting-ip … kan alle settes fritt).
+const LAN = Symbol('lan');
+/** Kom forespørselen inn på den betrodde LAN-porten? */
+export const isLan = (req) => req[LAN] === true;
+
 export function createApp({
   repo, mailer, config, logger = console, accessVerifier = defaultAccessVerifier(config), placeSearch = createPlaceSearch(),
 }) {
@@ -59,6 +69,9 @@ export function createApp({
   const siteById = new Map(sites.map((site) => [site.id, site]));
   const siteByHost = new Map(sites.filter((site) => site.host).map((site) => [site.host, site]));
   const siteOf = (event) => siteById.get(event.site) ?? mainSite;
+  // På LAN kan nettstedet også velges med ?site=<id> (f.eks. ?site=com), så sidene for et annet
+  // domene kan forhåndsvises uten å endre Host. På PORT har parameteren ingen virkning.
+  const lanSiteOf = (req) => (isLan(req) && typeof req.query.site === 'string' ? siteById.get(req.query.site) : undefined);
   const adminT = mainSite.t;
 
   // Vertsnavnet fra Host-headeren. Bevisst IKKE req.hostname: med «trust proxy» leser den
@@ -121,9 +134,23 @@ export function createApp({
 
   // Klientens IP til rate limiting. Bak Cloudflare Tunnel kommer alle forespørsler fra cloudflared,
   // så den ekte adressen må hentes fra headeren Cloudflare setter (CLIENT_IP_HEADER).
-  const clientKey = (req) => (config.clientIpHeader && req.get(config.clientIpHeader)) || req.ip;
+  // På LAN leses den alltid fra socketen – headeren kommer fra klienten selv og betyr ingenting der.
+  const clientKey = (req) => (isLan(req) ? req.socket.remoteAddress
+    : (config.clientIpHeader && req.get(config.clientIpHeader)) || req.ip);
   const limits = { ...DEFAULT_RATE_LIMITS, ...config.rateLimits };
-  const limiter = (options) => rateLimit({ ...options, key: clientKey, message: (req) => req.t('errors.rateLimited') });
+  // Rate limiting gjelder ikke på den betrodde LAN-porten.
+  const limiter = (options) => rateLimit({ ...options, key: clientKey, skip: isLan, message: (req) => req.t('errors.rateLimited') });
+
+  // Feil nettsted for arrangementet. Offentlig: 301 til arrangementets eget domene, med samme sti (og
+  // nettleseren tar med #nøkkelen). På LAN: samme adresse på LAN-porten med ?site=<id>, så man blir på
+  // kontornettet – 302, fordi den ikke skal huskes av nettleseren.
+  function redirectToSite(req, res, site) {
+    if (!isLan(req)) return res.redirect(301, `${site.baseUrl}${req.originalUrl}`);
+    const url = new URL(req.originalUrl, 'http://lan');
+    url.searchParams.set('site', site.id);
+    // Alltid en sti på samme vertsnavn: nøyaktig én / først, så Location aldri kan bli «//annet-domene».
+    return res.redirect(302, `/${url.pathname.replace(/^\/+/, '')}${url.search}`);
+  }
 
   // ---------- Billetter, kalender, Wallet og innsjekking (se tickets.js) ----------
   const tokens = createTokens(repo.secret());
@@ -133,7 +160,7 @@ export function createApp({
   for (const site of sites) logoFor(site.theme);
   const tickets = createTicketFeature({
     repo, config, tokens, siteOf, eventUrl, imageUrlOf, findEventBySlug, notFound, sendPage, logger, adminT, placeSearch, limiter, limits,
-    logoFor,
+    logoFor, isLan, redirectToSite,
   });
 
   // ---------- Felles mellomvare ----------
@@ -162,7 +189,7 @@ export function createApp({
         "form-action 'self'",
       ].join('; '),
     });
-    req.site = siteByHost.get(hostOf(req)) ?? mainSite;
+    req.site = lanSiteOf(req) ?? siteByHost.get(hostOf(req)) ?? mainSite;
     req.t = req.site.t;
     next();
   });
@@ -188,6 +215,12 @@ export function createApp({
 
   function adminGate(kind) {
     return async (req, res, next) => {
+      // Den betrodde LAN-porten slipper inn uten ADMIN_HOST og uten Access-token.
+      if (isLan(req)) {
+        req.t = adminT;
+        req.accessUser = null;
+        return next();
+      }
       // Med eget admin-vertsnavn finnes ikke admin på de offentlige domenene i det hele tatt.
       if (config.adminHost && hostOf(req) !== config.adminHost) return notFound(req, res);
       req.t = adminT;
@@ -226,7 +259,7 @@ export function createApp({
   app.get('/:slug/admin', (req, res) => {
     const event = findEventBySlug(req.params.slug);
     if (!event) return notFound(req, res);
-    res.redirect(301, `${config.adminHost ? adminBaseUrl(event) : ''}/admin/${event.slug}`);
+    res.redirect(301, `${config.adminHost && !isLan(req) ? adminBaseUrl(event) : ''}/admin/${event.slug}`);
   });
 
   tickets.mountPages(app);
@@ -237,7 +270,7 @@ export function createApp({
     const event = findEventBySlug(req.params.slug);
     if (!event) return notFound(req, res);
     const site = siteOf(event);
-    if (site !== req.site) return res.redirect(301, `${site.baseUrl}${req.originalUrl}`);
+    if (site !== req.site) return redirectToSite(req, res, site);
     sendPage(res, view, site, 200, event);
   };
   // Opplastet forsidebilde. Adressen har en hash av innholdet, så et nytt bilde får ny adresse.
@@ -248,7 +281,7 @@ export function createApp({
     const image = event && repo.image(event.id);
     if (!image || req.params.file !== `${image.hash}.${IMAGE_EXT[image.type]}`) return notFound(req, res);
     const site = siteOf(event);
-    if (site !== req.site) return res.redirect(301, `${site.baseUrl}${req.originalUrl}`);
+    if (site !== req.site) return redirectToSite(req, res, site);
     res.type(image.type).set('Cache-Control', 'private, max-age=86400').send(image.data);
   });
   app.get('/:slug', eventPage('event'));
@@ -297,11 +330,11 @@ export function createApp({
   }
 
   // Oppretting av nye arrangementer krever Cloudflare Access (adminGate har da allerede verifisert
-  // tokenet). Uten Access er oppretting slått av – med mindre ADMIN_NO_AUTH=true er satt for lokal
-  // utvikling. Slik blir en glemt innstilling aldri til at hvem som helst kan opprette arrangementer
-  // og sende e-post i ditt navn.
+  // tokenet) eller den betrodde LAN-porten. Ellers er oppretting slått av – med mindre ADMIN_NO_AUTH=true
+  // er satt for lokal utvikling. Slik blir en glemt innstilling aldri til at hvem som helst kan
+  // opprette arrangementer og sende e-post i ditt navn.
   function requireCreator(req, res, next) {
-    if (accessVerifier || config.adminNoAuth) return next();
+    if (isLan(req) || accessVerifier || config.adminNoAuth) return next();
     return res.status(403).json({ error: adminT('errors.creationDisabled') });
   }
 
@@ -762,6 +795,15 @@ export function createApp({
     }
     const deleted = repo.deleteEventsEndedBefore(new Date(now.getTime() - deleteAfterDays * DAY));
     return { reported, deleted };
+  };
+
+  /**
+   * Inngangen for den betrodde LAN-lytteren (se server.js): http.createServer(app.lanHandler).
+   * Samme app og database – forespørselen merkes bare som betrodd før den slippes inn.
+   */
+  app.lanHandler = (req, res) => {
+    req[LAN] = true;
+    app(req, res);
   };
 
   return app;

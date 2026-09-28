@@ -6,15 +6,23 @@ import { loadWalletConfig } from './walletConfig.js';
 export function loadConfig(rawEnv = process.env) {
   const env = unquoteAll(rawEnv);
   const port = Number(env.PORT) || 3000;
+  const lanWarnings = [];
+  // Betrodd port for kontorets LAN (valgfri). Se lanPort under.
+  const lanPort = parseLanPort(env.LAN_PORT, port, lanWarnings);
   // Nettstedene: hovednettstedet fra DOMAIN/BASE_URL/tema-variablene, pluss eventuelle SITE_<ID>_*.
   // Ugyldige verdier ignoreres og havner i `warnings`; alvorlige feil kaster SiteConfigError.
   const { sites, mainSite, warnings } = loadSites(env, { port });
   // Apple Wallet og Google Wallet: valgfrie, og slås av med en advarsel hvis oppsettet er ufullstendig.
   const wallet = loadWalletConfig(env);
-  warnings.push(...wallet.warnings);
+  warnings.push(...wallet.warnings, ...lanWarnings);
 
   return {
     port,
+    // Ekstra HTTP-lytter for kontorets LAN, i samme prosess og med samme app og database. Alt som
+    // kommer inn på denne porten er BETRODD: admin uten ADMIN_HOST og Access, ingen rate limiting.
+    // Tilliten følger porten forespørselen kom inn på – aldri headere, som klienten kan sette selv.
+    // Porten må aldri rutes gjennom tunnelen eller publiseres mot internett. null = av.
+    lanPort,
     sites,
     mainSite,
     // Hovednettstedets verdier, for kode som bare trenger «nettstedet» (logger, enkle oppsett).
@@ -73,6 +81,21 @@ function parseEmails(value, warnings) {
   const valid = emails.filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
   for (const e of emails) if (!valid.includes(e)) warnings.push(`ADMIN_EMAIL: «${e}» er ikke en gyldig e-postadresse og ignoreres.`);
   return valid;
+}
+
+function parseLanPort(value, port, warnings) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  const n = Number(raw);
+  if (!/^\d+$/.test(raw) || n < 1 || n > 65535) {
+    warnings.push(`LAN_PORT=${JSON.stringify(value)} ignoreres: må være et portnummer fra 1 til 65535. Ingen LAN-port startes.`);
+    return null;
+  }
+  if (n === port) {
+    warnings.push(`LAN_PORT=${n} ignoreres: kan ikke være den samme som PORT (${port}). Ingen LAN-port startes.`);
+    return null;
+  }
+  return n;
 }
 
 function parseDays(value, warnings) {
