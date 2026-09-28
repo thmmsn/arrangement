@@ -579,7 +579,9 @@ Alt settes i `.env` – se `.env.example` for hele lista med forklaringer. Ugyld
 | `FOOTER_TEXT`, `PRIVACY_URL` | Bunntekst og lenke til personvernerklæring |
 | `CUSTOM_CSS_URL` | Eget stilark for alt annet |
 
-**Egne filer:** Legg logo, favicon eller stilark i mappen `branding/`. De blir tilgjengelige som `/assets/custom/<filnavn>` – både lokalt og i Docker (mappen monteres inn). Eksempel: `LOGO_URL=/assets/custom/logo.svg`. Logoen brukes også i PDF-billetten, og må da være PNG, JPEG eller SVG.
+**Egne filer:** Legg logo, favicon eller stilark i mappen `branding/`. De blir tilgjengelige som `/assets/custom/<filnavn>` – både lokalt og i Docker (mappen monteres inn). Eksempel: `LOGO_URL=/assets/custom/logo.svg`. Logoen brukes også i PDF-billetten og e-postene, og må da være PNG, JPEG eller SVG.
+
+**Logoen i e-postene** bygges inn i selve e-posten som et PNG-bilde (vedlegg med Content-ID, vist med `src="cid:logo"`), ikke som en lenke til bildet på nettstedet. En lenke virker dårlig i e-post: Gmail, Outlook og de fleste andre viser ikke SVG i det hele tatt, mange klienter (bl.a. Outlook) viser ikke bilder fra nettet før mottakeren trykker «Vis bilder», og bildet må kunne hentes fra internett (ikke fra localhost, LAN eller bak Cloudflare Access). PNG-en lages én gang ved oppstart fra `LOGO_URL` – SVG tegnes skarpt i riktig størrelse, i dobbel oppløsning for skjermer med høy pikseltetthet – med høyden `LOGO_HEIGHT` og maks 480 piksler bred. Bredde og høyde står både som attributter og i `style`, fordi Outlook for Windows bare ser på attributtene. Kan logoen ikke leses (f.eks. WebP), står lenken til den i e-posten som før, og loggen sier fra ved oppstart.
 
 Nyanser som hover-farger og lyse bakgrunner på meldinger regnes ut fra grunnfargene med CSS `color-mix()`, så hele siden følger med når du bytter `COLOR_ACCENT`.
 
@@ -665,7 +667,8 @@ src/
   tickets.js     Billettsider, PDF, Wallet, kalender og innsjekking (sider og API)
   qr.js          QR-koder (SVG og rutenett til PDF)
   pdf.js         PDF-billett (billettform med logo, QR-kode og dørkode)
-  logo.js        Logoen til PDF-billetten (fra branding/ eller https; PNG, JPEG, SVG)
+  logo.js        Logoen til PDF-billetten og e-postene (fra branding/ eller https; PNG, JPEG, SVG)
+  emailLogo.js   Logoen bygget inn i e-postene som PNG (Content-ID)
   calendar.js    Kalenderfil (.ics) og Google Kalender-lenke
   appleWallet.js Apple Wallet-kort (.pkpass/.pkpasses) med PKCS#7-signatur
   googleWallet.js Google Wallet-lenke (JWT)

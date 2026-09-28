@@ -5,6 +5,7 @@ import express from 'express';
 import { CapacityError } from './db.js';
 import { registrationsToCsv } from './csv.js';
 import * as templates from './email.js';
+import { createEmailLogo } from './emailLogo.js';
 import { accessTokenFrom, AccessError, createAccessVerifier } from './cfAccess.js';
 import { escapeHtml } from './html.js';
 import { hashSecret, newSecret, newSlug, secretMatches, SLUG_PATTERN } from './ids.js';
@@ -58,6 +59,8 @@ export const isLan = (req) => req[LAN] === true;
 export function createApp({
   repo, mailer, config, logger = console, accessVerifier = defaultAccessVerifier(config), placeSearch = createPlaceSearch(),
   version = readVersion(),
+  // Leser LOGO_URL (se logo.js). Kan byttes ut i testene.
+  logoFor = createLogoLoader({ brandingDir: BRANDING, assetsDir: ASSETS, logger }),
 }) {
   const app = express();
   app.disable('x-powered-by');
@@ -190,8 +193,9 @@ export function createApp({
   const tokens = createTokens(repo.secret());
   // Logoen til PDF-billetten. Hentes med én gang for hvert nettsted, så en logo som ikke kan brukes
   // i PDF (feil sti, WebP …) gir en advarsel i loggen ved oppstart – ikke først når noen melder seg på.
-  const logoFor = createLogoLoader({ brandingDir: BRANDING, assetsDir: ASSETS, logger });
-  for (const site of sites) logoFor(site.theme);
+  // Samme logo bygges inn i e-postene som PNG (se emailLogo.js) – lages også med én gang.
+  const emailLogoFor = createEmailLogo({ logoFor, logger });
+  for (const site of sites) emailLogoFor(site.theme);
   const tickets = createTicketFeature({
     repo, config, tokens, siteOf, eventUrl, imageUrlOf, findEventBySlug, notFound, sendPage, logger, adminT, placeSearch, limiter, limits,
     logoFor, isLan, redirectToSite,
@@ -445,8 +449,12 @@ export function createApp({
   }
 
   // E-post skal aldri stoppe en påmelding: feil logges, og svaret forteller om sendingen gikk bra.
+  // Logoen bygges inn i hver e-post (se emailLogo.js); kan den ikke det, står lenken til den igjen.
   async function sendEmails(messages) {
-    const results = await Promise.allSettled(messages.map((m) => mailer.send(m)));
+    const results = await Promise.allSettled(messages.map(async (m) => {
+      const { site, ...message } = templates.embedLogo(m, await emailLogoFor(m.site?.theme));
+      return mailer.send(message);
+    }));
     results.forEach((result, i) => {
       if (result.status === 'rejected') logger.error(`Kunne ikke sende e-post til ${messages[i].to}:`, result.reason);
     });

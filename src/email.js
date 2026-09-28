@@ -10,7 +10,8 @@ const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 // `from` er standardavsenderen; hver melding kan ha sin egen (nettstedets EMAIL_FROM).
 export function createMailer({ apiKey, from: defaultFrom, fetchImpl = fetch, logger = console }) {
   return {
-    // attachments: [{ filename, content: Buffer, contentType }] – f.eks. kalenderfil og PDF-billett.
+    // attachments: [{ filename, content: Buffer, contentType, contentId }] – f.eks. kalenderfil og
+    // PDF-billett. Med contentId er vedlegget et innebygd bilde, vist i HTML-en med src="cid:<contentId>".
     async send({ from = defaultFrom, to, subject, html, text, replyTo, attachments = [] }) {
       if (!apiKey) {
         const files = attachments.length ? `\nVedlegg: ${attachments.map((a) => `${a.filename} (${a.content.length} byte)`).join(', ')}` : '';
@@ -29,6 +30,7 @@ export function createMailer({ apiKey, from: defaultFrom, fetchImpl = fetch, log
               filename: a.filename,
               content: Buffer.from(a.content).toString('base64'),
               ...(a.contentType && { content_type: a.contentType }),
+              ...(a.contentId && { content_id: a.contentId }),
             })),
           }),
         }),
@@ -44,6 +46,7 @@ export function createMailer({ apiKey, from: defaultFrom, fetchImpl = fetch, log
 //
 // Hver mal får `site` – nettstedet arrangementet hører til – og bruker dets språk (site.t),
 // tema (farger og logo) og avsender (site.emailFrom). Lenkene lages av kalleren fra samme nettsted.
+// Meldingen har med `site`, så logoen kan bygges inn før sending (se embedLogo). Mailer sender den ikke.
 
 export { escapeHtml };
 
@@ -55,13 +58,43 @@ const DEFAULT_SITE = {
   theme: { colors: DEFAULT_COLORS, siteName: '', logoAbsoluteUrl: '', logoHeight: 44 },
 };
 
+// Logoen øverst i e-posten. Uten `logo` er den en lenke til bildet på nettstedet. Med `logo` (se
+// emailLogo.js) er den et bilde bygget inn i e-posten (src="cid:…"), med bredde og høyde som
+// attributter – Outlook for Windows ser bare på dem.
+function logoImg(theme, logo = null) {
+  const alt = escapeHtml(theme.siteName || '');
+  if (!logo) {
+    return `<img src="${escapeHtml(theme.logoAbsoluteUrl)}" alt="${alt}" height="${theme.logoHeight}" style="display:block;height:${theme.logoHeight}px;width:auto;margin:0 auto 20px;border:0;">`;
+  }
+  return `<img src="cid:${escapeHtml(logo.cid)}" alt="${alt}" width="${logo.width}" height="${logo.height}" style="display:block;width:${logo.width}px;height:${logo.height}px;margin:0 auto 20px;border:0;">`;
+}
+
+/**
+ * Bygger logoen inn i e-posten: lenken til logoen byttes med det innebygde bildet, som legges ved med
+ * Content-ID. Uten `logo` (kunne ikke lages) eller uten logo i e-posten er meldingen uendret.
+ */
+export function embedLogo(message, logo) {
+  const theme = message.site?.theme;
+  if (!logo || !theme?.logoAbsoluteUrl) return message;
+  const linked = logoImg(theme);
+  if (!message.html?.includes(linked)) return message;
+  return {
+    ...message,
+    html: message.html.replace(linked, () => logoImg(theme, logo)),
+    attachments: [
+      ...(message.attachments ?? []),
+      { filename: `${logo.cid}.png`, content: logo.png, contentType: 'image/png', contentId: logo.cid },
+    ],
+  };
+}
+
 // E-post-HTML må ha stilene inline – e-postklienter ignorerer stilark. Fargene kommer fra temaet
 // og er allerede validert (se theme.js), så de kan trygt settes inn i style-attributter.
 function emailUi(site) {
   const { theme, t, lang } = site;
   const c = theme.colors;
   const brand = theme.logoAbsoluteUrl
-    ? `<img src="${escapeHtml(theme.logoAbsoluteUrl)}" alt="${escapeHtml(theme.siteName || '')}" height="${theme.logoHeight}" style="display:block;height:${theme.logoHeight}px;width:auto;margin:0 auto 20px;border:0;">`
+    ? logoImg(theme)
     : theme.siteName
       ? `<p style="text-align:center;margin:0 0 20px;font-family:Arial,sans-serif;font-size:13px;letter-spacing:2px;text-transform:uppercase;color:${c.accent};">${escapeHtml(theme.siteName)}</p>`
       : '';
@@ -260,7 +293,7 @@ ${forward ? `\n${forward}\n` : ''}
 ${personsText(ui, event, persons)}
 
 ${cancelText}`;
-  return { from: site.emailFrom, to: contactEmail, subject, html, text, replyTo: event.organizerEmail };
+  return { site, from: site.emailFrom, to: contactEmail, subject, html, text, replyTo: event.organizerEmail };
 }
 
 /** Varsel til arrangøren om ny påmelding. Svar på e-posten går til den som meldte på. */
@@ -287,7 +320,7 @@ export function organizerNotification({ event, booking, count, site = DEFAULT_SI
 ${personsText(ui, event, persons)}
 
 ${status}`;
-  return { from: site.emailFrom, to: event.organizerEmail, subject, html, text, replyTo: contactEmail };
+  return { site, from: site.emailFrom, to: event.organizerEmail, subject, html, text, replyTo: contactEmail };
 }
 
 /** Kvittering til den som meldte på, etter at hele eller deler av påmeldingen er meldt av. */
@@ -312,7 +345,7 @@ export function guestCancellation({ event, booking, cancelled, remaining, eventU
 ${who} ${thanks}
 ${rest ? `\n${rest}\n` : ''}
 ${t('email.guestCancellation.rebookText', { url: eventUrl })}`;
-  return { from: site.emailFrom, to: booking.contactEmail, subject, html, text, replyTo: event.organizerEmail };
+  return { site, from: site.emailFrom, to: booking.contactEmail, subject, html, text, replyTo: event.organizerEmail };
 }
 
 /** Varsel til arrangøren om avmelding. */
@@ -331,7 +364,7 @@ export function organizerCancellation({ event, booking, cancelled, count, site =
   const text = `${intro}
 
 ${status}`;
-  return { from: site.emailFrom, to: event.organizerEmail, subject, html, text, replyTo: booking.contactEmail };
+  return { site, from: site.emailFrom, to: event.organizerEmail, subject, html, text, replyTo: booking.contactEmail };
 }
 
 // «Dette skjer videre»: e-post per påmelding, rapport ved fristen, etteranmelding og sletting.
@@ -396,7 +429,7 @@ export function eventCreated({
     ...(lines.length ? ['', `${t('email.eventCreated.nextHeading')}:`, ...lines.map((l) => `- ${l}`)] : []),
     ...(cancelEventUrl ? ['', t('email.eventCreated.cancelEventText', { url: cancelEventUrl })] : []),
   ].filter((line, i, all) => line !== '' || all[i - 1] !== '').join('\n').replace(/^\n+/, '');
-  return { from: site.emailFrom, to: event.organizerEmail, subject, html, text };
+  return { site, from: site.emailFrom, to: event.organizerEmail, subject, html, text };
 }
 
 /**
@@ -445,7 +478,7 @@ export function deadlineReport({ event, registrations, count, scannerUrl, delete
     '',
     deletion,
   ].join('\n');
-  return { from: site.emailFrom, to: event.organizerEmail, subject, html, text };
+  return { site, from: site.emailFrom, to: event.organizerEmail, subject, html, text };
 }
 
 /** Til hver påmelding når arrangementet avlyses, med arrangørens melding. Svar går til arrangøren. */
@@ -472,7 +505,7 @@ export function eventCancelledGuest({ event, booking, message, timeZone, site = 
     '',
     t('email.eventCancelled.reply'),
   ].join('\n');
-  return { from: site.emailFrom, to: booking.contactEmail, subject, html, text, replyTo: event.organizerEmail };
+  return { site, from: site.emailFrom, to: booking.contactEmail, subject, html, text, replyTo: event.organizerEmail };
 }
 
 /** Kvittering til arrangøren (og tjenesteadministratoren) når arrangementet er avlyst. */
@@ -491,5 +524,5 @@ export function eventCancelledOrganizer({ event, notified, deleteAt, timeZone, s
     ${ui.small(escapeHtml(deletion))}
   `);
   const text = [t('email.eventCancelled.organizerIntro', { title: event.title, name: event.organizerName, email: event.organizerEmail }), '', result, '', deletion].join('\n');
-  return { from: site.emailFrom, to: event.organizerEmail, subject, html, text };
+  return { site, from: site.emailFrom, to: event.organizerEmail, subject, html, text };
 }

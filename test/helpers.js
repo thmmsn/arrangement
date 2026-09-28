@@ -20,8 +20,9 @@ const noRateLimits = {
 /**
  * Starter appen med `env` som miljøvariabler. Returnerer { request, repo, sent, config, app }.
  * `sent` samler alle e-postene som ville blitt sendt. `placeSearch` erstatter Kartverket-oppslaget.
+ * `logoFor` erstatter lesingen av LOGO_URL (se logo.js).
  */
-export async function startApp(env = {}, { configOverrides = {}, accessVerifier, placeSearch, mailer: customMailer } = {}) {
+export async function startApp(env = {}, { configOverrides = {}, accessVerifier, placeSearch, mailer: customMailer, logoFor } = {}) {
   const sent = [];
   const config = { ...loadConfig(env), rateLimits: noRateLimits, ...configOverrides };
   const repo = createRepository(openDatabase(':memory:'));
@@ -30,6 +31,7 @@ export async function startApp(env = {}, { configOverrides = {}, accessVerifier,
     repo, mailer, config, logger: quiet,
     ...(accessVerifier !== undefined && { accessVerifier }),
     ...(placeSearch && { placeSearch }),
+    ...(logoFor && { logoFor }),
   });
   const server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
