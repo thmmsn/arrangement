@@ -126,11 +126,24 @@ a:hover { color: var(--accent-dark); }
 
 /* ---------- Arrangementsside ---------- */
 
+/*
+  Forsidebildet vises alltid helt, aldri beskåret. Arrangører lager det ofte som en plakat med tekst,
+  dato og logo helt ut mot kantene. Bildet fyller innholdskolonnen i bredden, med samme venstre og
+  høyre kant som tittelen og teksten, og får sin egen høyde.
+  Et svært høyt bilde, for eksempel en stående plakat, begrenses i høyden, så påmeldingen ikke havner
+  langt ned på siden. Da skaleres bildet ned og sentreres med object-fit: contain (aldri cover), og
+  bakgrunnen fyller feltene på sidene. Grensen er 70 % av skjermhøyden, men minst 320 piksler, så
+  bildet ikke blir bittelite på en liggende mobil. svh er høyden når mobilens adresselinje vises.
+  Nettlesere som ikke kjenner svh, hopper over den linjen og bruker vh.
+*/
 .hero {
-  width: 100%;
-  max-height: 380px;
-  object-fit: cover;
   display: block;
+  width: 100%;
+  height: auto;
+  max-height: max(320px, 70vh);
+  max-height: max(320px, 70svh);
+  object-fit: contain;
+  object-position: center;
   border-radius: var(--radius);
   margin-bottom: 32px;
   background: var(--line);
@@ -515,8 +528,10 @@ tr.added td:nth-child(2) { padding-left: 22px; }
 /* ---------- Skjema: sted, brytere og utseende ---------- */
 
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.image-preview { display: block; max-width: 100%; max-height: 220px; border-radius: var(--radius-sm); margin-bottom: 10px; object-fit: cover; }
+/* Forhåndsvisningen viser hele bildet, som på arrangementssiden – bare mindre. */
+.image-preview { display: block; max-width: 100%; max-height: 220px; border-radius: var(--radius-sm); margin-bottom: 10px; object-fit: contain; }
 .image-field .actions { margin: 0 0 10px; }
+.image-hint { margin: 8px 0 0; }
 .image-link { display: grid; grid-template-columns: max-content 1fr; gap: 10px; align-items: center; }
 .place-field { position: relative; }
 .place-results {

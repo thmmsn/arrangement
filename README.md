@@ -393,13 +393,14 @@ Arrangøren kan **laste opp et bilde** eller lime inn en lenke. Et opplastet bil
   - Filtypen avgjøres av innholdet, ikke filnavnet. Bare JPEG, PNG og WebP godtas, maks 5 MB og maks 40 millioner piksler, så et lite «bildebombe»-bilde ikke kan få nettleseren til å gå tom for minne.
   - **Alle metadata fjernes** før lagring: EXIF og XMP (GPS-posisjon, tidspunkt, kameramodell), kommentarer og tekstfelter. Bare bildets retning beholdes, i en minimal EXIF-blokk, så mobilbilder ikke vises liggende. Selve bildedataene endres ikke.
 - **Lagring:** bildet ligger i databasen, i en egen tabell, og slettes sammen med arrangementet.
-- **Visning:** bildet vises på arrangementets eget domene (`/<hash>/bilde/<hash-av-innholdet>.jpg`), med `Cache-Control: private`, så det ikke blir liggende i en delt mellomlagring etter at arrangementet er slettet. I Google Wallet vises det øverst på kortet.
+- **Hele bildet vises:** på arrangementssiden fyller bildet innholdskolonnen i bredden, med samme kanter som tittelen og teksten, og får sin egen høyde – det beskjæres aldri, så tekst, dato og logo ut mot kantene av en plakat blir med. Et svært høyt bilde (en stående plakat) begrenses til 70 % av skjermhøyden (men minst 320 piksler), så påmeldingen ikke havner langt ned. Da skaleres det ned og sentreres (`object-fit: contain`). Ved opplastingen står det hvilket format som passer best: liggende, helst 1,91 : 1, for eksempel 1920 × 1005 piksler, som er det samme formatet som delingsbildet under.
+- **Visning:** bildet vises på arrangementets eget domene (`/<hash>/bilde/<hash-av-innholdet>.jpg`), med `Cache-Control: private`, så det ikke blir liggende i en delt mellomlagring etter at arrangementet er slettet. I Google Wallet vises det øverst på kortet som et bredt banner. Der er det Google som bestemmer hvordan bildet skaleres og beskjæres (Google anbefaler forholdet 3 : 1), så en stående plakat kan bli beskåret eller liten der.
 
 ### Delingsbilde (og:image)
 
 Når arrangementslenken deles i Messenger, Slack, Teams, iMessage, LinkedIn o.l., viser tjenesten en forhåndsvisning med tittel og bilde. Bildet er et eget **delingsbilde som lages fra det opplastede forsidebildet**:
 
-- **Format:** JPEG på 1200 × 630 piksler (forholdet 1,91 : 1 som disse tjenestene bruker), beskåret fra midten – samme utsnitt som forsidebildet på arrangementssiden. Små bilder skaleres opp, så forhåndsvisningen alltid blir stor.
+- **Format:** JPEG på 1200 × 630 piksler (forholdet 1,91 : 1 som disse tjenestene bruker), beskåret fra midten. Dette er det eneste stedet systemet selv beskjærer forsidebildet, fordi forhåndsvisningen har fast format. Et forsidebilde i forholdet 1,91 : 1 (f.eks. 1920 × 1005) mister ingenting. Små bilder skaleres opp, så forhåndsvisningen alltid blir stor.
 - **Riktig vei:** bildet roteres etter EXIF-retningen, så mobilbilder ikke blir liggende.
 - **Gjennomsiktighet** (PNG/WebP) fylles med hvitt – ellers blir den svart hos noen tjenester.
 - **Uten metadata:** delingsbildet har verken EXIF, XMP eller fargeprofil (fargene gjøres om til sRGB).

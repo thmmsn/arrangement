@@ -4,8 +4,9 @@
 // Disse tjenestene viser et bilde i forholdet 1,91 : 1 og vil helst ha 1200 × 630 piksler. Et
 // forsidebilde kan ha hvilken som helst form, være opptil 2000 piksler (eller mer), være WebP (som ikke
 // alle forstår) eller ha gjennomsiktighet (som blir svart hos noen). Derfor lages en egen JPEG:
-//   - beskåret til 1200 × 630 fra midten – samme utsnitt som forsidebildet på arrangementssiden, som
-//     vises med object-fit: cover
+//   - beskåret til 1200 × 630 fra midten. Formatet krever det: forhåndsvisningen har fast størrelse.
+//     Arrangementssiden viser derimot alltid hele forsidebildet (se .hero i style.css), så et bilde i
+//     forholdet 1,91 : 1 (f.eks. 1920 × 1005) blir likt begge steder – det anbefales ved opplastingen.
 //   - rotert etter EXIF-retningen, så mobilbilder ikke blir liggende
 //   - gjennomsiktige områder fylles med hvitt
 //   - uten metadata (sharp skriver ingen EXIF, XMP eller fargeprofil med mindre man ber om det), og

@@ -384,9 +384,15 @@ function imageField(initial) {
   const preview = h('img', { class: 'image-preview', alt: '', hidden: true });
   preview.addEventListener('error', () => { preview.hidden = true; });
   const error = h('div');
-  const file = h('input', { id: 'imageFile', type: 'file', accept: TYPES.join(','), class: 'visually-hidden' });
+  const file = h('input', {
+    id: 'imageFile', type: 'file', accept: TYPES.join(','), class: 'visually-hidden', 'aria-describedby': 'imageHint',
+  });
   const pick = h('label', { class: 'btn secondary small', for: 'imageFile' }, t('eventForm.imageUpload'));
-  const url = h('input', { id: 'imageUrl', name: 'imageUrl', type: 'url', value: initial.imageUrl || '', placeholder: 'https://…' });
+  const url = h('input', {
+    id: 'imageUrl', name: 'imageUrl', type: 'url', value: initial.imageUrl || '', placeholder: 'https://…', 'aria-describedby': 'imageHint',
+  });
+  // Hele bildet vises på arrangementssiden (se .hero i style.css), så arrangøren får vite hvilket format som passer.
+  const hint = h('p', { id: 'imageHint', class: 'muted small image-hint' }, t('eventForm.imageHint'));
   const remove = h('button', { class: 'btn danger small', type: 'button' }, t('eventForm.imageRemove'));
 
   const show = () => {
@@ -426,7 +432,8 @@ function imageField(initial) {
     el: h('div', { class: 'image-field' },
       preview, error,
       h('div', { class: 'actions' }, file, pick, remove),
-      h('div', { class: 'image-link' }, h('span', { class: 'muted small' }, t('eventForm.imageOrLink')), url)),
+      h('div', { class: 'image-link' }, h('span', { class: 'muted small' }, t('eventForm.imageOrLink')), url),
+      hint),
     url: () => url.value,
     read: () => ({ upload, removeUpload }),
     /** Etter lagring: det som ble lastet opp, er nå det lagrede bildet. */

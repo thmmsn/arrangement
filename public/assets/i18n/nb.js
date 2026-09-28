@@ -213,6 +213,7 @@ export default {
     imageUpload: 'Last opp bilde',
     imageOrLink: 'eller lenke',
     imageRemove: 'Fjern bildet',
+    imageHint: 'Hele bildet vises på arrangementssiden, uten beskjæring. Liggende format passer best, helst 1,91 : 1, for eksempel 1920 × 1005 piksler. Da blir også forhåndsvisningen når lenken deles (1200 × 630) lik bildet; andre formater beskjæres fra midten der. Et høyt, stående bilde, for eksempel en plakat, vises også helt, men mindre.',
     imageTooLarge: 'Bildet er for stort (maks {max} MB).',
     imageType: 'Bare JPEG, PNG eller WebP.',
     capacity: 'Antall plasser',
