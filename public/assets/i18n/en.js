@@ -213,7 +213,6 @@ export default {
     imageUpload: 'Upload image',
     imageOrLink: 'or link',
     imageRemove: 'Remove image',
-    imageHint: 'The whole image is shown on the event page, never cropped. Landscape works best, ideally 1.91 : 1, for example 1920 × 1005 pixels. Then the preview when the link is shared (1200 × 630) matches the image too; other formats are cropped from the centre there. A tall, portrait image, such as a poster, is also shown in full, but smaller.',
     imageTooLarge: 'The image is too large (max {max} MB).',
     imageType: 'Only JPEG, PNG or WebP.',
     capacity: 'Number of spots',
