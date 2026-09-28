@@ -127,26 +127,34 @@ a:hover { color: var(--accent-dark); }
 /* ---------- Arrangementsside ---------- */
 
 /*
-  Forsidebildet vises alltid helt, aldri beskåret. Arrangører lager det ofte som en plakat med tekst,
-  dato og logo helt ut mot kantene. Bildet fyller innholdskolonnen i bredden, med samme venstre og
-  høyre kant som tittelen og teksten, og får sin egen høyde.
-  Et svært høyt bilde, for eksempel en stående plakat, begrenses i høyden, så påmeldingen ikke havner
-  langt ned på siden. Da skaleres bildet ned og sentreres med object-fit: contain (aldri cover), og
-  bakgrunnen fyller feltene på sidene. Grensen er 70 % av skjermhøyden, men minst 320 piksler, så
-  bildet ikke blir bittelite på en liggende mobil. svh er høyden når mobilens adresselinje vises.
-  Nettlesere som ikke kjenner svh, hopper over den linjen og bruker vh.
+  Forsidebildet er et heltebilde over tekstkolonnen. Det vises alltid helt, aldri beskåret.
+  Bare høyden har et tak, så påmeldingen ikke havner langt ned på siden: 60 % av skjermhøyden, men
+  minst 320 piksler. svh er høyden når mobilens adresselinje vises (--hero-max settes på nytt under).
+  Innenfor taket blir bildet så stort som formatet tillater. Det kan gå ut over margene til tekstkolonnen,
+  men aldri bredere enn siden (100cqw er bredden til .hero-wrap, altså hele siden):
+    bredde = min(sidebredden, taket × bredde/høyde)
+  Et liggende bilde blir dermed bredere enn teksten, og på mobil går det fra kant til kant. En stående
+  plakat blir smalere og står midt på. Formatet (--hero-ratio) setter event.js når bildet er lastet.
+  Til da er bredden 0, så bildet ikke blinker i feil størrelse.
+  Hjørnene rundes bare når bildet ikke når ut til sidekantene: avstanden til kantene, klemt mellom 0 og
+  --radius. max-width og max-height er en reserve for nettlesere uten cqw: der vises bildet i sin egen
+  størrelse, innenfor sidebredden og taket.
 */
+.hero-wrap { container-type: inline-size; }
 .hero {
+  --hero-max: max(320px, 60vh);
+  --hero-width: min(100cqw, var(--hero-max) * var(--hero-ratio, 0));
   display: block;
-  width: 100%;
+  width: var(--hero-width);
   height: auto;
-  max-height: max(320px, 70vh);
-  max-height: max(320px, 70svh);
-  object-fit: contain;
-  object-position: center;
-  border-radius: var(--radius);
-  margin-bottom: 32px;
+  max-width: 100%;
+  max-height: var(--hero-max);
+  margin: 0 auto 32px;
+  border-radius: clamp(0px, 100cqw - var(--hero-width), var(--radius));
   background: var(--line);
+}
+@supports (height: 1svh) {
+  .hero { --hero-max: max(320px, 60svh); }
 }
 
 .meta {

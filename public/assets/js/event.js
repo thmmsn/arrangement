@@ -3,6 +3,7 @@ import {
 } from './common.js';
 
 const app = document.getElementById('app');
+const hero = document.getElementById('hero');
 const slug = slugFromPath();
 const REFRESH_MS = 30_000;
 
@@ -23,9 +24,9 @@ async function load() {
 
 function render() {
   const tz = event.timeZone;
+  hero.replaceChildren(...(event.imageUrl ? [heroImage(event.imageUrl)] : []));
   // replaceChildren skriver «null» som tekst, så valgfrie deler som mangler filtreres bort.
   app.replaceChildren(...[
-    event.imageUrl ? h('img', { class: 'hero', src: event.imageUrl, alt: '', onerror: (e) => e.target.remove() }) : null,
     h('p', { class: 'kicker' }, formatDay(event.startsAt, tz)),
     h('h1', {}, event.title),
     h('dl', { class: 'meta' },
@@ -40,6 +41,21 @@ function render() {
     event.description ? h('div', { class: 'description' }, linkify(event.description)) : null,
     h('section', { class: 'card', id: 'registration' }, registrationSection()),
   ].filter(Boolean));
+}
+
+/**
+ * Forsidebildet står over tekstkolonnen og kan være bredere enn den. Bredden regnes ut i CSS-en fra
+ * bildets format (se .hero i style.css), så formatet settes som --hero-ratio når bildet er lastet.
+ * Lytterne legges til før src, så de rekker å fange opp et bilde som allerede ligger i mellomlageret.
+ */
+function heroImage(src) {
+  return h('img', {
+    class: 'hero',
+    alt: '',
+    onload: (e) => e.target.style.setProperty('--hero-ratio', e.target.naturalWidth / e.target.naturalHeight),
+    onerror: (e) => e.target.remove(),
+    src,
+  });
 }
 
 /** «Veibeskrivelse»: Apple Kart på iPhone/iPad/Mac, ellers Google Maps. */
