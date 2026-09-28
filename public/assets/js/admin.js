@@ -23,9 +23,10 @@ async function load() {
     return;
   }
   try {
+    // Alt hentes med admin-nøkkelen til arrangementet – siden trenger ingen annen innlogging.
     const [data, config] = await Promise.all([
       api(`/admin/events/${slug}`, { headers: auth }),
-      api('/admin/config'),
+      api(`/admin/events/${slug}/config`, { headers: auth }),
     ]);
     ({ event, registrations } = data);
     ({ sites, wallets = {}, skins = [] } = config);
@@ -308,6 +309,7 @@ function editCard() {
     wallets,
     skins,
     editing: true,
+    searchPlaces: (q) => api(`/admin/events/${slug}/places?q=${encodeURIComponent(q)}`, { headers: auth }),
     submitLabel: t('admin.save'),
     onSubmit: (payload, extras) => save(payload, t('admin.saved'), extras.image),
   });

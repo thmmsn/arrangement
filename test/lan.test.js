@@ -182,8 +182,14 @@ describe('LAN-porten er betrodd', () => {
     assert.equal(admin.status, 200);
     assert.equal((await app.lan({ path: `/admin/${slug}` })).status, 200);
 
-    // Den samme admin-siden er fortsatt stengt på PORT uten Access.
-    assert.equal((await app.pub({ path: `/api/admin/events/${slug}`, headers: { host: ADMIN, authorization: `Bearer ${adminKey}` } })).status, 403);
+    // På PORT gir admin-nøkkelen alene tilgang til arrangementet – uten Access, både på det offentlige
+    // domenet (nye lenker) og på admin-vertsnavnet (eldre lenker). Uten nøkkel: 401.
+    for (const host of [MAIN, ADMIN]) {
+      const withKey = await app.pub({ path: `/api/admin/events/${slug}`, headers: { host, authorization: `Bearer ${adminKey}` } });
+      assert.equal(withKey.status, 200, host);
+      assert.equal((await app.pub({ path: `/api/admin/events/${slug}`, headers: { host } })).status, 401, host);
+    }
+    assert.equal(app.accessChecks(), 0, 'Access kreves ikke for ett arrangement');
   });
 
   test('alle lenker er de offentlige – også når handlingen skjedde på LAN', async () => {
@@ -191,11 +197,11 @@ describe('LAN-porten er betrodd', () => {
     const create = await app.lan({ method: 'POST', path: '/api/admin/events', headers: { host: '192.168.1.10:9067' }, body: eventBody({ site: 'com' }) });
     const { slug, adminKey } = create.json;
     assert.equal(create.json.eventUrl, `https://${COM}/${slug}`);
-    assert.equal(create.json.adminUrl, `https://${ADMIN}/admin/${slug}#${adminKey}`);
-    assert.match(create.json.scannerUrl, new RegExp(`^https://${COM}/${slug}/skanner#`));
+    assert.equal(create.json.adminUrl, `https://${COM}/admin/${slug}#${adminKey}`);
+    assert.match(create.json.scannerUrl, new RegExp(`^https://${COM}/dorvakt/${slug}#`));
     const created = app.sent.find((m) => m.to === 'kari@example.com');
     assert.ok(created.text.includes(`https://${COM}/${slug}`));
-    assert.ok(created.text.includes(`https://${ADMIN}/admin/${slug}#${adminKey}`));
+    assert.ok(created.text.includes(`https://${COM}/admin/${slug}#${adminKey}`));
     assert.doesNotMatch(created.text + created.html, /192\.168|9067|3001/);
 
     // Admin-siden viser de offentlige lenkene, som er dem som deles videre.

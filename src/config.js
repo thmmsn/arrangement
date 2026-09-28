@@ -38,8 +38,12 @@ export function loadConfig(rawEnv = process.env) {
     // Tjenesteadministratoren: får e-post med alle lenkene når et arrangement opprettes eller avlyses.
     // Flere adresser skilles med komma.
     adminEmails: parseEmails(env.ADMIN_EMAIL, warnings),
-    // Oppretting av arrangementer uten Cloudflare Access. BARE for lokal utvikling – da kan alle som
-    // når /admin opprette arrangementer.
+    // Opprettingsnøkkelen: lenken /admin/ny#<nøkkel> gir rett til å opprette arrangementer, uten
+    // Cloudflare Access. Minst 32 tegn; en for kort eller ugyldig nøkkel ignoreres, og oppretting er da
+    // stengt (med mindre Access eller LAN-porten brukes).
+    createKey: parseCreateKey(env.CREATE_KEY, warnings),
+    // Oppretting av arrangementer uten Cloudflare Access og uten CREATE_KEY. BARE for lokal utvikling –
+    // da kan alle som når /admin opprette arrangementer.
     adminNoAuth: ['true', '1', 'yes', 'ja'].includes((env.ADMIN_NO_AUTH || '').trim().toLowerCase()),
     // Uten nøkkel skrives e-postene til konsollen i stedet for å sendes (nyttig i utvikling).
     resendApiKey: env.RESEND_API_KEY || '',
@@ -53,11 +57,12 @@ export function loadConfig(rawEnv = process.env) {
     // hvem som helst sende headeren selv.
     clientIpHeader: (env.CLIENT_IP_HEADER || '').toLowerCase(),
 
-    // --- Administrasjon bak Cloudflare Access ---
-    // Eget vertsnavn for admin (f.eks. arrangement-admin.domain.no). Når det er satt, svarer /admin og
-    // /api/admin bare på dette vertsnavnet, og admin-lenkene i e-postene peker hit.
+    // --- Oppretting av arrangementer (eget vertsnavn og Cloudflare Access) ---
+    // Eget vertsnavn for oppretting (f.eks. arrangement-admin.domain.no). Når det er satt, svarer
+    // /admin/ny og API-et for oppretting bare på dette vertsnavnet. Administrasjonen av ett arrangement
+    // (/admin/<hash>#<nøkkel>) virker på alle vertsnavn – der er det nøkkelen som gir tilgang.
     adminHost: normalizeHost(env.ADMIN_HOST),
-    // Når begge er satt, krever /admin og /api/admin et gyldig Cloudflare Access-token.
+    // Når begge er satt, gir et gyldig Cloudflare Access-token rett til å opprette arrangementer.
     cfAccessTeamDomain: normalizeHost(env.CF_ACCESS_TEAM_DOMAIN),
     cfAccessAudiences: (env.CF_ACCESS_AUD || '').split(',').map((s) => s.trim()).filter(Boolean),
   };
@@ -81,6 +86,18 @@ function parseEmails(value, warnings) {
   const valid = emails.filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
   for (const e of emails) if (!valid.includes(e)) warnings.push(`ADMIN_EMAIL: «${e}» er ikke en gyldig e-postadresse og ignoreres.`);
   return valid;
+}
+
+// Bare tegn som kan stå etter # i en lenke uten å kodes (A–Z, a–z, 0–9, - og _), og minst 32 av dem.
+// `openssl rand -hex 32` gir 64 tegn (256 tilfeldige bit).
+const CREATE_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
+
+function parseCreateKey(value, warnings) {
+  const key = String(value ?? '').trim();
+  if (!key) return null;
+  if (CREATE_KEY_PATTERN.test(key)) return key;
+  warnings.push('CREATE_KEY ignoreres: må være minst 32 tegn, og bare A–Z, a–z, 0–9, - og _. Lag en med `openssl rand -hex 32`. Ingen kan opprette arrangementer med nøkkel.');
+  return null;
 }
 
 function parseLanPort(value, port, warnings) {

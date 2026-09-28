@@ -1,12 +1,16 @@
-import { api, copyToClipboard, h, notice, t, uploadImage } from './common.js';
+import { api, copyToClipboard, h, notice, secretFromHash, t, uploadImage } from './common.js';
 import { createEventForm } from './event-form.js';
 
 const root = document.getElementById('form-root');
+// Opprettingsnøkkelen (CREATE_KEY) fra lenken /admin/ny#<nøkkel>. Uten nøkkel må tilgangen komme fra
+// Cloudflare Access eller LAN-porten.
+const key = secretFromHash();
+const auth = key ? { Authorization: `Bearer ${key}` } : {};
 
 // Admin-oppsettet: tidssone, nettsteder og hvem som er logget inn via Cloudflare Access.
 let adminConfig;
 try {
-  adminConfig = await api('/admin/config');
+  adminConfig = await api('/admin/config', { headers: auth });
 } catch (err) {
   root.replaceChildren(notice('error', err.message));
   throw err;
@@ -21,8 +25,9 @@ const { form } = createEventForm({
   // Innlogget via Access: foreslå den e-postadressen som arrangør.
   initial: accessEmail ? { organizerEmail: accessEmail } : {},
   submitLabel: t('create.submit'),
+  searchPlaces: (q) => api(`/admin/places?q=${encodeURIComponent(q)}`, { headers: auth }),
   async onSubmit(payload, { image }) {
-    const result = await api('/admin/events', { method: 'POST', body: payload });
+    const result = await api('/admin/events', { method: 'POST', body: payload, headers: auth });
     // Arrangementet er opprettet selv om bildet skulle feile – da vises en advarsel.
     let imageError = null;
     if (image.upload) {
@@ -65,7 +70,13 @@ function showResult(result, payload, imageError) {
         // Relativ: blir på samme vertsnavn og port (admin-vertsnavnet, eller LAN). Kopifeltene over
         // viser de offentlige lenkene – det er dem som deles videre.
         h('a', { class: 'btn secondary', href: `/admin/${result.slug}#${result.adminKey}` }, t('create.goAdmin')),
-        h('a', { class: 'btn secondary', href: '/admin/ny' }, t('create.createAnother')),
+        // Med opprettingsnøkkelen etter #, så neste arrangement kan opprettes uten å lete fram lenken.
+        // Adressen er den samme som nå, og da laster nettleseren ikke siden på nytt av seg selv.
+        h('a', {
+          class: 'btn secondary',
+          href: `/admin/ny${location.hash}`,
+          onclick: (e) => { e.preventDefault(); location.reload(); },
+        }, t('create.createAnother')),
       ),
     ),
   );

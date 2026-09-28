@@ -11,7 +11,8 @@ Et lite og enkelt alternativ til Hoopla for påmelding til arrangementer:
 - **Antall påmeldte vises** på arrangementssiden (kan skrus av), med ledige plasser hvis det er et tak.
 - **E-post via [Resend](https://resend.com)**: én bekreftelse til den som meldte på (med alle personene), ett varsel til arrangøren, admin-lenke ved opprettelse og kvittering ved avmelding.
 - **Avmelding**: den som meldte på, kan melde av hele eller deler av påmeldingen, og hver person har sin egen avmeldingslenke til å videresende. Arrangøren kan slå avmelding av per arrangement.
-- **All administrasjon under `/admin`** – enkelt å skjule bak Cloudflare Access, på eget subdomene eller egen sti.
+- **Samme hash i alle lenkene til et arrangement**, på arrangementets eget domene: `/<hash>` (påmelding), `/admin/<hash>#<nøkkel>` (administrasjon) og `/dorvakt/<hash>#<nøkkel>` (dørvakt). Nøkkelen etter `#` er det eneste som gir tilgang, så Cloudflare Access trengs ikke.
+- **Oppretting av arrangementer med en nøkkel** (`/admin/ny#<nøkkel>`, `CREATE_KEY`), Cloudflare Access eller kontorets LAN – valgfritt på et eget admin-vertsnavn.
 - **Utseendet styres med miljøvariabler**: navn, logo, farger, fonter, hjørneradius og tekster.
 - **Flere domener, én database og én admin**: hvert domene er et *nettsted* med eget språk (norsk eller engelsk), tema, avsender og base-URL.
 - **Helt lukket uten lenke**: forsiden og alle ukjente adresser svarer bare `404 Not Found` – uten logo, navn eller språk.
@@ -36,21 +37,35 @@ Produksjon: `docker compose` med Cloudflare Tunnel – ingen åpne porter på se
 
 ## Adressene
 
+Et arrangement har én hash, og den går igjen i alle lenkene – på arrangementets eget domene (f.eks. `arrangement.domain.no`):
+
+```
+arrangement.domain.no/k7hq2mxpr9az                      påmelding (offentlig)
+arrangement.domain.no/admin/k7hq2mxpr9az#<admin-nøkkel>  administrasjon (arrangøren)
+arrangement.domain.no/dorvakt/k7hq2mxpr9az#<nøkkel>      innsjekking (dørvaktene)
+```
+
 | Adresse | Hvem | Hva |
 |---|---|---|
 | `/<hash>` | Alle som får lenken | Arrangementsside med påmelding |
 | `/<hash>/avmelding#<nøkkel>` | Den som meldte på (e-posten, etter påmeldingen og `/b/…`), eller én person (videresendt) | Avmelding av hele eller deler av påmeldingen – eller bare den ene personen |
-| `/admin/ny` | Administrator | Opprett nytt arrangement |
-| `/admin/<hash>#<nøkkel>` | Arrangøren (lenke i e-posten) | Påmeldte, innsjekking, dørvaktlenke, redigering, CSV, stenging, avlysning, sletting |
+| `/admin/ny` | Administrator: `/admin/ny#<nøkkel>` med `CREATE_KEY`, eller via Cloudflare Access eller LAN | Opprett nytt arrangement |
+| `/admin/<hash>#<nøkkel>` | Arrangøren (lenke i e-posten). Bare nøkkelen kreves | Påmeldte, innsjekking, dørvaktlenke, redigering, CSV, stenging, avlysning, sletting |
 | `/admin/<hash>/avlys#<nøkkel>` | Arrangøren og tjenesteadministratoren (lenke i e-posten) | Samme side, åpnet på «Avlys arrangement» |
+| `/dorvakt/<hash>#<nøkkel>` | Dørvakter (lenke fra arrangøren) | Innsjekking: skanner, billettnummer og navnesøk |
 | `/b/<nøkkel>` | Den som meldte på (lenke i e-posten) | Alle billettene i påmeldingen, med Wallet, PDF, kalender, avmelding og «Del billetten» per person |
 | `/t/<nøkkel>` | Gjesten – og det QR-koden peker på | Én billett. For en innlogget dørvakt: innsjekking |
 | `/<hash>/kalender.ics` | Alle som har lenken til arrangementet | Kalenderfil |
-| `/<hash>/skanner#<nøkkel>` | Dørvakter (lenke fra arrangøren) | Innsjekking: skanner, billettnummer og navnesøk |
 
-Alt annet – også forsiden `/` – svarer med det samme nakne `404 Not Found` (ren tekst, uten logo, navn eller språk). Det gjelder også ugyldige lenker, både for sider og API. Uten en gyldig hash kan man dermed ikke se hvilket nettsted eller system som ligger på domenet. Statiske filer (CSS og JavaScript) må være tilgjengelige for at arrangementssidene skal virke, men de inneholder ingen data. Temastilarket har et navn som er en hash av innholdet, så det kan ikke gjettes.
+Alt annet – også forsiden `/` – svarer med det samme nakne `404 Not Found` (ren tekst, uten logo, navn eller språk). Det gjelder også ugyldige lenker, både for sider og API, også `/admin/<ukjent hash>` og `/dorvakt/<ukjent hash>`. Uten en gyldig hash kan man dermed ikke se hvilket nettsted eller system som ligger på domenet. Statiske filer (CSS og JavaScript) må være tilgjengelige for at arrangementssidene skal virke, men de inneholder ingen data. Temastilarket har et navn som er en hash av innholdet, så det kan ikke gjettes.
 
-Gamle admin-lenker (`/<hash>/admin#<nøkkel>`) sendes videre til `/admin/<hash>` – men bare for arrangementer som finnes.
+**Eldre lenker virker fortsatt** (se [Oppgradering: samme hash overalt](#oppgradering-samme-hash-overalt)):
+
+| Eldre lenke | Hva skjer |
+|---|---|
+| `/<hash>/skanner#<nøkkel>` (dørvakt) | Samme skannerside, direkte (ingen videresending), med den samme nøkkelen |
+| `https://<ADMIN_HOST>/admin/<hash>#<nøkkel>` (admin) | Virker som før – administrasjonen svarer på alle vertsnavn |
+| `/<hash>/admin#<nøkkel>` (admin, enda eldre) | `301` til `/admin/<hash>` – bare for arrangementer som finnes |
 
 ### Hvor vanskelig er lenkene å gjette?
 
@@ -60,11 +75,23 @@ $$31^{12} \approx 7{,}9 \cdot 10^{17} \approx 2^{59{,}4}$$
 
 Selv med 1000 gjett i sekundet tar det i snitt $\frac{31^{12}}{2 \cdot 1000 \cdot N}$ sekunder å treffe ett av $N$ arrangementer. Med $N = 1000$ er det rundt $4 \cdot 10^{11}$ sekunder, altså over 12 000 år.
 
-Admin-nøkkelen er 24 tilfeldige byte, altså $2^{192}$ muligheter – den kan ikke gjettes.
+Admin-nøkkelen er 24 tilfeldige byte, altså $2^{192} \approx 6{,}3 \cdot 10^{57}$ muligheter – den kan ikke gjettes. Derfor holder den alene som tilgang til administrasjonen av arrangementet, uten Cloudflare Access. Med en milliard gjett i sekundet tar det i snitt
+
+$$\frac{2^{192}}{2 \cdot 10^{9}\ \text{s}^{-1}} \approx 3{,}1 \cdot 10^{48}\ \text{s} \approx 10^{41}\ \text{år}$$
+
+å treffe én bestemt nøkkel. Universet er rundt $1{,}4 \cdot 10^{10}$ år gammelt.
+
+Dørvaktnøkkelen er en HMAC-SHA-256 forkortet til 128 bit, altså $2^{128} \approx 3{,}4 \cdot 10^{38}$ muligheter (se [Dørvaktlenken](#dørvaktlenken)).
+
+Opprettingsnøkkelen (`CREATE_KEY`) velger du selv, men appen krever minst 32 tegn fra et alfabet på 64 (A–Z, a–z, 0–9, `-` og `_`). En tilfeldig nøkkel på 32 slike tegn har
+
+$$64^{32} = 2^{6 \cdot 32} = 2^{192}$$
+
+muligheter – like mange som admin-nøkkelen. `openssl rand -hex 32` gir 64 heksadesimale tegn, altså $16^{64} = 2^{256}$ muligheter. Lengdekravet hjelper bare hvis nøkkelen er tilfeldig: en nøkkel du har funnet på selv, kan være mye lettere å gjette enn tallene over.
 
 Billettlenkene (`/t/…` og `/b/…`) består av et nummer på 10 tegn fra det samme alfabetet og en signatur på 128 bit, altså $2^{128} \approx 3{,}4 \cdot 10^{38}$ muligheter. Signaturen er en HMAC-SHA-256 av nummeret med en hemmelighet som bare finnes i databasen (se [Billetter og innsjekking](#billetter-og-innsjekking)). Nummeret alene gir ingen tilgang.
 
-Nøklene etter `#` sendes **aldri** til serveren av nettleseren. De havner derfor ikke i serverlogger, proxy-logger eller `Referer`-headere. JavaScript på siden leser nøkkelen og sender den i `Authorization`-headeren. I databasen lagres bare SHA-256-hashen av nøklene.
+Nøklene etter `#` sendes **aldri** til serveren av nettleseren. De havner derfor ikke i serverlogger, proxy-logger eller `Referer`-headere. JavaScript på siden leser nøkkelen og sender den i `Authorization`-headeren (dørvaktnøkkelen i en `POST`, én gang). I databasen lagres bare SHA-256-hashen av admin-nøklene. Opprettingsnøkkelen ligger bare i `.env`.
 
 ---
 
@@ -78,8 +105,8 @@ cp .env.example .env      # tøm DOMAIN, og sett ADMIN_NO_AUTH=true
 npm run dev               # starter på http://localhost:3000 og laster på nytt ved endringer
 ```
 
-1. Gå til <http://localhost:3000/admin/ny> og opprett et arrangement. Lokalt, uten Cloudflare Access, må `ADMIN_NO_AUTH=true` være satt – ellers er oppretting slått av.
-2. Du får en påmeldingslenke og en administrasjonslenke.
+1. Gå til <http://localhost:3000/admin/ny> og opprett et arrangement. Lokalt må `ADMIN_NO_AUTH=true` være satt (eller `CREATE_KEY`, og da åpner du `http://localhost:3000/admin/ny#<nøkkel>`) – ellers er oppretting slått av.
+2. Du får en påmeldingslenke, en administrasjonslenke og en dørvaktlenke – alle med samme hash.
 3. Uten `RESEND_API_KEY` skrives e-postene til terminalen, så du ser nøyaktig hva som ville blitt sendt (inkludert avmeldingslenken).
 
 Vil du prøve to nettsteder lokalt, kan du bruke `localhost` og `127.0.0.1` som to «domener»:
@@ -146,52 +173,94 @@ Etter endringer i `.env`: kjør `docker compose up -d` på nytt, så startes app
 
 Noen innstillinger er låst i `docker-compose.yml` med vilje, uansett hva `.env` sier: databasen ligger alltid i volumet (`/data/arrangement.db`), klient-IP leses fra Cloudflares `cf-connecting-ip`, og appen får ikke se `TUNNEL_TOKEN`.
 
-### 3. Skjul administrasjonen bak Cloudflare Access
+### 3. Tilgang til administrasjonen
 
-All administrasjon ligger under `/admin` (sider) og `/api/admin` (API). Resten – arrangementssider, påmelding og avmelding – er offentlig. Velg én av to måter:
+All administrasjon ligger under `/admin` (sider) og `/api/admin` (API). Resten – arrangementssider, påmelding, avmelding og dørvakt – er offentlig og beskyttes av lenkene selv. Det finnes to slags tilgang til administrasjonen, med hver sin nøkkel:
 
-**A. Eget subdomene (anbefalt)** – enklest å få riktig:
+| | Administrere **ett** arrangement | **Opprette** arrangementer |
+|---|---|---|
+| Adresse | `/admin/<hash>#<admin-nøkkel>` | `/admin/ny` (`/admin/ny#<CREATE_KEY>`) |
+| Hvem | Arrangøren (lenken kommer på e-post) | Du (og den du gir nøkkelen til) |
+| Hva gir tilgang | **Bare admin-nøkkelen** til arrangementet | `CREATE_KEY`, Cloudflare Access **eller** LAN-porten |
+| Hvor | Alle vertsnavn: arrangementets domene (nye lenker), `ADMIN_HOST` (eldre lenker) og LAN | Med `ADMIN_HOST`: bare der. Ellers alle vertsnavn |
+| Cloudflare Access | Trengs ikke. Kommer forespørselen gjennom Access likevel, brukes e-postadressen som «sjekket inn av» | Valgfritt – ett av tre alternativer |
 
-1. Sett `ADMIN_HOST=arrangement-admin.domain.no` i `.env`. Da finnes `/admin` og `/api/admin` *bare* på det vertsnavnet; på `arrangement.domain.no` gir de 404. Admin-lenkene i e-postene peker dit.
+Admin-nøkkelen per arrangement har $2^{192}$ muligheter (se [Hvor vanskelig er lenkene å gjette?](#hvor-vanskelig-er-lenkene-å-gjette)), så den er like sterk som en tilfeldig innloggingsnøkkel. Uten riktig nøkkel svarer API-et `401`, og et ukjent arrangement gir den nakne `404`-en. Nøkkelen gir bare tilgang til det ene arrangementet – aldri til å opprette nye, og aldri til andre arrangementer.
+
+#### Opprette arrangementer med nøkkel (uten Cloudflare Access)
+
+1. Lag en tilfeldig nøkkel og sett den i `.env`:
+
+   ```bash
+   openssl rand -hex 32          # f.eks. 3f9c…e1 (64 tegn)
+   ```
+
+   ```ini
+   CREATE_KEY=3f9c…e1
+   ```
+
+   Nøkkelen må være minst 32 tegn og bare inneholde `A–Z`, `a–z`, `0–9`, `-` og `_`. Ellers ignoreres den, og loggen sier fra.
+2. `docker compose up -d`. Loggen sier «Nye arrangementer kan opprettes med opprettingsnøkkelen …».
+3. Åpne `https://arrangement.domain.no/admin/ny#<nøkkel>` (eller `https://<ADMIN_HOST>/admin/ny#<nøkkel>` hvis du bruker eget admin-vertsnavn), og lagre den som bokmerke. «Opprett et nytt» beholder nøkkelen.
+
+Siden `/admin/ny` vises uten nøkkel (nettleseren sender aldri det som står etter `#`), men den har ingen data: oppsettet, stedsoppslaget og selve opprettingen svarer `403` uten riktig nøkkel. Vil du bytte nøkkel, endrer du `CREATE_KEY` og starter på nytt. Den gamle slutter da å virke. Admin-lenkene til arrangementer som allerede finnes, påvirkes ikke.
+
+Med `CREATE_KEY` har `ADMIN_NO_AUTH` ingen virkning: nøkkelen kreves alltid.
+
+#### Opprette arrangementer via Cloudflare Access (valgfritt)
+
+Access virker som før, men gjelder nå bare oppretting. Den kan brukes alene eller sammen med `CREATE_KEY` (da holder én av dem).
+
+**A. Eget subdomene** – enklest å få riktig:
+
+1. Sett `ADMIN_HOST=arrangement-admin.domain.no` i `.env`. Da finnes `/admin/ny` og API-et for oppretting *bare* på det vertsnavnet; på `arrangement.domain.no` gir de 404.
 2. Legg til vertsnavnet i tunnelen (se over).
-3. **Zero Trust → Access → Applications → Add an application → Self-hosted**, domene `arrangement-admin.domain.no` (hele), og en policy som slipper inn deg (og eventuelle arrangører), f.eks. *Emails* med innlogging via engangskode.
+3. **Zero Trust → Access → Applications → Add an application → Self-hosted**, domene `arrangement-admin.domain.no` (hele), og en policy som slipper inn deg, f.eks. *Emails* med innlogging via engangskode.
 
 > Bruk ett nivå under domenet (`arrangement-admin.domain.no`), ikke `admin.arrangement.domain.no` – Cloudflares gratis sertifikat dekker bare ett nivå.
 
-Med flere nettsteder er A det klart beste valget: ellers finnes `/admin` på hvert eneste offentlige domene, og hvert domene trenger sin egen Access-regel. Uten `ADMIN_HOST` skriver appen en advarsel ved oppstart.
+`ADMIN_HOST` er også nyttig uten Access, sammen med `CREATE_KEY`: da finnes ikke engang siden `/admin/ny` på de offentlige domenene. Uten `ADMIN_HOST` skriver appen en advarsel ved oppstart.
 
-**B. Samme domene, egne stier:** Lag én Access-applikasjon for `arrangement.domain.no` med **to** stier: `admin` og `api/admin`. Glemmer du `api/admin`, er selve dataene ubeskyttet av Access – derfor anbefales C i tillegg.
+**B. Samme domene, egen sti:** Lag en Access-applikasjon for `arrangement.domain.no` med stien `admin/ny`. **Ikke** legg Access på hele `admin` eller `api/admin` lenger: da må også arrangørene logge inn via Access for å bruke admin-lenken sin. Resten av API-et for oppretting (`api/admin/config`, `api/admin/places` og `POST api/admin/events`) beskyttes av appens egen sjekk (C).
 
-**C. La appen verifisere Access (påkrevd, i tillegg til A eller B):**
+**C. La appen verifisere Access (påkrevd når Access brukes):**
 
-Sett `CF_ACCESS_TEAM_DOMAIN` (Zero Trust → Settings → Custom Pages → *Team domain*) og `CF_ACCESS_AUD` (applikasjonens *Application Audience (AUD) Tag*). Da sjekker appen selv signaturen på Access-tokenet Cloudflare sender med hver forespørsel, og avviser alt til `/admin` og `/api/admin` som ikke har passert Access. En feilkonfigurert Access-regel kan dermed ikke gjøre admin offentlig.
+Sett `CF_ACCESS_TEAM_DOMAIN` (Zero Trust → Settings → Custom Pages → *Team domain*) og `CF_ACCESS_AUD` (applikasjonens *Application Audience (AUD) Tag*). Da sjekker appen selv signaturen på Access-tokenet Cloudflare sender med, og avviser oppretting som verken har passert Access eller har riktig `CREATE_KEY`. En feilkonfigurert Access-regel kan dermed ikke åpne for oppretting.
 
-Access er den eneste innloggingen – det finnes ikke noe passord. Uten C er oppretting av arrangementer derfor slått av, slik at en glemt innstilling aldri gjør det mulig for hvem som helst å opprette arrangementer og sende e-post i ditt navn. For lokal utvikling uten Access finnes `ADMIN_NO_AUTH=true`, som appen varsler tydelig om ved oppstart, og som ikke har noen virkning når Access er satt opp.
+#### Uten noe av dette
 
-**Arrangører:** Admin-lenken per arrangement (`/admin/<hash>#<nøkkel>`) krever fortsatt sin egen nøkkel. Med Access må arrangørene i tillegg slippes inn av Access-policyen – legg til e-postadressene deres der, eller behold administrasjonen for deg selv.
+Uten `CREATE_KEY`, Access og LAN-port er oppretting av arrangementer slått av, slik at en glemt innstilling aldri gjør det mulig for hvem som helst å opprette arrangementer og sende e-post i ditt navn. For lokal utvikling finnes `ADMIN_NO_AUTH=true`, som appen varsler tydelig om ved oppstart, og som ikke har noen virkning når `CREATE_KEY` eller Access er satt opp.
+
+#### Droppe Cloudflare Access helt
+
+I denne rekkefølgen, så det ikke finnes et øyeblikk der ingen kan opprette arrangementer:
+
+1. Sett `CREATE_KEY` (se over), `docker compose up -d`, og sjekk at `/admin/ny#<nøkkel>` virker.
+2. Fjern `CF_ACCESS_TEAM_DOMAIN` og `CF_ACCESS_AUD` fra `.env`, og `docker compose up -d` igjen.
+3. Slett Access-applikasjonen i Cloudflare (**Zero Trust → Access → Applications**).
+4. **Behold admin-vertsnavnet i tunnelen** (og gjerne `ADMIN_HOST`): admin-lenkene som allerede er sendt ut, peker dit. De virker med nøkkelen alene så lenge vertsnavnet går til appen. Arrangementene slettes `DELETE_AFTER_DAYS` dager etter at de er over. Etter det finnes ingen gamle lenker å ta vare på.
 
 ### 4. Kontorets LAN uten Cloudflare Access (valgfritt)
 
-Appen kan brukes fullt ut fra kontorets nett, også admin og oppretting av arrangementer, uten Cloudflare Access. Da starter appen en **ekstra HTTP-lytter** i samme prosess, med samme app og database:
+Appen kan brukes fullt ut fra kontorets nett, også oppretting av arrangementer, uten Cloudflare Access og uten `CREATE_KEY`. Da starter appen en **ekstra HTTP-lytter** i samme prosess, med samme app og database:
 
 ```
-Internett ──► Cloudflare ──► tunnel ──► arrangement:3000   (PORT – som før: Access, ADMIN_HOST, rate limiting)
+Internett ──► Cloudflare ──► tunnel ──► arrangement:3000   (PORT – CREATE_KEY/Access, ADMIN_HOST, rate limiting)
 Kontorets LAN ──────────► verten:9067 ──► arrangement:3001   (LAN_PORT – betrodd)
 ```
 
-**Tilliten følger porten forespørselen kom inn på, aldri headere.** `Host`, `X-Forwarded-*`, `cf-connecting-ip` og query-parametere kan klienten sette fritt, så ingen av dem kan gjøre en forespørsel på `PORT` betrodd. Teknisk merker LAN-lytteren hver forespørsel med et privat `Symbol` før appen ser den. Det kan ikke settes av noe klienten sender. En test (`test/lan.test.js`) prøver å lure `PORT` med alle kombinasjoner av falske `Host`, `X-Forwarded-*`, `Forwarded`, `cf-connecting-ip` og query, og viser at admin fortsatt avvises.
+**Tilliten følger porten forespørselen kom inn på, aldri headere.** `Host`, `X-Forwarded-*`, `cf-connecting-ip` og query-parametere kan klienten sette fritt, så ingen av dem kan gjøre en forespørsel på `PORT` betrodd. Teknisk merker LAN-lytteren hver forespørsel med et privat `Symbol` før appen ser den. Det kan ikke settes av noe klienten sender. En test (`test/lan.test.js`) prøver å lure `PORT` med alle kombinasjoner av falske `Host`, `X-Forwarded-*`, `Forwarded`, `cf-connecting-ip` og query, og viser at oppretting fortsatt avvises.
 
 | | `PORT` (3000, tunnelen) | `LAN_PORT` (f.eks. 3001) |
 |---|---|---|
-| Admin (`/admin`, `/api/admin`) | Access-token og `ADMIN_HOST`, som før | Slipper inn uten Access og uten `ADMIN_HOST` |
-| Opprette arrangementer | Krever Access | Tillatt |
-| Admin-nøkkel per arrangement | Kreves | Kreves fortsatt – LAN erstatter Access, ikke nøkkelen |
+| Opprette arrangementer (`/admin/ny`, `/api/admin`) | `CREATE_KEY` eller Access-token, og `ADMIN_HOST` | Tillatt, uten nøkkel, Access og `ADMIN_HOST` |
+| Administrere ett arrangement (`/admin/<hash>`) | Admin-nøkkelen | Admin-nøkkelen – LAN erstatter `CREATE_KEY` og Access, ikke nøkkelen |
 | Rate limiting | Per klient-IP (`CLIENT_IP_HEADER` bak tunnelen) | Av. Klient-IP leses alltid fra socketen |
 | Nettsted | Fra `Host` | Fra `Host`, eller `?site=<id>` (f.eks. `?site=com`) |
 | Arrangement på et annet nettsted | `301` til det offentlige domenet | `302` til samme adresse på LAN med `?site=<id>` |
 | Dørvakt-informasjonskapsel | `Secure` (https) | Uten `Secure`, fordi LAN er vanlig http |
 
-**Lenker er alltid de offentlige.** E-post, Wallet, kalender, PDF, dørvaktlenken og «Del billetten» bygges fra nettstedets offentlige adresse (`DOMAIN` / `SITE_<ID>_DOMAIN`), også når handlingen skjedde på LAN. Admin-siden viser de offentlige lenkene, så det er dem som kopieres og deles videre. Admin-lenken i e-posten peker til det offentlige admin-vertsnavnet. På LAN åpner du den samme siden ved å bytte ut starten: `http://<server>:9067/admin/<hash>#<nøkkel>`.
+**Lenker er alltid de offentlige.** E-post, Wallet, kalender, PDF, admin-lenken, dørvaktlenken og «Del billetten» bygges fra nettstedets offentlige adresse (`DOMAIN` / `SITE_<ID>_DOMAIN`), også når handlingen skjedde på LAN. Admin-siden viser de offentlige lenkene, så det er dem som kopieres og deles videre. På LAN åpner du den samme siden ved å bytte ut starten: `http://<server>:9067/admin/<hash>#<nøkkel>`.
 
 **Oppsett med docker compose:**
 
@@ -205,15 +274,30 @@ Kontorets LAN ──────────► verten:9067 ──► arrangemen
 
 ### Lagene som beskytter administrasjonen
 
-| Lag | Beskytter mot |
-|---|---|
-| Cloudflare Access (innlogging) | Alle som ikke er på lista di |
-| `ADMIN_HOST` | At admin i det hele tatt finnes på det offentlige domenet |
-| Appens egen Access-sjekk (`CF_ACCESS_*`) | Feilkonfigurerte Access-regler |
-| Admin-nøkkel per arrangement | At én arrangør ser andres arrangementer |
-| Oppretting slått av uten Access | At en glemt innstilling åpner for oppretting |
-| Rate limiting per ekte klient-IP | Masseoppretting og spam (maks 20 nye arrangementer per 15 min) |
-| `LAN_PORT` bare på kontorets nett | At noen utenfor kontoret når den betrodde porten (tilliten følger porten – aldri headere) |
+| Lag | Gjelder | Beskytter mot |
+|---|---|---|
+| Admin-nøkkel per arrangement ($2^{192}$) | Ett arrangement | Alle andre enn arrangøren – og at én arrangør ser andres arrangementer |
+| Opprettingsnøkkelen (`CREATE_KEY`) | Oppretting | Alle som ikke har nøkkelen |
+| Cloudflare Access (valgfritt) | Oppretting | Alle som ikke er på lista di |
+| Appens egen Access-sjekk (`CF_ACCESS_*`) | Oppretting | Feilkonfigurerte Access-regler |
+| `ADMIN_HOST` | Oppretting | At `/admin/ny` i det hele tatt finnes på det offentlige domenet |
+| Oppretting slått av uten `CREATE_KEY`/Access | Oppretting | At en glemt innstilling åpner for oppretting |
+| Naken `404` for ukjente arrangementer | Ett arrangement | At `/admin/…` og `/api/admin/events/…` røper noe på et offentlig domene |
+| Rate limiting per ekte klient-IP | Oppretting | Masseoppretting og spam (maks 20 nye arrangementer per 15 min) |
+| `LAN_PORT` bare på kontorets nett | Oppretting | At noen utenfor kontoret når den betrodde porten (tilliten følger porten – aldri headere) |
+
+### Oppgradering: samme hash overalt
+
+Fra versjon 2026.9.28.3 har alle lenkene til et arrangement samme hash, på arrangementets eget domene: `/<hash>`, `/admin/<hash>#<nøkkel>` og `/dorvakt/<hash>#<nøkkel>`. Admin-lenken krever bare nøkkelen. Oppgraderingen påvirker ikke arrangementer som allerede er i gang:
+
+- **Ingen endring i databasen.** Hash, admin-nøkkel og dørvaktnøkkel er de samme som før. Nye lenker regnes ut fra de samme verdiene.
+- **Gamle dørvaktlenker** (`/<hash>/skanner#<nøkkel>`) gir den samme siden som før, direkte og uten videresending. Nøkkelen er den samme i den gamle og den nye lenken, fordi den er avledet av arrangementet og ikke av adressen (se `src/tokens.js`).
+- **Dørvakter som allerede er logget inn,** forblir innlogget. Informasjonskapselen (`dv_<hash>`) gjelder hele domenet (`Path=/`) og virker på begge adressene. Køen for innsjekking uten nett er knyttet til hashen, ikke adressen.
+- **Gamle admin-lenker** til `ADMIN_HOST` virker som før. Er Access fortsatt satt opp på det vertsnavnet, logger man inn der som før. Appen krever bare nøkkelen.
+- **Hurtigbufferen i nettleseren:** filene under `/assets` kan ligge i hurtigbufferen i én time. Sidene laster derfor skriptene med versjonsnummeret i adressen (`/assets/js/scanner.js?v=2026.9.28.3`), så en ny versjon aldri kjører et gammelt skript. Skannersiden leser dessuten hashen selv, og ikke via en delt hjelpefunksjon som kunne vært gammel i den timen.
+- **E-poster** som sendes etter oppgraderingen (rapporten ved påmeldingsfristen, nye arrangementer), har de nye lenkene. E-poster som allerede er sendt, har de gamle, og de virker fortsatt.
+
+Bruker du Cloudflare Access med stiregler på det offentlige domenet (B), bør regelen endres fra `admin` og `api/admin` til bare `admin/ny`. Ellers må arrangørene logge inn via Access for å bruke de nye admin-lenkene. Med eget admin-vertsnavn (A) trengs ingen endring.
 
 ### Oppgradering fra «booking»
 
@@ -349,11 +433,17 @@ $$\text{person} = \text{billettnummer} \,\|\, \mathrm{HMAC\text{-}SHA256}(\text{
 
 ### Dørvaktlenken
 
-På admin-siden og i den første e-posten til arrangøren står en **dørvaktlenke** (`/<hash>/skanner#<nøkkel>`). Arrangøren deler den med dem som skal stå i døra.
+På admin-siden og i den første e-posten til arrangøren står en **dørvaktlenke** (`/dorvakt/<hash>#<nøkkel>`, med samme hash som `/<hash>` og `/admin/<hash>`). Arrangøren deler den med dem som skal stå i døra. Eldre dørvaktlenker (`/<hash>/skanner#<nøkkel>`) virker fortsatt, med den samme nøkkelen.
+
+Nøkkelen er
+
+$$\text{dørvaktnøkkel} = \mathrm{HMAC\text{-}SHA256}(\text{hemmelighet},\ \texttt{scanner:} \,\|\, \text{arrangement-id} \,\|\, \texttt{:} \,\|\, \text{versjon})$$
+
+forkortet til 128 bit. Adressen er ikke med i det som signeres, så den nye og den gamle lenken har den samme nøkkelen.
 
 1. Dørvakten åpner lenken én gang og skriver eventuelt navnet sitt. Telefonen får en informasjonskapsel for arrangementet. Den er `HttpOnly`, `SameSite=Lax` og gyldig til to døgn etter at arrangementet er over. Nøkkelen fjernes fra adresselinjen.
 2. **Med vanlig kamera** (iPhone eller Android): QR-koden åpner billetten, siden ser at telefonen tilhører en dørvakt og sjekker gjesten inn. Skjermen blir grønn («Sjekket inn»), gul («Allerede sjekket inn 18:02 av Kari») eller rød («Ugyldig billett», «Feil arrangement» eller «Avlyst»), med lyd og vibrasjon. «Angre» retter et feiltrykk.
-3. **Skanneren på siden** (`/<hash>/skanner`) bruker kameraet direkte. Den bruker nettleserens innebygde QR-leser når den finnes, ellers [jsQR](https://github.com/cozmo/jsQR). Siden har også felt for **dørkoden** og **søk på navn** (minst to tegn, maks ti treff) for gjester uten billett på telefonen.
+3. **Skanneren på siden** (`/dorvakt/<hash>`) bruker kameraet direkte. Den bruker nettleserens innebygde QR-leser når den finnes, ellers [jsQR](https://github.com/cozmo/jsQR). Siden har også felt for **dørkoden** og **søk på navn** (minst to tegn, maks ti treff) for gjester uten billett på telefonen.
    - Dørkoden sendes så snart femte bokstav er skrevet.
    - Koden har bare bokstaver, så dørvakten slipper å bytte mellom bokstaver og tall på tastaturet.
 4. **Hele familien på én gang:** etter en innsjekking vises de andre i samme påmelding med en «Sjekk inn»-knapp.
@@ -491,7 +581,7 @@ Når et arrangement opprettes, får arrangøren én e-post med alt som trengs se
 - om **etteranmelding** er tillatt;
 - datoen da **alle data slettes**.
 
-**Tjenesteadministratoren** (`ADMIN_EMAIL`, gjerne flere adresser skilt med komma) får en kopi med de samme lenkene, pluss arrangørens navn og e-post og hvem som opprettet arrangementet via Cloudflare Access. Det er en ekstra sikkerhet: det finnes ingen oversikt over alle arrangementer, men administratoren vet om hvert eneste ett og kan avlyse eller slette det. Administratoren får også kvittering når et arrangement avlyses.
+**Tjenesteadministratoren** (`ADMIN_EMAIL`, gjerne flere adresser skilt med komma) får en kopi med de samme lenkene, pluss arrangørens navn og e-post, og hvem som opprettet arrangementet når det skjedde via Cloudflare Access. Det er en ekstra sikkerhet: det finnes ingen oversikt over alle arrangementer, men administratoren vet om hvert eneste ett og kan avlyse eller slette det. Administratoren får også kvittering når et arrangement avlyses.
 
 ### Underveis
 
@@ -654,7 +744,7 @@ Migreringene kjøres med fremmednøkler slått av, og hver migrering kjører `PR
 ```
 src/
   server.js      Starter serveren (PORT, og den betrodde LAN-lytteren når LAN_PORT er satt)
-  app.js         Ruter: sider, offentlig API og admin-API bak admin-porten
+  app.js         Ruter: sider, offentlig API og admin-API (oppretting og admin-nøkkel)
   cfAccess.js    Verifisering av Cloudflare Access-token (JWT)
   sites.js       Nettsteder fra miljøvariabler (hovednettsted + SITE_<ID>_*, arv)
   theme.js       Utseende fra miljøvariabler (validering, temastilark, topp og bunn)
@@ -707,22 +797,25 @@ test/            Tester (node:test)
 | `POST` | `/api/events/:slug/registrations` | Offentlig. Body: `{ name, email, answers, guests: [{ name, email?, answers }] }`. Svaret har `links`: `tickets`, `apple`, `google`, `pdf`, `ics`, `googleCalendar` og `cancel` (`null` når av) |
 | `POST` | `/api/events/:slug/cancel/lookup` | Avmeldingsnøkkel i body. Gir personene nøkkelen kan melde av, og `personal` (én persons egen lenke). `403` når avmelding er slått av |
 | `POST` | `/api/events/:slug/cancel` | Avmeldingsnøkkel i body. `ids` (valgfritt) velger hvem; uten `ids` meldes alle nøkkelen gjelder av. `403` når avmelding er slått av |
-| `GET` | `/api/admin/config` | Admin-porten. Gir bl.a. nettstedene som kan velges |
-| `POST` | `/api/admin/events` | Admin-porten (krever Cloudflare Access). `site` velger nettsted (standard hovednettstedet) |
-| `GET` / `PUT` / `DELETE` | `/api/admin/events/:slug` | Admin-porten + `Authorization: Bearer <admin-nøkkel>` |
-| `DELETE` | `/api/admin/events/:slug/registrations/:id` | Admin-porten + `Authorization: Bearer <admin-nøkkel>` |
-| `GET` | `/api/admin/events/:slug/registrations.csv` | Admin-porten + `Authorization: Bearer <admin-nøkkel>` |
-| `POST` / `DELETE` | `/api/admin/events/:slug/registrations/:id/checkin` | Admin-porten + admin-nøkkel. Sjekk inn / angre |
-| `POST` | `/api/admin/events/:slug/scanner/rotate` | Admin-porten + admin-nøkkel. Ny dørvaktlenke |
-| `POST` / `DELETE` | `/api/admin/events/:slug/cancel` | Admin-porten + admin-nøkkel. Avlys (`{ notify, message }`) / opphev |
-| `GET` | `/api/admin/places?q=` | Admin-porten. Stedsoppslag hos Kartverket |
-| `PUT` / `DELETE` | `/api/admin/events/:slug/image` | Admin-porten + admin-nøkkel. Last opp forsidebilde (selve bildet som body, `Content-Type: image/…`) / fjern. Svaret har `uploadedImage` og `ogImage` (delingsbildet) |
+| `GET` | `/api/admin/config` | Oppretting. Gir bl.a. nettstedene som kan velges |
+| `GET` | `/api/admin/places?q=` | Oppretting. Stedsoppslag hos Kartverket |
+| `POST` | `/api/admin/events` | Oppretting. `site` velger nettsted (standard hovednettstedet) |
+| `GET` / `PUT` / `DELETE` | `/api/admin/events/:slug` | Admin-nøkkel |
+| `GET` | `/api/admin/events/:slug/config`, `…/places?q=` | Admin-nøkkel. Samme som over, for skjemaet på admin-siden |
+| `DELETE` | `/api/admin/events/:slug/registrations/:id` | Admin-nøkkel |
+| `GET` | `/api/admin/events/:slug/registrations.csv` | Admin-nøkkel |
+| `POST` / `DELETE` | `/api/admin/events/:slug/registrations/:id/checkin` | Admin-nøkkel. Sjekk inn / angre |
+| `POST` | `/api/admin/events/:slug/scanner/rotate` | Admin-nøkkel. Ny dørvaktlenke |
+| `POST` / `DELETE` | `/api/admin/events/:slug/cancel` | Admin-nøkkel. Avlys (`{ notify, message }`) / opphev |
+| `PUT` / `DELETE` | `/api/admin/events/:slug/image` | Admin-nøkkel. Last opp forsidebilde (selve bildet som body, `Content-Type: image/…`) / fjern. Svaret har `uploadedImage` og `ogImage` (delingsbildet) |
 | `GET` | `/api/tickets/:nøkkel`, `/api/bookings/:nøkkel` | Billettlenken. Billetten(e), lenker og om telefonen er dørvakt |
 | `POST` | `/api/events/:slug/scanner/login` | Dørvaktnøkkel i body. Setter informasjonskapselen |
 | `GET` | `/api/events/:slug/scanner`, `…/scanner/search?q=` | Dørvakt. Status og liste for bruk uten nett; navnesøk |
 | `POST` | `/api/events/:slug/scanner/checkin`, `…/scanner/undo` | Dørvakt. `{ token }`, `{ code }` (dørkode eller billettnummer) eller `{ id }`; angre med `{ id }` |
 
-*Admin-porten* = riktig vertsnavn (hvis `ADMIN_HOST` er satt) og gyldig Cloudflare Access-token (hvis `CF_ACCESS_*` er satt).
+*Oppretting* = riktig vertsnavn (hvis `ADMIN_HOST` er satt), og `Authorization: Bearer <CREATE_KEY>`, et gyldig Cloudflare Access-token eller LAN-porten. Uten det: `403` (på feil vertsnavn: naken `404`).
+
+*Admin-nøkkel* = `Authorization: Bearer <admin-nøkkel>` for akkurat det arrangementet, på hvilket som helst vertsnavn. Uten riktig nøkkel: `401`. Ukjent arrangement: naken `404`.
 
 ---
 

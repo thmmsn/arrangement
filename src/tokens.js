@@ -8,8 +8,9 @@
 //
 //   billett:     /t/<nummer><signatur>   f.eks. /t/k7hq2mxpr9Xy3…  (10 + 22 tegn)
 //   påmelding:   /b/<nummer><signatur>   alle billettene i én påmelding
-//   dørvakt:     /<slug>/skanner#<nøkkel>, nøkkelen avhenger av arrangementet og en versjon, så
-//                arrangøren kan lage en ny lenke (og stenge ute alle som hadde den gamle).
+//   dørvakt:     /dorvakt/<slug>#<nøkkel> (eldre lenker: /<slug>/skanner#<nøkkel>, samme nøkkel).
+//                Nøkkelen avhenger av arrangementet og en versjon, så arrangøren kan lage en ny lenke
+//                (og stenge ute alle som hadde den gamle). Adressen er ikke med i det som signeres.
 //   avmelding:   /<slug>/avmelding#<nummer><signatur>, med eget formål for hele påmeldingen
 //                (påmeldingsnummeret) og for én person (billettnummeret).
 //

@@ -118,11 +118,13 @@ export function createApp({
     const image = repo.imageMeta(event.id);
     return image?.hasOg ? `${eventUrl(event)}/bilde/${image.hash}-deling.jpg` : null;
   };
-  // Med eget admin-vertsnavn peker admin-lenkene dit; ellers til arrangementets domene.
-  const adminBaseUrl = (event) => (config.adminHost ? `https://${config.adminHost}` : siteOf(event).baseUrl);
-  const adminUrl = (event, key) => `${adminBaseUrl(event)}/admin/${event.slug}#${key}`;
+  // Admin-lenken ligger på arrangementets eget domene, med samme hash som arrangementet:
+  // <domene>/<hash> (påmelding), <domene>/admin/<hash>#<nøkkel> og <domene>/dorvakt/<hash>#<nøkkel>.
+  // Admin-nøkkelen er det eneste som gir tilgang (se «Tilgang til administrasjonen»). Eldre lenker til
+  // admin-vertsnavnet (ADMIN_HOST) virker fortsatt, fordi administrasjonen svarer på alle vertsnavn.
+  const adminUrl = (event, key) => `${siteOf(event).baseUrl}/admin/${event.slug}#${key}`;
   // Samme admin-side, åpnet rett på «Avlys arrangement».
-  const cancelEventUrl = (event, key) => `${adminBaseUrl(event)}/admin/${event.slug}/avlys#${key}`;
+  const cancelEventUrl = (event, key) => `${siteOf(event).baseUrl}/admin/${event.slug}/avlys#${key}`;
 
   // ---------- Svar uten innhold ----------
   // Uten en gyldig arrangementslenke skal et offentlig domene ikke avsløre noe som helst: forsiden,
@@ -247,45 +249,96 @@ export function createApp({
   app.use('/assets', express.static(ASSETS, { maxAge: '1h' }));
   app.get('/robots.txt', (req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /\n'));
 
-  // ---------- Admin-porten ----------
-  // Alt som har med administrasjon å gjøre ligger under /admin (sider) og /api/admin (API),
-  // slik at én Cloudflare Access-regel – på et eget vertsnavn eller på disse stiene – dekker alt.
+  // ---------- Tilgang til administrasjonen ----------
+  // Alt som har med administrasjon å gjøre ligger under /admin (sider) og /api/admin (API). Det finnes
+  // to slags tilgang, med hver sin nøkkel:
+  //
+  // 1. Opprette arrangementer: /admin/ny og resten av /api/admin (config, places, POST events).
+  //    Slipper inn med den betrodde LAN-porten, opprettingsnøkkelen (CREATE_KEY, lenken
+  //    /admin/ny#<nøkkel>) eller et gyldig Cloudflare Access-token. Med ADMIN_HOST finnes dette bare
+  //    på admin-vertsnavnet – på de offentlige domenene gir det den nakne 404-en.
+  // 2. Administrere ett arrangement: /admin/<hash> og /api/admin/events/<hash>/…. Krever bare
+  //    arrangementets admin-nøkkel (lenken /admin/<hash>#<nøkkel>) – verken Access eller ADMIN_HOST.
+  //    Nøkkelen er 24 tilfeldige byte (192 bit) og kan ikke gjettes. Virker på alle vertsnavn:
+  //    arrangementets eget domene (der nye lenker peker), admin-vertsnavnet (der eldre lenker peker) og LAN.
+  //
+  // Nøklene står etter # i lenkene, så nettleseren sender dem aldri til serveren når en side åpnes.
+  // JavaScript på siden sender dem i «Authorization: Bearer <nøkkel>» til API-et.
 
-  function adminGate(kind) {
+  const createKeyHash = config.createKey ? hashSecret(config.createKey) : null;
+  const bearerOf = (req) => /^Bearer (.+)$/.exec(req.get('authorization') || '')?.[1] ?? '';
+
+  // Oppretting (1). Setter req.creator når forespørselen har lov til å opprette arrangementer.
+  function creatorGate(kind) {
     return async (req, res, next) => {
-      // Den betrodde LAN-porten slipper inn uten ADMIN_HOST og uten Access-token.
+      req.t = adminT;
+      req.accessUser = null;
+      req.creator = false;
+      // Den betrodde LAN-porten slipper inn uten ADMIN_HOST, Access og nøkkel.
       if (isLan(req)) {
-        req.t = adminT;
-        req.accessUser = null;
+        req.creator = true;
         return next();
       }
-      // Med eget admin-vertsnavn finnes ikke admin på de offentlige domenene i det hele tatt.
+      // Med eget admin-vertsnavn finnes oppretting ikke på de offentlige domenene i det hele tatt.
       if (config.adminHost && hostOf(req) !== config.adminHost) return notFound(req, res);
-      req.t = adminT;
+      if (createKeyHash && secretMatches(bearerOf(req), createKeyHash)) {
+        req.creator = true;
+        return next();
+      }
       if (accessVerifier) {
         try {
           req.accessUser = await accessVerifier(accessTokenFrom(req));
+          req.creator = true;
         } catch (err) {
           if (!(err instanceof AccessError)) logger.error('Cloudflare Access-sjekk feilet:', err);
+          // Nøkkelen etter # kommer aldri med når siden åpnes. Med opprettingsnøkkel vises derfor siden
+          // (den har ingen data) – nøkkelen sjekkes når siden kaller API-et.
+          if (kind === 'page' && createKeyHash) return next();
           return kind === 'api'
-            ? res.status(403).set('Cache-Control', 'no-store').json({ error: adminT('errors.accessDenied') })
+            ? res.status(403).set('Cache-Control', 'no-store').json({ error: adminT(createKeyHash ? 'errors.createKeyRequired' : 'errors.accessDenied') })
             : sendPage(res, '403', mainSite, 403);
         }
+        return next();
       }
+      // Verken gyldig nøkkel eller Access. ADMIN_NO_AUTH (lokal utvikling) gjelder bare når ingen annen
+      // innlogging er satt opp: med CREATE_KEY skal nøkkelen alltid kreves.
+      req.creator = config.adminNoAuth && !createKeyHash;
       next();
     };
   }
 
+  // /api/admin/events/<hash> og alt under – men ikke POST /api/admin/events (oppretting).
+  const EVENT_ADMIN_PATH = /^\/events\/([^/]+)(?:\/|$)/;
+
+  // Ett arrangement (2). Et ukjent arrangement gir det samme nakne svaret som alt annet uten gyldig lenke,
+  // så API-et ikke røper noe på de offentlige domenene. Uten riktig nøkkel: 401.
+  async function eventAdminGate(req, res, next) {
+    req.t = adminT;
+    req.accessUser = null;
+    const event = findEventBySlug(EVENT_ADMIN_PATH.exec(req.path)[1]);
+    if (!event) return notFound(req, res);
+    if (!secretMatches(bearerOf(req), event.adminKeyHash)) {
+      return res.status(401).set('Cache-Control', 'no-store').json({ error: adminT('errors.invalidAdminLink') });
+    }
+    // Kom forespørselen gjennom Cloudflare Access, brukes e-postadressen (f.eks. «sjekket inn av»).
+    // Access kreves ikke: et manglende eller ugyldig token betyr bare at vi ikke vet hvem det er.
+    const token = accessVerifier && !isLan(req) ? accessTokenFrom(req) : '';
+    if (token) req.accessUser = await accessVerifier(token).catch(() => null);
+    next();
+  }
+
   // ---------- Sider ----------
 
-  app.get('/admin', adminGate('page'), (req, res) => res.redirect('/admin/ny'));
-  app.get('/admin/ny', adminGate('page'), (req, res) => sendPage(res, 'new', mainSite));
+  app.get('/admin', creatorGate('page'), (req, res) => res.redirect('/admin/ny'));
+  app.get('/admin/ny', creatorGate('page'), (req, res) => sendPage(res, 'new', mainSite));
+  // Siden for ett arrangement vises for alle arrangementer som finnes. Den har ingen data: dataene
+  // krever admin-nøkkelen, som bare JavaScript på siden kjenner.
   const adminPage = (req, res) => {
     if (!findEventBySlug(req.params.slug)) return notFound(req, res);
     sendPage(res, 'admin', mainSite);
   };
-  app.get('/admin/:slug', adminGate('page'), adminPage);
-  app.get('/admin/:slug/avlys', adminGate('page'), adminPage);
+  app.get('/admin/:slug', adminPage);
+  app.get('/admin/:slug/avlys', adminPage);
 
   function findEventBySlug(value) {
     const slug = String(value).toLowerCase();
@@ -293,11 +346,12 @@ export function createApp({
   }
 
   // Gammel admin-adresse fra før admin ble samlet under /admin. Nettleseren tar med #nøkkelen videre.
-  // Sendes bare videre for arrangementer som finnes, så adressen ikke kan brukes til å lete.
+  // Sendes bare videre for arrangementer som finnes, så adressen ikke kan brukes til å lete. Admin-siden
+  // for ett arrangement virker på alle vertsnavn, så den relative adressen holder.
   app.get('/:slug/admin', (req, res) => {
     const event = findEventBySlug(req.params.slug);
     if (!event) return notFound(req, res);
-    res.redirect(301, `${config.adminHost && !isLan(req) ? adminBaseUrl(event) : ''}/admin/${event.slug}`);
+    res.redirect(301, `/admin/${event.slug}`);
   });
 
   tickets.mountPages(app);
@@ -340,7 +394,10 @@ export function createApp({
   const api = express.Router({ caseSensitive: true });
   api.use(express.json({ limit: '100kb' }), noStore);
   const adminApi = express.Router({ caseSensitive: true });
-  adminApi.use(adminGate('api'), express.json({ limit: '100kb' }), noStore);
+  // Ett arrangement krever admin-nøkkelen; alt annet under /api/admin gjelder oppretting.
+  const apiCreatorGate = creatorGate('api');
+  const adminApiGate = (req, res, next) => (EVENT_ADMIN_PATH.test(req.path) ? eventAdminGate : apiCreatorGate)(req, res, next);
+  adminApi.use(adminApiGate, express.json({ limit: '100kb' }), noStore);
 
   const registerLimiter = limiter(limits.register);
   const cancelLimiter = limiter(limits.cancel);
@@ -364,22 +421,22 @@ export function createApp({
     next();
   }
 
-  // Admin-nøkkelen for et arrangement sendes som «Authorization: Bearer <nøkkel>».
+  // Admin-nøkkelen for et arrangement sendes som «Authorization: Bearer <nøkkel>». eventAdminGate har
+  // allerede sjekket den; sjekken gjentas her for hver rute, så en rute aldri kan bli åpen ved en feil.
   function requireEventAdmin(req, res, next) {
-    const match = /^Bearer (.+)$/.exec(req.get('authorization') || '');
-    if (!match || !secretMatches(match[1], req.event.adminKeyHash)) {
+    if (!secretMatches(bearerOf(req), req.event.adminKeyHash)) {
       return res.status(401).json({ error: adminT('errors.invalidAdminLink') });
     }
     next();
   }
 
-  // Oppretting av nye arrangementer krever Cloudflare Access (adminGate har da allerede verifisert
-  // tokenet) eller den betrodde LAN-porten. Ellers er oppretting slått av – med mindre ADMIN_NO_AUTH=true
-  // er satt for lokal utvikling. Slik blir en glemt innstilling aldri til at hvem som helst kan
-  // opprette arrangementer og sende e-post i ditt navn.
+  // Oppretting av nye arrangementer (og oppsettet og stedsoppslaget som skjemaet bruker) krever at
+  // creatorGate har sluppet forespørselen inn: LAN-porten, opprettingsnøkkelen eller Cloudflare Access.
+  // Ellers er oppretting slått av – med mindre ADMIN_NO_AUTH=true er satt for lokal utvikling. Slik blir
+  // en glemt innstilling aldri til at hvem som helst kan opprette arrangementer og sende e-post i ditt navn.
   function requireCreator(req, res, next) {
-    if (isLan(req) || accessVerifier || config.adminNoAuth) return next();
-    return res.status(403).json({ error: adminT('errors.creationDisabled') });
+    if (req.creator) return next();
+    return res.status(403).json({ error: adminT(createKeyHash ? 'errors.createKeyRequired' : 'errors.creationDisabled') });
   }
 
   function publicEvent(event, count) {
@@ -629,7 +686,9 @@ export function createApp({
 
   const siteIds = sites.map((site) => site.id);
 
-  adminApi.get('/config', (req, res) => res.json({
+  // Oppsettet skjemaet trenger. Samme innhold for oppretting (/config) og for ett arrangement
+  // (/events/<hash>/config, med admin-nøkkelen), så admin-siden aldri trenger opprettingstilgang.
+  const adminConfig = (req, res) => res.json({
     timeZone: config.timeZone,
     accessEmail: req.accessUser?.email ?? null,
     // Nettstedene arrangøren kan velge mellom. Hovednettstedet først.
@@ -639,7 +698,9 @@ export function createApp({
     deleteAfterDays,
     // Wallet-bryterne vises bare når tjenesten er satt opp.
     wallets: { apple: Boolean(config.wallet?.apple), google: Boolean(config.wallet?.google) },
-  }));
+  });
+  adminApi.get('/config', requireCreator, adminConfig);
+  adminApi.get('/events/:slug/config', loadAdminEvent, requireEventAdmin, adminConfig);
 
   const skinIds = [...skins.keys()];
 
@@ -793,7 +854,7 @@ export function createApp({
     res.send(csv);
   });
 
-  tickets.mountAdminApi(adminApi, { loadAdminEvent, requireEventAdmin });
+  tickets.mountAdminApi(adminApi, { loadAdminEvent, requireEventAdmin, requireCreator });
 
   // Feil i API-et blir alltid til JSON, med melding på språket forespørselen gjelder (req.t).
   const apiErrors = (err, req, res, next) => {

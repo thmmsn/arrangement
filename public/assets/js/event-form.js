@@ -23,6 +23,8 @@ const PRESETS = [
  */
 export function createEventForm({
   initial = {}, timeZone, sites = [], submitLabel, editing = false, wallets = {}, skins = [], onSubmit,
+  // Stedsoppslaget: q → { results }. Admin-siden for ett arrangement bruker sin egen adresse, med nøkkelen.
+  searchPlaces = (q) => api(`/admin/places?q=${encodeURIComponent(q)}`),
 }) {
   // Kopier feltene så endringer ikke lekker ut før skjemaet lagres.
   let fields = (initial.fields || []).map((f) => ({ ...f, options: [...(f.options || [])] }));
@@ -43,7 +45,7 @@ export function createEventForm({
   site.value = sites.some((s) => s.id === initial.site) ? initial.site : sites[0]?.id ?? '';
   const siteLang = () => sites.find((s) => s.id === site.value)?.lang ?? t.lang;
 
-  const place = placeField(initial);
+  const place = placeField(initial, searchPlaces);
   const image = imageField(initial);
   const features = featureToggles(initial.features ?? {}, wallets);
   const skinPicker = skinField(initial.skin ?? '', skins);
@@ -252,7 +254,7 @@ export function createEventForm({
  * gir kartpunkt, som brukes til veibeskrivelse, kalenderen og Wallet (kortet dukker opp på
  * låseskjermen nær stedet). Teksten kan endres etterpå uten at kartpunktet forsvinner.
  */
-function placeField(initial) {
+function placeField(initial, searchPlaces) {
   let geo = initial.geo ?? null;
   let results = [];
   let active = -1;
@@ -309,7 +311,7 @@ function placeField(initial) {
     timer = setTimeout(async () => {
       const mine = ++seq;
       try {
-        const data = await api(`/admin/places?q=${encodeURIComponent(q)}`);
+        const data = await searchPlaces(q);
         if (mine !== seq) return; // Et nyere søk er på vei.
         results = data.results;
         active = -1;

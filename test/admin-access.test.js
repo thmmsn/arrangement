@@ -103,24 +103,35 @@ describe('ADMIN_HOST: admin bare på eget vertsnavn', () => {
     assert.equal(spoof.status, 404);
   });
 
-  test('på admin-vertsnavnet virker alt, og admin-lenken peker dit', async () => {
+  test('oppretting på admin-vertsnavnet; admin-lenken peker til arrangementets eget domene', async () => {
     const port = await start({ adminHost: ADMIN, adminNoAuth: true });
     const adm = { host: ADMIN };
+    const pub = { host: 'events.example.com' };
 
     assert.equal((await request(port, { path: '/admin/ny', headers: adm })).status, 200);
     const create = await request(port, { method: 'POST', path: '/api/admin/events', headers: adm, body: eventBody });
     assert.equal(create.status, 201);
-    assert.equal(create.json.adminUrl, `https://${ADMIN}/admin/${create.json.slug}#${create.json.adminKey}`);
-    assert.equal(create.json.eventUrl, `https://events.example.com/${create.json.slug}`);
+    const { slug, adminKey } = create.json;
+    // Samme hash overalt: /<hash>, /admin/<hash>#<nøkkel> og /dorvakt/<hash>#<nøkkel> på samme domene.
+    assert.equal(create.json.adminUrl, `https://events.example.com/admin/${slug}#${adminKey}`);
+    assert.equal(create.json.eventUrl, `https://events.example.com/${slug}`);
+    assert.match(create.json.scannerUrl, new RegExp(`^https://events\\.example\\.com/dorvakt/${slug}#[\\w-]{22}$`));
 
-    // Den offentlige siden virker fortsatt på det offentlige domenet.
-    const page = await request(port, { path: `/${create.json.slug}`, headers: { host: 'events.example.com' } });
-    assert.equal(page.status, 200);
+    // Den offentlige siden og admin-siden virker på det offentlige domenet – admin med nøkkelen.
+    assert.equal((await request(port, { path: `/${slug}`, headers: pub })).status, 200);
+    assert.equal((await request(port, { path: `/admin/${slug}`, headers: pub })).status, 200);
+    const auth = { authorization: `Bearer ${adminKey}` };
+    assert.equal((await request(port, { path: `/api/admin/events/${slug}`, headers: { ...pub, ...auth } })).status, 200);
+    assert.equal((await request(port, { path: `/api/admin/events/${slug}`, headers: pub })).status, 401);
 
-    // Gamle admin-lenker sendes videre til admin-vertsnavnet.
-    const legacy = await request(port, { path: `/${create.json.slug}/admin`, headers: { host: 'events.example.com' } });
+    // Admin-lenker sendt ut før endringen (til admin-vertsnavnet) virker fortsatt.
+    assert.equal((await request(port, { path: `/admin/${slug}`, headers: adm })).status, 200);
+    assert.equal((await request(port, { path: `/api/admin/events/${slug}`, headers: { ...adm, ...auth } })).status, 200);
+
+    // Gamle admin-lenker (/<hash>/admin) sendes videre til /admin/<hash> på samme domene.
+    const legacy = await request(port, { path: `/${slug}/admin`, headers: pub });
     assert.equal(legacy.status, 301);
-    assert.equal(legacy.headers.location, `https://${ADMIN}/admin/${create.json.slug}`);
+    assert.equal(legacy.headers.location, `/admin/${slug}`);
   });
 
   test('admin kan ikke nås med store bokstaver (forbi en Access-regel på stien «admin»)', async () => {

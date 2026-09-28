@@ -237,11 +237,12 @@ describe('e-postlenker per nettsted', () => {
     assert.match(guest.html, new RegExp(`<img src="https://${MAIN}/assets/custom/logo\\.svg"`));
   });
 
-  test('med ADMIN_HOST peker admin-lenken dit, mens resten følger nettstedet', async () => {
+  test('med ADMIN_HOST følger også admin-lenken arrangementets nettsted – ADMIN_HOST gjelder bare oppretting', async () => {
     const app = await startApp({ ...TWO_SITES, ADMIN_HOST: ADMIN });
     const en = await createEvent(app, { site: 'com' }, onHost(ADMIN));
-    assert.equal(en.adminUrl, `https://${ADMIN}/admin/${en.slug}#${en.adminKey}`);
+    assert.equal(en.adminUrl, `https://${COM}/admin/${en.slug}#${en.adminKey}`);
     assert.equal(en.eventUrl, `https://${COM}/${en.slug}`);
+    assert.match(en.scannerUrl, new RegExp(`^https://${COM}/dorvakt/${en.slug}#`));
   });
 });
 
@@ -357,6 +358,14 @@ describe('et offentlig domene er helt lukket uten gyldig lenke', () => {
       { path: '/abcdefghjkmn' },
       { path: '/abcdefghjkmn/avmelding' },
       { path: '/abcdefghjkmn/admin' },
+      { path: '/abcdefghjkmn/skanner' },
+      { path: '/admin/abcdefghjkmn' },
+      { path: '/admin/abcdefghjkmn/avlys' },
+      { path: '/dorvakt' },
+      { path: '/dorvakt/abcdefghjkmn' },
+      { path: '/api/admin/events/abcdefghjkmn' },
+      { path: '/api/admin/events/abcdefghjkmn/config' },
+      { path: '/api/admin/places?q=Oslo' },
       { path: '/theme.css' },
       { path: '/assets/theme/0000000000.css' },
       { path: '/api/events/abcdefghjkmn' },
