@@ -153,7 +153,7 @@ test('avlysning: melding til de påmeldte, kvittering til arrangør og administr
   const admin = { authorization: `Bearer ${adminKey}` };
   await register(app, slug, { guests: ['Kari Nordmann'] });
   await register(app, slug, { name: 'Per', email: 'per@example.com' });
-  const ticketsUrl = (await register(app, slug, { name: 'Lise', email: 'lise@example.com' })).json.ticketsUrl;
+  const ticketsUrl = (await register(app, slug, { name: 'Lise', email: 'lise@example.com' })).json.links.tickets;
 
   assert.equal((await app.request({ method: 'POST', path: `/api/admin/events/${slug}/cancel`, body: { notify: true } })).status, 401);
   const tooLong = await app.request({ method: 'POST', path: `/api/admin/events/${slug}/cancel`, headers: admin, body: { notify: true, message: 'x'.repeat(2001) } });

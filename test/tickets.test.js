@@ -139,7 +139,7 @@ describe('billettene etter påmelding', () => {
     const { slug } = await createEvent(app, { location: 'Grendehuset', geo: { lat: 63.1, lon: 9.8 } });
     const res = await register(app, slug, { guests: ['Kari Nordmann'] });
     assert.equal(res.status, 201);
-    assert.match(res.json.ticketsUrl, /^http:\/\/localhost:3000\/b\/[a-z0-9]{10}[\w-]{22}$/);
+    assert.match(res.json.links.tickets, /^http:\/\/localhost:3000\/b\/[a-z0-9]{10}[\w-]{22}$/);
 
     const mail = app.sent.find((m) => m.to === 'ola@example.com');
     assert.deepEqual(mail.attachments.map((a) => a.contentType), ['text/calendar; charset=utf-8; method=PUBLISH', 'application/pdf']);
@@ -153,7 +153,7 @@ describe('billettene etter påmelding', () => {
     assert.match(mail.text, /Vis billettene: http:\/\/localhost:3000\/b\//);
     assert.match(mail.text, /Veibeskrivelse: https:\/\/www\.google\.com\/maps\/dir\/\?api=1&destination=63\.1%2C9\.8/);
 
-    const bookingPath = pathOf(res.json.ticketsUrl);
+    const bookingPath = pathOf(res.json.links.tickets);
     const page = await app.request({ path: bookingPath });
     assert.equal(page.status, 200);
     assert.match(page.headers['content-type'], /text\/html/);
@@ -187,7 +187,7 @@ describe('billettene etter påmelding', () => {
     const app = await startApp({ ADMIN_NO_AUTH: 'true' });
     const { slug } = await createEvent(app);
     const res = await register(app, slug);
-    const bookingPath = pathOf(res.json.ticketsUrl);
+    const bookingPath = pathOf(res.json.links.tickets);
     const tampered = bookingPath.slice(0, -1) + (bookingPath.at(-1) === 'A' ? 'B' : 'A');
     for (const path of [
       tampered, `${tampered}/pdf`, bookingPath.replace('/b/', '/t/'), '/t/abc', '/b/', '/t/abcdefghjkXXXXXXXXXXXXXXXXXXXXXX/qr.svg',
@@ -204,8 +204,8 @@ describe('billettene etter påmelding', () => {
     const app = await startApp({ ADMIN_NO_AUTH: 'true', DOMAIN: 'arrangement.example.no', SITE_COM_DOMAIN: 'events.example.com', SITE_COM_LANG: 'en' });
     const { slug } = await createEvent(app, { site: 'com' }, { host: 'arrangement.example.no' });
     const res = await register(app, slug, { headers: { host: 'events.example.com' } });
-    assert.match(res.json.ticketsUrl, /^https:\/\/events\.example\.com\/b\//);
-    const path = pathOf(res.json.ticketsUrl);
+    assert.match(res.json.links.tickets, /^https:\/\/events\.example\.com\/b\//);
+    const path = pathOf(res.json.links.tickets);
     const wrong = await app.request({ path, headers: { host: 'arrangement.example.no' } });
     assert.equal(wrong.status, 301);
     assert.equal(wrong.headers.location, `https://events.example.com${path}`);
@@ -220,11 +220,11 @@ describe('billettene etter påmelding', () => {
   test('brytere per arrangement: alt er på som standard, og kan slås av', async () => {
     const app = await startApp({ ADMIN_NO_AUTH: 'true' });
     const on = await createEvent(app);
-    assert.deepEqual(app.repo.findEvent(on.slug).features, { tickets: true, calendar: true, pdf: true, googleWallet: true, appleWallet: true });
+    assert.deepEqual(app.repo.findEvent(on.slug).features, { tickets: true, calendar: true, pdf: true, googleWallet: true, appleWallet: true, selfCancel: true });
 
     const off = await createEvent(app, { features: { tickets: false, calendar: false } });
     const res = await register(app, off.slug, { email: 'uten@example.com' });
-    assert.equal(res.json.ticketsUrl, null);
+    assert.equal(res.json.links.tickets, null);
     assert.equal(res.json.event.links.ics, null);
     const mail = app.sent.find((m) => m.to === 'uten@example.com');
     assert.deepEqual(mail.attachments, []);
@@ -243,11 +243,11 @@ describe('billettene etter påmelding', () => {
     const app = await startApp({ ADMIN_NO_AUTH: 'true' });
     const { slug, adminKey } = await createEvent(app);
     const res = await register(app, slug);
-    const data = await app.request({ path: pathOf(res.json.ticketsUrl).replace('/b/', '/api/bookings/') });
+    const data = await app.request({ path: pathOf(res.json.links.tickets).replace('/b/', '/api/bookings/') });
     const ticketPath = data.json.tickets[0].path;
     const list = await app.request({ path: `/api/admin/events/${slug}`, headers: { authorization: `Bearer ${adminKey}` } });
     await app.request({ method: 'DELETE', path: `/api/admin/events/${slug}/registrations/${list.json.registrations[0].id}`, headers: { authorization: `Bearer ${adminKey}` } });
     assert.equal((await app.request({ path: ticketPath })).status, 404);
-    assert.equal((await app.request({ path: pathOf(res.json.ticketsUrl) })).status, 404);
+    assert.equal((await app.request({ path: pathOf(res.json.links.tickets) })).status, 404);
   });
 });

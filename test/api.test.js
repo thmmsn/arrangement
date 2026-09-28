@@ -343,7 +343,9 @@ describe('administrasjon', () => {
 
 describe('påmelding av flere personer', () => {
   const guest = (event, name, extra = {}) => ({ name, answers: answersFor(event), ...extra });
-  const tokenFromMail = () => sent.find((m) => m.to === 'ola@example.com').text.match(/avmelding#([\w-]+)/)[1];
+  // Avmeldingslenken for hele påmeldingen står nederst; lenkene over den gjelder hver sin person.
+  const cancelTokensFromMail = () => [...sent.find((m) => m.to === 'ola@example.com').text.matchAll(/avmelding#([\w-]+)/g)].map((m) => m[1]);
+  const tokenFromMail = () => cancelTokensFromMail().at(-1);
 
   test('den som melder på kan legge til personer – hver person er én gjest', async () => {
     const { slug, event, adminKey } = await createEvent({ capacity: 10 });
@@ -483,5 +485,77 @@ describe('påmelding av flere personer', () => {
     // Fjerner siste person: påmeldingen forsvinner.
     await call(`/api/admin/events/${slug}/registrations/${data.registrations[1].id}`, { method: 'DELETE', headers: admin(adminKey) });
     assert.equal((await call(`/api/events/${slug}/cancel/lookup`, { method: 'POST', body: { token } })).status, 404);
+  });
+
+  test('hver person har sin egen avmeldingslenke, som bare melder av den personen', async () => {
+    const { slug, event } = await createEvent();
+    const res = await register(slug, event, { guests: [guest(event, 'Kari'), guest(event, 'Per')] });
+    // Én lenke per person, og til slutt lenken for hele påmeldingen – den samme som siden viser.
+    const tokens = cancelTokensFromMail();
+    assert.equal(tokens.length, 4);
+    assert.equal(new Set(tokens).size, 4);
+    assert.equal(new URL(res.data.links.cancel).hash, `#${tokens[3]}`);
+    sent = [];
+
+    const lookup = await call(`/api/events/${slug}/cancel/lookup`, { method: 'POST', body: { token: tokens[1] } });
+    assert.equal(lookup.status, 200);
+    assert.equal(lookup.data.personal, true);
+    assert.deepEqual(lookup.data.persons.map((p) => p.name), ['Kari']);
+
+    // Kari kan ikke melde av de andre med sin lenke.
+    const all = await call(`/api/events/${slug}/cancel/lookup`, { method: 'POST', body: { token: tokens[3] } });
+    const [ola, , per] = all.data.persons;
+    const other = await call(`/api/events/${slug}/cancel`, { method: 'POST', body: { token: tokens[1], ids: [ola.id, per.id] } });
+    assert.equal(other.status, 400);
+
+    const done = await call(`/api/events/${slug}/cancel`, { method: 'POST', body: { token: tokens[1] } });
+    assert.equal(done.status, 200);
+    assert.deepEqual(done.data.cancelled.map((p) => p.name), ['Kari']);
+    assert.deepEqual(done.data.remaining, []);
+    assert.equal(done.data.event.count, 2);
+    // Den som meldte på, får kvittering om at Kari er meldt av.
+    assert.match(sent.find((m) => m.to === 'ola@example.com').text, /Nå er Kari meldt av/);
+    assert.equal((await call(`/api/events/${slug}/cancel/lookup`, { method: 'POST', body: { token: tokens[1] } })).status, 404);
+  });
+
+  test('billettnøkkelen (QR-koden) og påmeldingsnøkkelen kan ikke brukes til avmelding', async () => {
+    const { slug, event } = await createEvent();
+    const res = await register(slug, event);
+    const bookingToken = new URL(res.data.links.tickets).pathname.split('/')[2];
+    const booking = await call(`/api/bookings/${bookingToken}`);
+    const ticketToken = booking.data.tickets[0].path.split('/')[2];
+    for (const token of [bookingToken, ticketToken]) {
+      assert.equal((await call(`/api/events/${slug}/cancel/lookup`, { method: 'POST', body: { token } })).status, 404);
+      assert.equal((await call(`/api/events/${slug}/cancel`, { method: 'POST', body: { token } })).status, 404);
+    }
+    assert.equal((await call(`/api/events/${slug}`)).data.count, 1);
+    // Siden med alle billettene har avmelding; hver billett har sin egen lenke til å videresende.
+    assert.match(booking.data.links.cancel, new RegExp(`^/${slug}/avmelding#`));
+    assert.match(booking.data.tickets[0].cancel, new RegExp(`/${slug}/avmelding#`));
+    // Enkeltbilletten – det QR-koden peker på – har ingen avmelding.
+    const ticket = await call(`/api/tickets/${ticketToken}`);
+    assert.equal(ticket.data.links.cancel, null);
+    assert.equal(ticket.data.tickets[0].cancel, undefined);
+  });
+
+  test('arrangøren kan slå av avmelding: ingen lenker, og API-et avviser', async () => {
+    const { slug, event, adminKey } = await createEvent({ features: { selfCancel: false } });
+    assert.equal((await call(`/api/admin/events/${slug}`, { headers: admin(adminKey) })).data.event.features.selfCancel, false);
+    const res = await register(slug, event, { guests: [guest(event, 'Kari')] });
+    assert.equal(res.data.links.cancel, null);
+    const mail = sent.find((m) => m.to === 'ola@example.com');
+    assert.doesNotMatch(mail.text, /avmelding#/);
+    assert.doesNotMatch(mail.html, /avmelding#/);
+    assert.match(mail.text, /Svar på denne e-posten/);
+    const booking = await call(`/api/bookings/${new URL(res.data.links.tickets).pathname.split('/')[2]}`);
+    assert.equal(booking.data.links.cancel, null);
+    assert.equal(booking.data.tickets[0].cancel, null);
+
+    // En lenke laget mens avmelding var på, virker ikke etter at den er slått av.
+    const denied = await call(`/api/events/${slug}/cancel`, { method: 'POST', body: { token: 'x'.repeat(32) } });
+    assert.equal(denied.status, 403);
+    assert.equal(denied.data.selfCancelDisabled, true);
+    assert.equal((await call(`/api/events/${slug}/cancel/lookup`, { method: 'POST', body: { token: 'x' } })).status, 403);
+    assert.equal((await call(`/api/events/${slug}`)).data.count, 2);
   });
 });

@@ -233,7 +233,7 @@ describe('Wallet i appen', () => {
 
     const { slug } = await createEvent(app);
     const res = await register(app, slug, { guests: ['Kari'] });
-    const path = new URL(res.json.ticketsUrl).pathname;
+    const path = new URL(res.json.links.tickets).pathname;
     const data = await app.request({ path: path.replace('/b/', '/api/bookings/') });
     assert.equal(data.json.links.apple, `${path}/apple`);
     assert.equal(data.json.links.google, `${path}/google`);
@@ -245,13 +245,24 @@ describe('Wallet i appen', () => {
     const google = await app.request({ path: `${path}/google` });
     assert.equal(google.status, 302);
     assert.match(google.headers.location, /^https:\/\/pay\.google\.com\/gp\/v\/save\//);
+    // Siden etter påmeldingen viser Wallet med én gang – samme lenker som e-posten.
+    assert.equal(res.json.links.apple, `http://localhost:3000${path}/apple`);
+    assert.equal(res.json.links.google, `http://localhost:3000${path}/google`);
+    assert.equal(res.json.links.pdf, `http://localhost:3000${path}/pdf`);
+    // E-posten: Wallet for alle billettene, og for hver person til å videresende.
     const mail = app.sent.find((m) => m.to === 'ola@example.com');
-    assert.match(mail.text, /Legg til i Apple Wallet: http:\/\/localhost:3000\/b\/.+\/apple/);
-    assert.match(mail.text, /Lagre i Google Wallet: http:\/\/localhost:3000\/b\/.+\/google/);
+    assert.match(mail.text, /Legg alle i Apple Wallet: http:\/\/localhost:3000\/b\/.+\/apple/);
+    assert.match(mail.text, /Lagre alle i Google Wallet: http:\/\/localhost:3000\/b\/.+\/google/);
+    const ticketUrl = `http://localhost:3000${data.json.tickets[1].path}`;
+    assert.ok(mail.text.includes(`Person 2\nNavn: Kari\nDørkode: ${data.json.tickets[1].doorCode}\nBillett: ${ticketUrl}\nLegg til i Apple Wallet: ${ticketUrl}/apple\nLagre i Google Wallet: ${ticketUrl}/google\nLast ned PDF: ${ticketUrl}/pdf\nMeld av: `), mail.text);
+    assert.ok(mail.html.includes(`href="http://localhost:3000${path}/apple" style="display:inline-block;background:#000000;`));
 
     const off = await createEvent(app, { features: { appleWallet: false, googleWallet: false } });
     const r2 = await register(app, off.slug, { email: 'ingen@example.com' });
-    const p2 = new URL(r2.json.ticketsUrl).pathname;
+    const p2 = new URL(r2.json.links.tickets).pathname;
+    assert.equal(r2.json.links.apple, null);
+    assert.equal(r2.json.links.google, null);
+    assert.doesNotMatch(app.sent.find((m) => m.to === 'ingen@example.com').text, /Wallet/);
     assert.equal((await app.request({ path: `${p2}/apple` })).status, 404);
     assert.equal((await app.request({ path: `${p2}/google` })).status, 404);
   });

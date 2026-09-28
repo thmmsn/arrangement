@@ -227,6 +227,8 @@ export default {
     pdf: 'PDF ticket in the email',
     appleWallet: 'Apple Wallet',
     googleWallet: 'Google Wallet',
+    walletNotConfigured: 'not set up on the server (see README, “Wallet”)',
+    selfCancel: 'Guests can cancel themselves',
     allowLate: 'Allow registration after the deadline (late registration)',
     legendSkin: 'Appearance',
     skinDefault: 'Default',
@@ -284,6 +286,10 @@ export default {
       cancelMany: 'Can some of you not make it after all? Cancel {link} – you choose who – so someone else can have the spot.',
       cancelOneText: 'Can’t make it after all? Cancel here: {url}',
       cancelManyText: 'Can some of you not make it after all? Cancel here – you choose who: {url}',
+      cancelByReply: 'Can’t make it after all? Reply to this email and the organiser will be notified.',
+      ticketLink: 'Ticket',
+      forwardInfo: 'Each person has their own ticket. Forward the links below to the person concerned – with “Cancel” each of them can cancel themselves.',
+      forwardInfoNoCancel: 'Each person has their own ticket. Forward the links below to the person concerned.',
     },
     notification: {
       subject: 'New registration: {name}{extra} – {title}',
@@ -360,6 +366,10 @@ export default {
     googleCalendar: 'Google Calendar',
     directions: 'Directions',
     pdf: 'Download PDF',
+    appleWalletAll: 'Add all to Apple Wallet',
+    googleWalletAll: 'Save all to Google Wallet',
+    pdfAll: 'Download all (PDF)',
+    cancel: 'Cancel',
   },
 
   ticket: {
@@ -379,6 +389,11 @@ export default {
     next: 'Next ticket',
     pdfName: 'ticket',
     pdfNameMany: 'tickets',
+    share: 'Share ticket',
+    shareText: 'Ticket to {title} for {name}',
+    shareCancel: 'Cancel: {url}',
+    copied: 'Copied – paste it into a message to {name}.',
+    cancelAll: 'Cancel',
   },
 
   wallet: {
@@ -432,6 +447,7 @@ export default {
   errors: {
     eventNotFound: 'Event not found.',
     cancelNotFound: 'No registration was found for this link. Perhaps it has already been cancelled?',
+    selfCancelDisabled: 'The organiser has turned off cancelling online. Reply to the confirmation email and the organiser will be notified.',
     invalidSelection: 'Invalid selection of people.',
     selectSomeone: 'Choose who should be cancelled.',
     notEnough: {

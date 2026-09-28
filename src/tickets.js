@@ -59,6 +59,7 @@ export function parseCookies(header) {
 export function createTicketFeature(ctx) {
   const { repo, config, tokens, siteOf, eventUrl, findEventBySlug, notFound, sendPage, logger, adminT } = ctx;
   const imageUrlOf = ctx.imageUrlOf ?? ((event) => event.imageUrl);
+  const { logoFor } = ctx;
   const wallet = config.wallet ?? { apple: null, google: null };
 
   // ---------- Brytere og lenker ----------
@@ -82,19 +83,41 @@ export function createTicketFeature(ctx) {
   const bookingUrl = (event, code) => `${base(event)}${bookingPath(code)}`;
   const calendarUrl = (event) => `${base(event)}/${event.slug}/kalender.ics`;
   const scannerUrl = (event) => `${base(event)}/${event.slug}/skanner#${tokens.scanner(event.id, event.scannerVersion)}`;
+  // Avmelding (/<slug>/avmelding#<nøkkel>), bare når arrangøren lar deltakerne melde seg av selv.
+  // Nøkkelen står etter #, så den havner aldri i serverlogger eller Referer-headere.
+  const cancelPath = (event, token) => (event.features.selfCancel ? `/${event.slug}/avmelding#${token}` : null);
+  const cancelBookingPath = (event, bookingCode) => cancelPath(event, tokens.cancelBooking(bookingCode));
+  const cancelTicketPath = (event, code) => cancelPath(event, tokens.cancelTicket(code));
+  const absolute = (event, path) => (path ? `${base(event)}${path}` : null);
 
   /** Lenkene som vises på billettsiden og i e-posten. `path` er /t/… eller /b/… (uten domene). */
-  function links(event, path, { absolute = false } = {}) {
+  function links(event, path, { absolute: full = false } = {}) {
     const f = features(event);
-    const prefix = absolute ? base(event) : '';
+    const prefix = full ? base(event) : '';
     return {
       pdf: f.pdf ? `${prefix}${path}/pdf` : null,
       apple: f.appleWallet ? `${prefix}${path}/apple` : null,
       google: f.googleWallet ? `${prefix}${path}/google` : null,
-      ics: f.calendar ? (absolute ? calendarUrl(event) : `/${event.slug}/kalender.ics`) : null,
+      ics: f.calendar ? (full ? calendarUrl(event) : `/${event.slug}/kalender.ics`) : null,
       googleCalendar: f.calendar ? googleCalendarUrl({ event, eventUrl: eventUrl(event) }) : null,
       directions: directionsUrl(event),
       appleDirections: appleDirectionsUrl(event),
+    };
+  }
+
+  /**
+   * Alt for én person, til den som meldte på: billettlenke, Wallet, PDF og avmelding. Den som melder
+   * på flere, får alt samlet og videresender selv til hver enkelt.
+   */
+  function personLinks(event, person) {
+    const f = features(event);
+    const ticket = f.tickets ? ticketUrl(event, person.code) : null;
+    return {
+      ticket,
+      apple: f.appleWallet ? `${ticket}/apple` : null,
+      google: f.googleWallet ? `${ticket}/google` : null,
+      pdf: f.pdf ? `${ticket}/pdf` : null,
+      cancel: absolute(event, cancelTicketPath(event, person.code)),
     };
   }
 
@@ -265,14 +288,14 @@ export function createTicketFeature(ctx) {
 
   const noStore = (res) => res.set('Cache-Control', 'no-store');
 
-  function sendPdf(res, event, persons, name) {
-    return ticketsPdf({
-      event, site: siteOf(event), timeZone: config.timeZone, eventUrl: eventUrl(event), tickets: ticketList(event, persons),
-    }).then((pdf) => {
-      noStore(res).type('application/pdf')
-        .set('Content-Disposition', `inline; filename="${name}"`)
-        .send(pdf);
+  async function sendPdf(res, event, persons, name) {
+    const site = siteOf(event);
+    const pdf = await ticketsPdf({
+      event, site, timeZone: config.timeZone, eventUrl: eventUrl(event), tickets: ticketList(event, persons), logo: await logoFor(site.theme),
     });
+    noStore(res).type('application/pdf')
+      .set('Content-Disposition', `inline; filename="${name}"`)
+      .send(pdf);
   }
 
   function sendApple(res, event, persons) {
@@ -375,7 +398,7 @@ export function createTicketFeature(ctx) {
       kind,
       event: ticketEvent(event),
       tickets: ticketList(event, persons).map(({ id, url, code, ...rest }) => ({ ...rest, code: formatCode(code), qr: `${rest.path}/qr.svg` })),
-      links: links(event, path),
+      links: { ...links(event, path), cancel: null },
       // Dørvakt for dette arrangementet: siden sjekker inn. For et annet arrangement: rød skjerm.
       staff: staff ? { name: staff.name } : null,
       wrongEvent: !staff && staffEvents(req).length > 0,
@@ -413,6 +436,11 @@ export function createTicketFeature(ctx) {
       req.t = siteOf(event).t;
       const payload = pagePayload(req, event, booking.persons, bookingPath(booking.code), 'booking');
       payload.contactName = booking.contactName;
+      // Den som meldte på, kan melde av hele påmeldingen eller hver enkelt, og videresende hver
+      // billett med sin egen avmeldingslenke. Enkeltbilletten (/t/, det QR-koden peker på) får
+      // aldri avmelding – se tokens.js.
+      payload.links.cancel = cancelBookingPath(event, booking.code);
+      payload.tickets.forEach((ticket, i) => { ticket.cancel = absolute(event, cancelTicketPath(event, booking.persons[i].code)); });
       // Dørvakten får også id-ene, så hver billett kan sjekkes inn fra siden.
       if (payload.staff) payload.tickets.forEach((ticket, i) => { ticket.id = booking.persons[i].id; });
       res.json(payload);
@@ -534,7 +562,8 @@ export function createTicketFeature(ctx) {
   // ---------- E-post ----------
 
   /**
-   * Lenker og vedlegg til bekreftelsen etter en påmelding: billettside, Wallet, kalender og PDF.
+   * Lenker og vedlegg til bekreftelsen etter en påmelding: billettside, Wallet, kalender, PDF og
+   * avmelding – for hele påmeldingen og for hver person.
    * Svikter PDF-en, sendes e-posten uten – påmeldingen er det viktigste.
    */
   async function confirmationExtras(event, bookingCode) {
@@ -554,7 +583,9 @@ export function createTicketFeature(ctx) {
       try {
         attachments.push({
           filename: `${site.t(booking.persons.length > 1 ? 'ticket.pdfNameMany' : 'ticket.pdfName')}-${fileSlug(event.title)}.pdf`,
-          content: await ticketsPdf({ event, site, timeZone: config.timeZone, eventUrl: eventUrl(event), tickets: ticketList(event, booking.persons) }),
+          content: await ticketsPdf({
+            event, site, timeZone: config.timeZone, eventUrl: eventUrl(event), tickets: ticketList(event, booking.persons), logo: await logoFor(site.theme),
+          }),
           contentType: 'application/pdf',
         });
       } catch (err) {
@@ -562,7 +593,13 @@ export function createTicketFeature(ctx) {
       }
     }
     return {
-      links: { tickets: f.tickets ? bookingUrl(event, bookingCode) : null, ...links(event, path, { absolute: true }) },
+      links: {
+        tickets: f.tickets ? bookingUrl(event, bookingCode) : null,
+        ...links(event, path, { absolute: true }),
+        cancel: absolute(event, cancelBookingPath(event, bookingCode)),
+      },
+      // Samme rekkefølge som booking.persons.
+      persons: (booking?.persons ?? []).map((person) => personLinks(event, person)),
       attachments,
     };
   }

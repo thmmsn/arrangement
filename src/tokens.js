@@ -10,6 +10,12 @@
 //   påmelding:   /b/<nummer><signatur>   alle billettene i én påmelding
 //   dørvakt:     /<slug>/skanner#<nøkkel>, nøkkelen avhenger av arrangementet og en versjon, så
 //                arrangøren kan lage en ny lenke (og stenge ute alle som hadde den gamle).
+//   avmelding:   /<slug>/avmelding#<nummer><signatur>, med eget formål for hele påmeldingen
+//                (påmeldingsnummeret) og for én person (billettnummeret).
+//
+// Avmeldingsnøkkelen for én person er med vilje en ANNEN nøkkel enn billettnøkkelen: billettlenken
+// står i QR-koden, som vises fram i døra, i Wallet og på utskrifter. Den som ser eller tar bilde av
+// QR-koden, skal kunne vise billetten – men ikke melde personen av.
 //
 // Signaturen er 128 bit – umulig å gjette. Et ugyldig forsøk gir samme nakne 404 som alt annet.
 
@@ -45,6 +51,12 @@ export function createTokens(secret) {
     parseTicket: verify('ticket'),
     booking: sign('booking'),
     parseBooking: verify('booking'),
+    /** Avmelding for hele påmeldingen (fra påmeldingsnummeret). */
+    cancelBooking: sign('cancel-booking'),
+    parseCancelBooking: verify('cancel-booking'),
+    /** Avmelding for én person (fra billettnummeret) – til å videresende sammen med billetten. */
+    cancelTicket: sign('cancel-ticket'),
+    parseCancelTicket: verify('cancel-ticket'),
     /** Dørvaktnøkkelen for et arrangement. Ny versjon = ny nøkkel, og den gamle slutter å virke. */
     scanner: (eventId, version) => mac('scanner', `${eventId}:${version}`),
     scannerMatches: (key, eventId, version) => typeof key === 'string' && equal(key, mac('scanner', `${eventId}:${version}`)),

@@ -10,7 +10,7 @@ Et lite og enkelt alternativ til Hoopla for påmelding til arrangementer:
 - **Den som melder på kan legge til flere personer** i samme skjema. Hver person er én gjest og tar én plass, og hver person svarer på de egendefinerte feltene (f.eks. allergier). Arrangøren bestemmer hvor mange som kan meldes på om gangen (standard 10, 1 = bare seg selv).
 - **Antall påmeldte vises** på arrangementssiden (kan skrus av), med ledige plasser hvis det er et tak.
 - **E-post via [Resend](https://resend.com)**: én bekreftelse til den som meldte på (med alle personene), ett varsel til arrangøren, admin-lenke ved opprettelse og kvittering ved avmelding.
-- **Avmelding per person**: avmeldingslenken lar deg velge hvem i påmeldingen som skal meldes av.
+- **Avmelding**: den som meldte på, kan melde av hele eller deler av påmeldingen, og hver person har sin egen avmeldingslenke til å videresende. Arrangøren kan slå avmelding av per arrangement.
 - **All administrasjon under `/admin`** – enkelt å skjule bak Cloudflare Access, på eget subdomene eller egen sti.
 - **Utseendet styres med miljøvariabler**: navn, logo, farger, fonter, hjørneradius og tekster.
 - **Flere domener, én database og én admin**: hvert domene er et *nettsted* med eget språk (norsk eller engelsk), tema, avsender og base-URL.
@@ -19,7 +19,7 @@ Et lite og enkelt alternativ til Hoopla for påmelding til arrangementer:
 - **Innsjekking i døra**: en egen dørvaktlenke. Dørvakten kan skanne QR-koden med vanlig kamera på iPhone, bruke skanneren på siden, taste inn billettnummeret eller søke på navn. Det gir grønt, gult eller rødt svar med «Angre», og innsjekking virker også uten nett.
 - **Kalenderfil (.ics)** til deltakerne, og lenke til Google Kalender.
 - **Sted fra Kartverket** (adresse, stedsnavn eller gnr/bnr) med kartpunkt, som gir **veibeskrivelse** på sidene, i e-posten og i Wallet. Wallet-kortet dukker opp av seg selv når tiden nærmer seg og man er i nærheten.
-- **Brytere per arrangement**: billett, kalender, PDF og Wallet er på som standard og kan slås av hver for seg.
+- **Brytere per arrangement**: billett, kalender, PDF, Wallet og selvavmelding er på som standard og kan slås av hver for seg.
 - **Skins**: arrangøren velger utseende per arrangement (Mørk, Lys, Glass, Glød, Fjord, Høy kontrast). Eieren kan legge til egne, se [docs/skins.md](docs/skins.md).
 - **Livsløpet er automatisk**:
   - Den første e-posten har alle lenkene: admin, dørvakt og avlys.
@@ -39,11 +39,11 @@ Produksjon: `docker compose` med Cloudflare Tunnel – ingen åpne porter på se
 | Adresse | Hvem | Hva |
 |---|---|---|
 | `/<hash>` | Alle som får lenken | Arrangementsside med påmelding |
-| `/<hash>/avmelding#<nøkkel>` | Den som meldte på (lenke i e-posten) | Avmelding av hele eller deler av påmeldingen |
+| `/<hash>/avmelding#<nøkkel>` | Den som meldte på (e-posten, etter påmeldingen og `/b/…`), eller én person (videresendt) | Avmelding av hele eller deler av påmeldingen – eller bare den ene personen |
 | `/admin/ny` | Administrator | Opprett nytt arrangement |
 | `/admin/<hash>#<nøkkel>` | Arrangøren (lenke i e-posten) | Påmeldte, innsjekking, dørvaktlenke, redigering, CSV, stenging, avlysning, sletting |
 | `/admin/<hash>/avlys#<nøkkel>` | Arrangøren og tjenesteadministratoren (lenke i e-posten) | Samme side, åpnet på «Avlys arrangement» |
-| `/b/<nøkkel>` | Den som meldte på (lenke i e-posten) | Alle billettene i påmeldingen, med Wallet, PDF og kalender |
+| `/b/<nøkkel>` | Den som meldte på (lenke i e-posten) | Alle billettene i påmeldingen, med Wallet, PDF, kalender, avmelding og «Del billetten» per person |
 | `/t/<nøkkel>` | Gjesten – og det QR-koden peker på | Én billett. For en innlogget dørvakt: innsjekking |
 | `/<hash>/kalender.ics` | Alle som har lenken til arrangementet | Kalenderfil |
 | `/<hash>/skanner#<nøkkel>` | Dørvakter (lenke fra arrangøren) | Innsjekking: skanner, billettnummer og navnesøk |
@@ -275,7 +275,19 @@ En test sjekker at alle språk har nøyaktig de samme nøklene og plassholderne,
 
 ### Billetten
 
-Hver person i en påmelding får en billett med QR-kode og en **dørkode** på 5 bokstaver, for eksempel `FFRXK`. Bekreftelses-e-posten har en knapp til siden med alle billettene i påmeldingen (`/b/…`). Der kan man bla mellom billettene (1 / 3), laste ned PDF, legge dem i Apple Wallet eller Google Wallet og legge arrangementet i kalenderen. PDF-billetten (én side per person) og kalenderfilen ligger også ved e-posten. Etter påmeldingen vises knappen «Vis billettene» med én gang.
+Hver person i en påmelding får en billett med QR-kode og en **dørkode** på 5 bokstaver, for eksempel `FFRXK`.
+
+**Den som melder på, får alt – også for de andre.** Ingen andre enn den som melder på får e-post, og den som melder på videresender selv til hver enkelt. Derfor får den som meldte på:
+
+| Hvor | Hva |
+|---|---|
+| **Rett etter påmeldingen** (på siden) | «Vis billettene», «Legg alle i Apple Wallet», «Lagre alle i Google Wallet», «Last ned alle (PDF)», kalender og «Meld av» |
+| **Bekreftelses-e-posten** | De samme knappene øverst (Wallet som tydelige svarte knapper). Ved flere personer: under hver person dørkode og egne lenker til *Billett*, *Apple Wallet*, *Google Wallet*, *PDF* og *Meld av*, klare til å videresendes. PDF-billetten (én side per person) og kalenderfilen ligger ved. |
+| **Siden med alle billettene** (`/b/…`) | Bla mellom billettene (1 / 3). Hver billett har «Del billetten» (telefonens delingsmeny, eller kopier på PC), Wallet og PDF for den ene billetten. Nederst Wallet og PDF for alle, kalender og «Meld av». |
+
+Wallet-knappene vises bare når Wallet er satt opp på serveren og slått på for arrangementet (se [Wallet](#apple-wallet)). Er de ikke satt opp, står det i loggen ved oppstart, og bryterne i skjemaet er grået ut med «ikke satt opp på serveren».
+
+**PDF-billetten** er formet som en billett med avrivningskant: nettstedets logo (`LOGO_URL`) øverst på nettstedets bakgrunnsfarge – samme kontrast som på nettsiden – med «BILLETT» og «1 / 3» til høyre, deretter tittel, tid, sted og navn, og under avrivningskanten QR-koden og dørkoden. Logoen kan være PNG, JPEG eller SVG (tegnes som vektorer, skarp på alle skrivere). Den leses fra `branding/` når `LOGO_URL=/assets/custom/<fil>`, eller hentes over https. WebP kan ikke brukes i PDF; da står nettstedsnavnet øverst, og loggen sier fra ved oppstart. Tekstfargene kontrollsjekkes mot bakgrunnen (WCAG), så billetten er lesbar også med mørkt tema.
 
 **QR-koden er en lenke:** `https://arrangement.domain.no/t/<billettnummer><signatur>`. Da kan den skannes med vanlig kamera på alle telefoner. Signaturen er
 
@@ -284,6 +296,20 @@ $$\text{signatur} = \mathrm{HMAC\text{-}SHA256}(\text{hemmelighet},\ \texttt{tic
 forkortet til 128 bit. Hemmeligheten lages tilfeldig i databasen første gang appen starter. Serveren lagrer bare nummeret og regner ut lenken på nytt når den trengs (e-post, PDF, Wallet). En lekket database gir dermed ikke billettlenkene. En falsk eller endret lenke gir den nakne 404-en. Påmeldingslenken (`/b/…`) signeres med et annet formål, så den ene kan aldri brukes som den andre.
 
 Billettlenken gir bare rett til å *se* billetten, altså navnet og arrangementet. Innsjekking krever i tillegg at telefonen er logget inn som dørvakt.
+
+### Avmelding
+
+Avmeldingslenken er `/<hash>/avmelding#<nøkkel>`. Nøkkelen står etter `#`, så den havner aldri i serverlogger eller `Referer`. Det finnes to slags nøkler, begge avledet med HMAC som billettnøkkelen, men med egne formål:
+
+$$\text{påmelding} = \text{påmeldingsnummer} \,\|\, \mathrm{HMAC\text{-}SHA256}(\text{hemmelighet},\ \texttt{cancel-booking:} \,\|\, \text{påmeldingsnummer})$$
+
+$$\text{person} = \text{billettnummer} \,\|\, \mathrm{HMAC\text{-}SHA256}(\text{hemmelighet},\ \texttt{cancel-ticket:} \,\|\, \text{billettnummer})$$
+
+(signaturen forkortet til 128 bit). Påmeldingens nøkkel lar deg velge hvem som skal meldes av. Personens nøkkel melder bare av den ene personen, og siden snakker da til personen selv («Hei Kari! Vil du melde deg av?»). Den som meldte på, får kvittering, og arrangøren får varsel.
+
+**Hvorfor ikke bare billettlenken?** Billettlenken står i QR-koden, som vises fram i døra, ligger i Wallet og skrives ut. Den som ser eller tar bilde av QR-koden, skal kunne se billetten, men ikke melde personen av. Derfor har enkeltbilletten (`/t/…`) aldri «Meld av», og verken billett- eller påmeldingsnøkkelen virker som avmeldingsnøkkel.
+
+**Bryteren «Deltakerne kan melde seg av selv»** (på som standard): Slått av, vises ingen avmeldingslenker, og API-et avviser avmelding med `403`, også for lenker som ble sendt ut mens den var på. E-posten sier i stedet «Svar på denne e-posten, så får arrangøren beskjed» (svaret går til arrangøren).
 
 ### Dørvaktlenken
 
@@ -395,7 +421,7 @@ Oppsett:
 
 Til Google har godkjent kontoen for produksjon, kan bare testbrukerne du legger til i Wallet Console lagre kortene.
 
-**Brytere:** Wallet-bryterne vises i skjemaet bare når tjenesten er satt opp. Mangler en fil eller variabel, slås Wallet av med en advarsel i loggen, og resten virker som før.
+**Brytere:** Wallet-bryterne er grået ut i skjemaet («ikke satt opp på serveren») når tjenesten ikke er satt opp; den lagrede verdien beholdes. Mangler en fil eller variabel, slås Wallet av med en advarsel i loggen, og resten virker som før. Ved oppstart står det alltid i loggen om Apple Wallet og Google Wallet er i bruk.
 
 ---
 
@@ -501,7 +527,7 @@ Alt settes i `.env` – se `.env.example` for hele lista med forklaringer. Ugyld
 | `FOOTER_TEXT`, `PRIVACY_URL` | Bunntekst og lenke til personvernerklæring |
 | `CUSTOM_CSS_URL` | Eget stilark for alt annet |
 
-**Egne filer:** Legg logo, favicon eller stilark i mappen `branding/`. De blir tilgjengelige som `/assets/custom/<filnavn>` – både lokalt og i Docker (mappen monteres inn). Eksempel: `LOGO_URL=/assets/custom/logo.svg`.
+**Egne filer:** Legg logo, favicon eller stilark i mappen `branding/`. De blir tilgjengelige som `/assets/custom/<filnavn>` – både lokalt og i Docker (mappen monteres inn). Eksempel: `LOGO_URL=/assets/custom/logo.svg`. Logoen brukes også i PDF-billetten, og må da være PNG, JPEG eller SVG.
 
 Nyanser som hover-farger og lyse bakgrunner på meldinger regnes ut fra grunnfargene med CSS `color-mix()`, så hele siden følger med når du bytter `COLOR_ACCENT`.
 
@@ -548,7 +574,7 @@ Skinnen legges oppå temaet og gjelder sidene gjestene og dørvaktene ser. Admin
 meta            Hemmeligheten billett-, påmeldings- og dørvaktnøklene avledes fra
 events          Arrangementet (nettsted, tittel, tid, sted med kartpunkt, kapasitet, felter, brytere,
                 skin, etteranmelding, avlysning, dørvaktversjon, når rapporten ble sendt …)
- └─ bookings    Én påmelding: kontaktperson, påmeldingsnummer, avmeldingsnøkkel (hash), etteranmelding
+ └─ bookings    Én påmelding: kontaktperson, påmeldingsnummer, etteranmelding
      └─ registrations   Én rad per gjest: navn, valgfri e-post, svar, billettnummer og innsjekking
 ```
 
@@ -563,6 +589,9 @@ Databasen oppgraderes automatisk ved oppstart (`PRAGMA user_version`):
 | 3 | Nettsted per arrangement (`events.site`). Eksisterende arrangementer havner på hovednettstedet (`main`). |
 | 4 | Billetter, innsjekking, kartpunkt, brytere, etteranmelding, skin og avlysning. Eksisterende påmeldinger får billettnummer, og arrangementer med passert frist får ingen rapport ved oppgraderingen. |
 | 5 | Dørkode per person (eksisterende påmeldinger får en) og tabellen `event_images` for opplastede bilder. |
+| 6 | Bryter for selvavmelding (`events.self_cancel_enabled`, på). Den tilfeldige avmeldingsnøkkelen (`bookings.cancel_token_hash`) fjernes – avmeldingsnøklene avledes nå fra påmeldings- og billettnummeret. `bookings` bygges opp på nytt med de samme id-ene. |
+
+Migreringene kjøres med fremmednøkler slått av, og hver migrering kjører `PRAGMA foreign_key_check` før den lagres (slik SQLite anbefaler for ombygging av tabeller). Ellers ville `DROP TABLE bookings` i versjon 6 slettet alle deltakerne via `ON DELETE CASCADE`.
 
 ## Prosjektstruktur
 
@@ -581,7 +610,8 @@ src/
   tokens.js      Signerte billett-, påmeldings- og dørvaktnøkler (HMAC)
   tickets.js     Billettsider, PDF, Wallet, kalender og innsjekking (sider og API)
   qr.js          QR-koder (SVG og rutenett til PDF)
-  pdf.js         PDF-billett
+  pdf.js         PDF-billett (billettform med logo, QR-kode og dørkode)
+  logo.js        Logoen til PDF-billetten (fra branding/ eller https; PNG, JPEG, SVG)
   calendar.js    Kalenderfil (.ics) og Google Kalender-lenke
   appleWallet.js Apple Wallet-kort (.pkpass/.pkpasses) med PKCS#7-signatur
   googleWallet.js Google Wallet-lenke (JWT)
@@ -612,9 +642,9 @@ test/            Tester (node:test)
 | Metode | Sti | Tilgang |
 |---|---|---|
 | `GET` | `/api/events/:slug` | Offentlig. Ukjent arrangement gir naken `404` |
-| `POST` | `/api/events/:slug/registrations` | Offentlig. Body: `{ name, email, answers, guests: [{ name, email?, answers }] }` |
-| `POST` | `/api/events/:slug/cancel/lookup` | Avmeldingsnøkkel i body. Gir personene i påmeldingen |
-| `POST` | `/api/events/:slug/cancel` | Avmeldingsnøkkel i body. `ids` (valgfritt) velger hvem; uten `ids` meldes alle av |
+| `POST` | `/api/events/:slug/registrations` | Offentlig. Body: `{ name, email, answers, guests: [{ name, email?, answers }] }`. Svaret har `links`: `tickets`, `apple`, `google`, `pdf`, `ics`, `googleCalendar` og `cancel` (`null` når av) |
+| `POST` | `/api/events/:slug/cancel/lookup` | Avmeldingsnøkkel i body. Gir personene nøkkelen kan melde av, og `personal` (én persons egen lenke). `403` når avmelding er slått av |
+| `POST` | `/api/events/:slug/cancel` | Avmeldingsnøkkel i body. `ids` (valgfritt) velger hvem; uten `ids` meldes alle nøkkelen gjelder av. `403` når avmelding er slått av |
 | `GET` | `/api/admin/config` | Admin-porten. Gir bl.a. nettstedene som kan velges |
 | `POST` | `/api/admin/events` | Admin-porten (krever Cloudflare Access). `site` velger nettsted (standard hovednettstedet) |
 | `GET` / `PUT` / `DELETE` | `/api/admin/events/:slug` | Admin-porten + `Authorization: Bearer <admin-nøkkel>` |
@@ -641,6 +671,5 @@ test/            Tester (node:test)
 - Påminnelse på e-post dagen før
 - Gjest kan endre svarene sine, eller legge til personer i en eksisterende påmelding
 - Felter som bare spørres én gang per påmelding (f.eks. telefon til kontaktpersonen), ikke per person
-- Egen bekreftelse til personer som er lagt til med e-postadresse
 - Oppdatering av Wallet-kort som allerede er lagt til (Apples push-tjeneste og Googles API)
 - Betaling (f.eks. Vipps eller Stripe)

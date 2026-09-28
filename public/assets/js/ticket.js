@@ -45,8 +45,10 @@ function render(data) {
         ? [h('dt', {}, t('event.where')), h('dd', {}, event.location, ' ', directionsLink(links))]
         : null,
     ),
-    carousel(tickets, event, staff),
-    actions(links),
+    carousel(tickets, event, staff, links),
+    actions(links, tickets.length > 1),
+    // Bare på siden med alle billettene (/b/): den som meldte på, velger hvem som skal meldes av.
+    links.cancel && !staff ? h('p', {}, h('a', { class: 'btn danger small', href: links.cancel }, t('ticket.cancelAll'))) : null,
     h('p', {}, h('a', { href: event.url }, t('ticket.toEvent'))),
   ].filter(Boolean));
   keepScreenOn();
@@ -61,8 +63,10 @@ function directionsLink(links) {
 
 // Flere billetter vises side om side og blas med sveip (CSS scroll-snap) eller knappene – som i
 // Wallet. «1 / 3» viser hvor man er.
-function carousel(tickets, event, staff) {
-  const track = h('div', { class: 'ticket-track' }, tickets.map((ticket) => ticketCard(ticket, event, staff)));
+function carousel(tickets, event, staff, links) {
+  // Flere billetter i én påmelding: hver billett kan deles, legges i Wallet og lastes ned for seg.
+  const tools = isBooking && tickets.length > 1 && !staff;
+  const track = h('div', { class: 'ticket-track' }, tickets.map((ticket) => ticketCard(ticket, event, staff, tools ? links : null)));
   if (tickets.length === 1) return track;
 
   const position = h('span', { class: 'ticket-position', 'aria-live': 'polite' });
@@ -83,7 +87,7 @@ function carousel(tickets, event, staff) {
   return h('div', { class: 'ticket-carousel' }, track, h('div', { class: 'ticket-nav' }, prev, position, next));
 }
 
-function ticketCard(ticket, event, staff) {
+function ticketCard(ticket, event, staff, links) {
   const tz = event.timeZone;
   return h('article', { class: `ticket-card${ticket.checkedInAt ? ' used' : ''}` },
     h('div', { class: 'ticket-qr' }, h('img', { src: ticket.qr, alt: ticket.code, width: 260, height: 260 })),
@@ -98,7 +102,39 @@ function ticketCard(ticket, event, staff) {
       : null,
     // På påmeldingssiden kan en dørvakt sjekke inn hver billett for seg.
     staff && ticket.id && !ticket.checkedInAt ? staffButton(event, ticket) : null,
+    links ? ticketTools(ticket, event, links) : null,
   );
+}
+
+/**
+ * Del, Wallet og PDF for én billett. «Del billetten» sender billettlenken – og personens egen
+ * avmeldingslenke når arrangøren tillater avmelding – til den billetten gjelder.
+ */
+function ticketTools(ticket, event, links) {
+  const share = h('button', { class: 'btn small', type: 'button' }, t('ticket.share'));
+  share.addEventListener('click', () => shareTicket(ticket, event, share));
+  return h('div', { class: 'ticket-tools' },
+    share,
+    links.apple ? h('a', { class: 'btn small wallet-btn apple', href: `${ticket.path}/apple` }, t('links.appleWallet')) : null,
+    links.google ? h('a', { class: 'btn small wallet-btn google', href: `${ticket.path}/google`, rel: 'noopener' }, t('links.googleWallet')) : null,
+    links.pdf ? h('a', { class: 'btn small secondary', href: `${ticket.path}/pdf`, target: '_blank' }, t('links.pdf')) : null);
+}
+
+// Delingsmenyen på telefonen (Web Share). Nettlesere uten den (f.eks. Firefox på PC) kopierer teksten.
+async function shareTicket(ticket, event, button) {
+  const text = [
+    t('ticket.shareText', { title: event.title, name: ticket.name }),
+    new URL(ticket.path, location.origin).href,
+    ticket.cancel ? t('ticket.shareCancel', { url: ticket.cancel }) : null,
+  ].filter(Boolean).join('\n');
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: t('ticket.documentTitle', { title: event.title }), text });
+    } catch { /* avbrutt av brukeren */ }
+    return;
+  }
+  await navigator.clipboard.writeText(text);
+  button.textContent = t('ticket.copied', { name: ticket.name });
 }
 
 function staffButton(event, ticket) {
@@ -117,11 +153,12 @@ function staffButton(event, ticket) {
   return button;
 }
 
-function actions(links) {
+// Wallet og PDF for alle billettene på siden (med flere billetter: «Legg alle i …»).
+function actions(links, several) {
   const items = [
-    links.apple && h('a', { class: 'btn wallet-btn apple', href: links.apple }, t('links.appleWallet')),
-    links.google && h('a', { class: 'btn wallet-btn google', href: links.google, rel: 'noopener' }, t('links.googleWallet')),
-    links.pdf && h('a', { class: 'btn secondary', href: links.pdf, target: '_blank' }, t('links.pdf')),
+    links.apple && h('a', { class: 'btn wallet-btn apple', href: links.apple }, t(several ? 'links.appleWalletAll' : 'links.appleWallet')),
+    links.google && h('a', { class: 'btn wallet-btn google', href: links.google, rel: 'noopener' }, t(several ? 'links.googleWalletAll' : 'links.googleWallet')),
+    links.pdf && h('a', { class: 'btn secondary', href: links.pdf, target: '_blank' }, t(several ? 'links.pdfAll' : 'links.pdf')),
     links.ics && h('a', { class: 'btn secondary', href: links.ics }, t('links.calendar')),
     links.googleCalendar && h('a', { class: 'btn secondary', href: links.googleCalendar, target: '_blank', rel: 'noopener' }, t('links.googleCalendar')),
   ].filter(Boolean);

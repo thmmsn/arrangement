@@ -14,7 +14,7 @@ async function setup(overrides = {}) {
   const created = await createEvent(app, overrides);
   const { slug, adminKey, scannerUrl } = created;
   const reg = await register(app, slug, { guests: ['Kari Nordmann'] });
-  const booking = await app.request({ path: pathOf(reg.json.ticketsUrl).replace('/b/', '/api/bookings/') });
+  const booking = await app.request({ path: pathOf(reg.json.links.tickets).replace('/b/', '/api/bookings/') });
   const ticketPaths = booking.json.tickets.map((t) => t.path);
   const tokens = ticketPaths.map((p) => p.slice(3));
   const key = scannerUrl.split('#')[1];
@@ -90,7 +90,7 @@ test('billett til et annet arrangement gir «feil arrangement»', async () => {
   const { app, checkin } = await setup();
   const other = await createEvent(app, { title: 'Et annet arrangement' });
   const reg = await register(app, other.slug, { email: 'annen@example.com' });
-  const data = await app.request({ path: pathOf(reg.json.ticketsUrl).replace('/b/', '/api/bookings/') });
+  const data = await app.request({ path: pathOf(reg.json.links.tickets).replace('/b/', '/api/bookings/') });
   const res = await checkin({ token: data.json.tickets[0].path.slice(3) });
   assert.equal(res.status, 409);
   assert.equal(res.json.result, 'wrong_event');
@@ -123,7 +123,7 @@ test('dørvakt for et annet arrangement får beskjed om feil arrangement', async
   const { app, staff } = await setup();
   const other = await createEvent(app);
   const reg = await register(app, other.slug, { email: 'annen@example.com' });
-  const data = await app.request({ path: pathOf(reg.json.ticketsUrl).replace('/b/', '/api/bookings/'), headers: staff });
+  const data = await app.request({ path: pathOf(reg.json.links.tickets).replace('/b/', '/api/bookings/'), headers: staff });
   assert.equal(data.json.staff, null);
   assert.equal(data.json.wrongEvent, true);
 });
@@ -207,7 +207,7 @@ test('dørkode: 5 bokstaver per person, unik i arrangementet, i e-posten og i d�
   // Dørkoden gjelder bare sitt eget arrangement.
   const other = await createEvent(app);
   const reg = await register(app, other.slug, { email: 'annen@example.com' });
-  const data = await app.request({ path: pathOf(reg.json.ticketsUrl).replace('/b/', '/api/bookings/') });
+  const data = await app.request({ path: pathOf(reg.json.links.tickets).replace('/b/', '/api/bookings/') });
   const foreign = data.json.tickets[0].doorCode;
   if (!codes.includes(foreign)) assert.equal((await checkin({ code: foreign })).json.result, 'invalid');
 

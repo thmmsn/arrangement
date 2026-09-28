@@ -48,7 +48,7 @@ const event = {
   capacity: 10,
   fields: [{ id: 'f1', label: 'Allergier', type: 'text' }],
 };
-const urls = { eventUrl: 'https://events.example.com/abc', cancelUrl: 'https://events.example.com/abc/avmelding#t', timeZone: 'Europe/Oslo' };
+const urls = { eventUrl: 'https://events.example.com/abc', timeZone: 'Europe/Oslo', links: { cancel: 'https://events.example.com/abc/avmelding#t' } };
 
 test('brukerinnhold escapes i HTML-e-posten', () => {
   const message = guestConfirmation({
@@ -77,6 +77,36 @@ test('bekreftelsen til en gruppe går til kontaktpersonen og lister alle persone
   assert.match(message.text, /Du har meldt på 3 personer: Ola, Kari og Per\./);
   assert.match(message.text, /Person 2\nNavn: Kari\nAllergier: Nøtter/);
   assert.match(message.text, /du velger selv hvem: https:\/\/events\.example\.com\/abc\/avmelding#t/);
+});
+
+test('ved flere personer får den som meldte på alt for hver person, til å videresende', () => {
+  const personLinks = (n) => ({
+    ticket: `https://e.no/t/${n}`, apple: `https://e.no/t/${n}/apple`, google: `https://e.no/t/${n}/google`,
+    pdf: `https://e.no/t/${n}/pdf`, cancel: `https://e.no/abc/avmelding#p${n}`,
+  });
+  const booking = { ...group, persons: group.persons.map((p, i) => ({ ...p, doorCode: `KODE${i}`, links: personLinks(i) })) };
+  const links = {
+    tickets: 'https://e.no/b/x', apple: 'https://e.no/b/x/apple', google: 'https://e.no/b/x/google', pdf: 'https://e.no/b/x/pdf',
+    cancel: 'https://e.no/abc/avmelding#alle',
+  };
+  const message = guestConfirmation({ event, booking, ...urls, links });
+  // Alle billettene samlet, med Wallet for alle.
+  assert.match(message.text, /Vis billettene: https:\/\/e\.no\/b\/x\n/);
+  assert.match(message.text, /Legg alle i Apple Wallet: https:\/\/e\.no\/b\/x\/apple/);
+  assert.match(message.text, /Lagre alle i Google Wallet: https:\/\/e\.no\/b\/x\/google/);
+  assert.match(message.text, /Videresend lenkene under/);
+  // Hver person: dørkode, billett, Wallet, PDF og egen avmelding.
+  assert.match(message.text, /Person 2\nNavn: Kari\nAllergier: Nøtter\nDørkode: KODE1\nBillett: https:\/\/e\.no\/t\/1\nLegg til i Apple Wallet: https:\/\/e\.no\/t\/1\/apple\nLagre i Google Wallet: https:\/\/e\.no\/t\/1\/google\nLast ned PDF: https:\/\/e\.no\/t\/1\/pdf\nMeld av: https:\/\/e\.no\/abc\/avmelding#p1/);
+  // Wallet-knappene i HTML-en er tydelige knapper, ikke bare tekstlenker.
+  assert.match(message.html, /<a href="https:\/\/e\.no\/b\/x\/apple" style="display:inline-block;background:#000000;/);
+  assert.match(message.html, /href="https:\/\/e\.no\/abc\/avmelding#p2"/);
+  assert.match(message.text, /du velger selv hvem: https:\/\/e\.no\/abc\/avmelding#alle$/);
+});
+
+test('uten avmelding på nettet står det at man svarer på e-posten', () => {
+  const message = guestConfirmation({ event, booking: group, ...urls, links: {} });
+  assert.doesNotMatch(message.text, /avmelding/);
+  assert.match(message.text, /Svar på denne e-posten, så får arrangøren beskjed\.$/);
 });
 
 test('arrangøren får én e-post for hele gruppen', () => {

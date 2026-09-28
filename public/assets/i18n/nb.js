@@ -227,6 +227,8 @@ export default {
     pdf: 'PDF-billett i e-posten',
     appleWallet: 'Apple Wallet',
     googleWallet: 'Google Wallet',
+    walletNotConfigured: 'ikke satt opp på serveren (se README, «Wallet»)',
+    selfCancel: 'Deltakerne kan melde seg av selv',
     allowLate: 'Tillat påmelding etter fristen (etteranmelding)',
     legendSkin: 'Utseende',
     skinDefault: 'Standard',
@@ -285,6 +287,10 @@ export default {
       cancelMany: 'Kan noen av dere ikke komme likevel? Meld av {link} – du velger selv hvem, så får noen andre plassen.',
       cancelOneText: 'Kan du ikke komme likevel? Meld deg av her: {url}',
       cancelManyText: 'Kan noen av dere ikke komme likevel? Meld av her – du velger selv hvem: {url}',
+      cancelByReply: 'Kan du ikke komme likevel? Svar på denne e-posten, så får arrangøren beskjed.',
+      ticketLink: 'Billett',
+      forwardInfo: 'Hver person har sin egen billett. Videresend lenkene under til den det gjelder – med «Meld av» kan hver enkelt melde seg av selv.',
+      forwardInfoNoCancel: 'Hver person har sin egen billett. Videresend lenkene under til den det gjelder.',
     },
     notification: {
       subject: 'Ny påmelding: {name}{extra} – {title}',
@@ -361,6 +367,10 @@ export default {
     googleCalendar: 'Google Kalender',
     directions: 'Veibeskrivelse',
     pdf: 'Last ned PDF',
+    appleWalletAll: 'Legg alle i Apple Wallet',
+    googleWalletAll: 'Lagre alle i Google Wallet',
+    pdfAll: 'Last ned alle (PDF)',
+    cancel: 'Meld av',
   },
 
   ticket: {
@@ -380,6 +390,11 @@ export default {
     next: 'Neste billett',
     pdfName: 'billett',
     pdfNameMany: 'billetter',
+    share: 'Del billetten',
+    shareText: 'Billett til {title} for {name}',
+    shareCancel: 'Meld av: {url}',
+    copied: 'Kopiert – lim inn i en melding til {name}.',
+    cancelAll: 'Meld av',
   },
 
   wallet: {
@@ -433,6 +448,7 @@ export default {
   errors: {
     eventNotFound: 'Fant ikke arrangementet.',
     cancelNotFound: 'Fant ingen påmelding for denne lenken. Kanskje den allerede er meldt av?',
+    selfCancelDisabled: 'Arrangøren har slått av avmelding på nettet. Svar på bekreftelses-e-posten, så får arrangøren beskjed.',
     invalidSelection: 'Ugyldig valg av personer.',
     selectSomeone: 'Velg hvem som skal meldes av.',
     notEnough: {

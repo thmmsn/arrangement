@@ -17,7 +17,7 @@ const PRESETS = [
  * @param {string} opts.timeZone       Tidssonen tidspunktene tolkes i
  * @param {{id: string, label: string, lang: string}[]} opts.sites  Nettstedene som kan velges
  * @param {boolean} [opts.editing]     Viser «påmelding åpen»-bryteren
- * @param {{apple: boolean, google: boolean}} [opts.wallets]  Wallet-tjenestene som er satt opp
+ * @param {{apple: boolean, google: boolean}} [opts.wallets]  Wallet-tjenestene som er satt opp på serveren
  * @param {{id: string, name: string, preview: string[]}[]} [opts.skins]  Utseender å velge mellom
  * @param {(payload: object) => Promise<void>} opts.onSubmit
  */
@@ -104,6 +104,7 @@ export function createEventForm({
         h('label', { class: 'checkbox' },
           h('input', { type: 'checkbox', name: 'allowLate', checked: initial.allowLate ?? false }),
           h('span', {}, t('eventForm.allowLate')))),
+      features.selfCancelEl,
       editing
         ? h('div', { class: 'form-row' },
           h('label', { class: 'checkbox' },
@@ -440,28 +441,34 @@ function imageField(initial) {
 // ---------- Billetter: brytere per arrangement ----------
 
 // Alt er på som standard. PDF og Wallet er billetter, så de kan bare være på når billetter er på.
-// Wallet-bryterne vises bare når tjenesten er satt opp på serveren; ellers beholdes lagret verdi.
+// Wallet-bryterne vises alltid, men er grået ut med en forklaring når tjenesten ikke er satt opp på
+// serveren – da vet arrangøren hvorfor Wallet mangler. Den lagrede verdien beholdes.
+// «Deltakerne kan melde seg av selv» hører til påmeldingen og har sin egen plass i skjemaet (selfCancelEl).
 function featureToggles(initial, wallets) {
   const value = (key) => initial[key] ?? true;
-  const box = (key, label, visible = true) => {
-    const input = h('input', { type: 'checkbox', name: `feature-${key}`, checked: value(key) });
-    const el = visible ? h('div', { class: 'form-row' }, h('label', { class: 'checkbox' }, input, h('span', {}, label))) : null;
-    return { key, input, el, visible };
+  // Ikke satt opp: vises uten hake (den er ikke i bruk), men den lagrede verdien sendes uendret.
+  const box = (key, label, { configured = true } = {}) => {
+    const input = h('input', { type: 'checkbox', name: `feature-${key}`, checked: configured && value(key) });
+    const note = configured ? null : h('span', { class: 'muted small' }, ` – ${t('eventForm.walletNotConfigured')}`);
+    const el = h('div', { class: 'form-row' }, h('label', { class: 'checkbox' }, input, h('span', {}, label, note)));
+    return { key, input, el, configured, read: () => (configured ? input.checked : value(key)) };
   };
   const tickets = box('tickets', t('eventForm.tickets'));
   const dependent = [
     box('pdf', t('eventForm.pdf')),
-    box('appleWallet', t('eventForm.appleWallet'), Boolean(wallets.apple)),
-    box('googleWallet', t('eventForm.googleWallet'), Boolean(wallets.google)),
+    box('appleWallet', t('eventForm.appleWallet'), { configured: Boolean(wallets.apple) }),
+    box('googleWallet', t('eventForm.googleWallet'), { configured: Boolean(wallets.google) }),
   ];
   const calendar = box('calendar', t('eventForm.calendar'));
-  const sync = () => dependent.forEach((d) => { d.input.disabled = !tickets.input.checked; });
+  const selfCancel = box('selfCancel', t('eventForm.selfCancel'));
+  const sync = () => dependent.forEach((d) => { d.input.disabled = !d.configured || !tickets.input.checked; });
   tickets.input.addEventListener('change', sync);
   sync();
-  const all = [tickets, ...dependent, calendar];
+  const all = [tickets, ...dependent, calendar, selfCancel];
   return {
-    el: h('div', { class: 'feature-list' }, all.map((b) => b.el)),
-    read: () => Object.fromEntries(all.map((b) => [b.key, b.input.checked])),
+    el: h('div', { class: 'feature-list' }, [tickets, ...dependent, calendar].map((b) => b.el)),
+    selfCancelEl: selfCancel.el,
+    read: () => Object.fromEntries(all.map((b) => [b.key, b.read()])),
   };
 }
 

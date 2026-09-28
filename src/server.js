@@ -28,6 +28,12 @@ if (!config.resendApiKey) {
   console.warn('ADVARSEL: RESEND_API_KEY er ikke satt – e-poster skrives til konsollen i stedet for å sendes.');
 }
 
+// Uten oppsett vises ingen Wallet-knapper – verken etter påmelding, på billettsiden eller i e-posten.
+for (const [key, name, prefix] of [['apple', 'Apple Wallet', 'APPLE_WALLET_*'], ['google', 'Google Wallet', 'GOOGLE_WALLET_*']]) {
+  if (config.wallet[key]) console.log(`${name} er i bruk.`);
+  else console.warn(`ADVARSEL: ${name} er av (${prefix} er ikke satt opp) – ingen «${name}»-knapper vises. Se README, «Wallet».`);
+}
+
 if (!config.adminEmails.length) {
   console.warn('ADVARSEL: ADMIN_EMAIL er ikke satt – ingen tjenesteadministrator får beskjed når arrangementer opprettes eller avlyses.');
 }

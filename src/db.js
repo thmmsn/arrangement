@@ -177,6 +177,33 @@ export const MIGRATIONS = [
     }
     db.exec('CREATE UNIQUE INDEX registrations_door_code ON registrations(event_id, door_code);');
   },
+
+  // 6: Selvavmelding.
+  // - Bryter per arrangement for om deltakerne kan melde seg av selv. På som standard.
+  // - Avmeldingsnøkkelen avledes nå fra påmeldingsnummeret og billettnummeret (se tokens.js), så den
+  //   tilfeldige nøkkelen (cancel_token_hash) fjernes. SQLite kan ikke fjerne en UNIQUE-kolonne med
+  //   ALTER TABLE, så bookings bygges opp på nytt med de samme id-ene – registrations peker dit.
+  `
+  CREATE TABLE bookings_new (
+    id            INTEGER PRIMARY KEY,
+    event_id      INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    contact_name  TEXT    NOT NULL,
+    contact_email TEXT    NOT NULL,
+    code          TEXT    NOT NULL,              -- påmeldingsnummeret (se ids.js)
+    late          INTEGER NOT NULL DEFAULT 0,    -- 1 = etteranmelding
+    created_at    TEXT    NOT NULL
+  );
+
+  INSERT INTO bookings_new (id, event_id, contact_name, contact_email, code, late, created_at)
+    SELECT id, event_id, contact_name, contact_email, code, late, created_at FROM bookings;
+
+  DROP TABLE bookings;
+  ALTER TABLE bookings_new RENAME TO bookings;
+  CREATE INDEX bookings_event_id ON bookings(event_id);
+  CREATE UNIQUE INDEX bookings_code ON bookings(code);
+
+  ALTER TABLE events ADD COLUMN self_cancel_enabled INTEGER NOT NULL DEFAULT 1;
+  `,
 ];
 
 // Før prosjektet ble omdøpt til «arrangement», het databasefilen booking.db.
@@ -210,15 +237,29 @@ export function openDatabase(path) {
   return db;
 }
 
+// Migreringene kjøres med fremmednøkler slått av. Ellers ville DROP TABLE på en tabell andre tabeller
+// peker på (f.eks. bookings, som registrations peker på med ON DELETE CASCADE) slettet radene som
+// pekte dit. Slik anbefaler SQLite å bygge om tabeller: PRAGMA foreign_keys kan ikke endres inne i en
+// transaksjon, så den slås av utenfor, og hver migrering sjekker at alle koblinger fortsatt stemmer
+// før den lagres. Er noe brutt, rulles migreringen tilbake.
 export function migrate(db) {
   const current = db.pragma('user_version', { simple: true });
-  for (let version = current; version < MIGRATIONS.length; version++) {
-    db.transaction(() => {
-      const migration = MIGRATIONS[version];
-      if (typeof migration === 'function') migration(db);
-      else db.exec(migration);
-      db.pragma(`user_version = ${version + 1}`);
-    })();
+  if (current >= MIGRATIONS.length) return;
+  const foreignKeys = db.pragma('foreign_keys', { simple: true });
+  db.pragma('foreign_keys = OFF');
+  try {
+    for (let version = current; version < MIGRATIONS.length; version++) {
+      db.transaction(() => {
+        const migration = MIGRATIONS[version];
+        if (typeof migration === 'function') migration(db);
+        else db.exec(migration);
+        const broken = db.pragma('foreign_key_check');
+        if (broken.length) throw new Error(`Migrering ${version + 1} brøt ${broken.length} fremmednøkkel(er), f.eks. i ${broken[0].table}.`);
+        db.pragma(`user_version = ${version + 1}`);
+      })();
+    }
+  } finally {
+    db.pragma(`foreign_keys = ${foreignKeys ? 'ON' : 'OFF'}`);
   }
 }
 
@@ -239,11 +280,12 @@ export function createRepository(db) {
       INSERT INTO events (slug, admin_key_hash, title, description, location, starts_at, ends_at,
         registration_deadline, capacity, max_per_booking, show_count, is_open, organizer_name,
         organizer_email, image_url, fields, site, tickets_enabled, calendar_enabled, pdf_enabled,
-        google_wallet_enabled, apple_wallet_enabled, location_lat, location_lon, allow_late, skin, created_at, updated_at)
+        google_wallet_enabled, apple_wallet_enabled, self_cancel_enabled, location_lat, location_lon, allow_late, skin,
+        created_at, updated_at)
       VALUES (@slug, @adminKeyHash, @title, @description, @location, @startsAt, @endsAt,
         @registrationDeadline, @capacity, @maxPerBooking, @showCount, @isOpen, @organizerName,
         @organizerEmail, @imageUrl, @fields, @site, @tickets, @calendar, @pdf,
-        @googleWallet, @appleWallet, @lat, @lon, @allowLate, @skin, @now, @now)`),
+        @googleWallet, @appleWallet, @selfCancel, @lat, @lon, @allowLate, @skin, @now, @now)`),
     updateEvent: db.prepare(`
       UPDATE events SET title = @title, description = @description, location = @location,
         starts_at = @startsAt, ends_at = @endsAt, registration_deadline = @registrationDeadline,
@@ -251,7 +293,7 @@ export function createRepository(db) {
         is_open = @isOpen, organizer_name = @organizerName, organizer_email = @organizerEmail,
         image_url = @imageUrl, fields = @fields, site = @site, tickets_enabled = @tickets,
         calendar_enabled = @calendar, pdf_enabled = @pdf, google_wallet_enabled = @googleWallet,
-        apple_wallet_enabled = @appleWallet, location_lat = @lat, location_lon = @lon, allow_late = @allowLate, skin = @skin,
+        apple_wallet_enabled = @appleWallet, self_cancel_enabled = @selfCancel, location_lat = @lat, location_lon = @lon, allow_late = @allowLate, skin = @skin,
         -- Flyttes fristen fram i tid, skal rapporten sendes på nytt når den nye fristen er nådd.
         deadline_report_sent_at = CASE WHEN COALESCE(@registrationDeadline, @startsAt) > @now THEN NULL
                                        ELSE deadline_report_sent_at END,
@@ -298,12 +340,11 @@ export function createRepository(db) {
     deleteImage: db.prepare('DELETE FROM event_images WHERE event_id = ?'),
     bookingCodeExists: db.prepare('SELECT 1 FROM bookings WHERE code = ?'),
     insertBooking: db.prepare(`
-      INSERT INTO bookings (event_id, contact_name, contact_email, cancel_token_hash, code, late, created_at)
-      VALUES (@eventId, @contactName, @contactEmail, @cancelTokenHash, @code, @late, @now)`),
+      INSERT INTO bookings (event_id, contact_name, contact_email, code, late, created_at)
+      VALUES (@eventId, @contactName, @contactEmail, @code, @late, @now)`),
     insertRegistration: db.prepare(`
       INSERT INTO registrations (event_id, booking_id, position, name, email, answers, ticket_code, door_code, created_at)
       VALUES (@eventId, @bookingId, @position, @name, @email, @answers, @ticketCode, @doorCode, @now)`),
-    bookingByToken: db.prepare('SELECT * FROM bookings WHERE event_id = ? AND cancel_token_hash = ?'),
     bookingByCode: db.prepare('SELECT * FROM bookings WHERE code = ?'),
     // Atomisk: to dørvakter som skanner samme billett samtidig kan ikke begge få «sjekket inn».
     checkIn: db.prepare(`
@@ -360,7 +401,6 @@ export function createRepository(db) {
       eventId: event.id,
       contactName: booking.contactName,
       contactEmail: booking.contactEmail,
-      cancelTokenHash: booking.cancelTokenHash,
       code: bookingCode,
       late: booking.late ? 1 : 0,
       now,
@@ -437,12 +477,9 @@ export function createRepository(db) {
     listRegistrations(eventId) {
       return stmt.listRegistrations.all(eventId).map(mapRegistration);
     },
-    /** booking: { contactName, contactEmail, cancelTokenHash, persons: [{ name, email, answers }] } */
+    /** booking: { contactName, contactEmail, late, persons: [{ name, email, answers }] } */
     register(event, booking) {
       return registerTx.immediate(event, booking);
-    },
-    findBookingByToken(eventId, tokenHash) {
-      return withPersons(stmt.bookingByToken.get(eventId, tokenHash));
     },
     /** Påmeldingen med dette påmeldingsnummeret (alle billettene i den), eller null. */
     findBookingByCode(code) {
@@ -515,13 +552,15 @@ export function createRepository(db) {
   };
 }
 
-// Brytere per arrangement: kolonnenavn → nøkkel i event.features. Alt er på som standard.
+// Brytere per arrangement: nøkkel i event.features → kolonnenavn. Alt er på som standard.
 const FEATURE_COLUMNS = {
   tickets: 'tickets_enabled',
   calendar: 'calendar_enabled',
   pdf: 'pdf_enabled',
   googleWallet: 'google_wallet_enabled',
   appleWallet: 'apple_wallet_enabled',
+  // Deltakerne kan melde seg av selv (lenke i e-posten, etter påmeldingen og på billettsiden).
+  selfCancel: 'self_cancel_enabled',
 };
 export const FEATURES = Object.keys(FEATURE_COLUMNS);
 const DEFAULT_FEATURES = Object.fromEntries(FEATURES.map((key) => [key, true]));

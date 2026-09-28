@@ -133,7 +133,6 @@ test('e-postene bruker temaets farger, logo (med full adresse) og navn', () => {
     event: { title: 'Kurs', startsAt: '2026-11-14T17:00:00Z', location: '', organizerName: 'Kari', organizerEmail: 'k@example.com', fields: [] },
     booking: { contactName: 'Ola', contactEmail: 'ola@example.com', persons: [{ name: 'Ola', email: 'ola@example.com', answers: {} }] },
     eventUrl: 'https://events.example.com/abc',
-    cancelUrl: 'https://events.example.com/abc/avmelding#t',
     timeZone: 'Europe/Oslo',
     site,
   });

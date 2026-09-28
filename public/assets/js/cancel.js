@@ -26,7 +26,8 @@ async function load() {
     h('p', { class: 'muted' }, formatEventTime(event.startsAt, event.endsAt, event.timeZone), event.location ? ` · ${event.location}` : ''),
     card,
   );
-  renderChoice(card, info.contactName, info.persons);
+  // En personlig lenke (videresendt av den som meldte på) åpnes av personen selv: «Vil du melde deg av?».
+  renderChoice(card, info.personal ? info.persons[0].name : info.contactName, info.persons);
 }
 
 // Avmeldingen skjer først når gjesten trykker på knappen – ikke når lenken åpnes.

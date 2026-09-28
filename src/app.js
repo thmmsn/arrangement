@@ -9,6 +9,7 @@ import { accessTokenFrom, AccessError, createAccessVerifier } from './cfAccess.j
 import { hashSecret, newSecret, newSlug, secretMatches, SLUG_PATTERN } from './ids.js';
 import { rateLimit } from './rateLimit.js';
 import { ImageError, MAX_IMAGE_BYTES, processImage } from './images.js';
+import { createLogoLoader } from './logo.js';
 import { createPlaceSearch } from './places.js';
 import { loadSites } from './sites.js';
 import { loadSkins, skinName } from './skins.js';
@@ -91,7 +92,6 @@ export function createApp({
     return image ? `${eventUrl(event)}/bilde/${image.hash}.${IMAGE_EXT[image.type]}` : null;
   };
   const imageUrlOf = (event) => uploadedImageUrl(event) ?? event.imageUrl;
-  const cancelUrl = (event, token) => `${siteOf(event).baseUrl}/${event.slug}/avmelding#${token}`;
   // Med eget admin-vertsnavn peker admin-lenkene dit; ellers til arrangementets domene.
   const adminBaseUrl = (event) => (config.adminHost ? `https://${config.adminHost}` : siteOf(event).baseUrl);
   const adminUrl = (event, key) => `${adminBaseUrl(event)}/admin/${event.slug}#${key}`;
@@ -127,8 +127,13 @@ export function createApp({
 
   // ---------- Billetter, kalender, Wallet og innsjekking (se tickets.js) ----------
   const tokens = createTokens(repo.secret());
+  // Logoen til PDF-billetten. Hentes med én gang for hvert nettsted, så en logo som ikke kan brukes
+  // i PDF (feil sti, WebP …) gir en advarsel i loggen ved oppstart – ikke først når noen melder seg på.
+  const logoFor = createLogoLoader({ brandingDir: BRANDING, assetsDir: ASSETS, logger });
+  for (const site of sites) logoFor(site.theme);
   const tickets = createTicketFeature({
     repo, config, tokens, siteOf, eventUrl, imageUrlOf, findEventBySlug, notFound, sendPage, logger, adminT, placeSearch, limiter, limits,
+    logoFor,
   });
 
   // ---------- Felles mellomvare ----------
@@ -414,31 +419,33 @@ export function createApp({
     }
 
     const { contact, persons } = validateBooking(req.body, event.fields, event.maxPerBooking);
-    const cancelToken = newSecret(18);
     const booking = { contactName: contact.name, contactEmail: contact.email, persons };
     // Etter fristen (når arrangøren tillater det): merkes, og arrangøren får «Etteranmelding» i emnet.
     const late = isLate(event);
 
     let result;
     try {
-      result = repo.register(event, { ...booking, late, cancelTokenHash: hashSecret(cancelToken) });
+      result = repo.register(event, { ...booking, late });
     } catch (err) {
       if (err instanceof CapacityError) return res.status(409).json(notEnoughSpots(req, err.spotsLeft));
       throw err;
     }
 
-    // Billettside, Wallet, kalender og PDF-vedlegg – etter arrangementets brytere.
+    // Billettside, Wallet, kalender, PDF-vedlegg og avmelding – etter arrangementets brytere.
     const extras = await tickets.confirmationExtras(event, result.bookingCode);
     const [guestSent] = await sendEmails([
       {
         ...templates.guestConfirmation({
           event,
-          // Med billetter får gjesten også dørkoden til hver person – arrangøren trenger den ikke.
-          booking: event.features.tickets
-            ? { ...booking, persons: persons.map((p, i) => ({ ...p, doorCode: result.persons[i].doorCode })) }
-            : booking,
+          // Den som meldte på, får alt for hver person: dørkode, billett, Wallet, PDF og avmelding
+          // – til å videresende. Arrangøren trenger ingen av delene.
+          booking: {
+            ...booking,
+            persons: persons.map((p, i) => ({
+              ...p, doorCode: event.features.tickets ? result.persons[i].doorCode : null, links: extras.persons[i],
+            })),
+          },
           eventUrl: eventUrl(event),
-          cancelUrl: cancelUrl(event, cancelToken),
           timeZone: config.timeZone,
           site,
           links: extras.links,
@@ -451,25 +458,51 @@ export function createApp({
     res.status(201).json({
       booking: { contactName: contact.name, contactEmail: contact.email, persons: persons.map(({ name }) => ({ name })) },
       emailSent: guestSent,
-      // Den som meldte på, får billettene med én gang – samme lenke som i e-posten.
-      ticketsUrl: extras.links.tickets,
+      // Den som meldte på, får billettene, Wallet, PDF og avmelding med én gang – som i e-posten.
+      links: extras.links,
       event: publicEvent(event, result.count),
     });
   });
 
+  /**
+   * Påmeldingen avmeldingsnøkkelen gjelder (se tokens.js), med personene nøkkelen kan melde av:
+   * - påmeldingens nøkkel (i e-posten, etter påmeldingen og på siden med alle billettene): alle
+   * - én persons nøkkel (i e-posten, til å videresende sammen med billetten): bare den personen
+   * Nøkkelen står etter # i adressen og sendes i forespørselen. Returnerer påmeldingen, eller null.
+   */
   function findBooking(req) {
     const token = req.body?.token;
-    return typeof token === 'string' && token ? repo.findBookingByToken(req.event.id, hashSecret(token)) : null;
+    const bookingCode = tokens.parseCancelBooking(token);
+    const ticketCode = !bookingCode && tokens.parseCancelTicket(token);
+    let booking = null;
+    if (bookingCode) booking = repo.findBookingByCode(bookingCode);
+    if (ticketCode) {
+      const person = repo.findRegistrationByCode(ticketCode);
+      const whole = person && repo.findBookingByCode(person.bookingCode);
+      booking = whole && { ...whole, personal: true, persons: whole.persons.filter((p) => p.id === person.id) };
+    }
+    if (!booking || booking.eventId !== req.event.id || !booking.persons.length) return null;
+    return booking;
+  }
+
+  // Arrangøren kan slå av avmelding på nettet. Da må gjesten svare på bekreftelsen i stedet.
+  function selfCancelAllowed(req, res) {
+    if (req.event.features.selfCancel) return true;
+    res.status(403).json({ error: req.t('errors.selfCancelDisabled'), selfCancelDisabled: true });
+    return false;
   }
 
   // Viser hvem avmeldingslenken gjelder før gjesten bekrefter. Avmeldingen skjer først ved POST
   // til /cancel – mange e-posttjenester åpner lenker automatisk for å sjekke dem for virus,
   // og det skal ikke melde noen av.
   api.post('/events/:slug/cancel/lookup', loadPublicEvent, cancelLimiter, (req, res) => {
+    if (!selfCancelAllowed(req, res)) return;
     const booking = findBooking(req);
     if (!booking) return res.status(404).json({ error: req.t('errors.cancelNotFound') });
     res.json({
       contactName: booking.contactName,
+      // Én persons egen lenke, videresendt av den som meldte på: siden snakker til personen selv.
+      personal: Boolean(booking.personal),
       persons: booking.persons.map(({ id, name }) => ({ id, name })),
       event: publicEvent(req.event, repo.countRegistrations(req.event.id)),
     });
@@ -478,6 +511,7 @@ export function createApp({
   // body: { token, ids? } – uten ids meldes hele påmeldingen av, ellers bare de valgte personene.
   api.post('/events/:slug/cancel', loadPublicEvent, cancelLimiter, async (req, res) => {
     const { event, eventSite: site, t } = req;
+    if (!selfCancelAllowed(req, res)) return;
     const booking = findBooking(req);
     if (!booking) return res.status(404).json({ error: t('errors.cancelNotFound') });
 

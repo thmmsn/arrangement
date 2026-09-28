@@ -315,6 +315,7 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
   line-height: 56px;
   margin: 0 auto 16px;
 }
+.success-panel .actions { justify-content: center; margin: 12px 0; }
 
 /* ---------- Administrasjon ---------- */
 
@@ -467,6 +468,8 @@ tr.added td:nth-child(2) { padding-left: 22px; }
 .ticket-actions { margin-bottom: 24px; }
 .wallet-btn.apple { background: #000; border-color: #000; color: #fff; }
 .wallet-btn.google { background: #1f1f1f; border-color: #1f1f1f; color: #fff; }
+/* Handlinger for én billett på siden med alle billettene: del, Wallet, PDF. */
+.ticket-card .ticket-tools { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
 
 /* ---------- Dørvakt ---------- */
 

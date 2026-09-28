@@ -316,7 +316,8 @@ describe('engelsk tekst i en påmelding', () => {
       method: 'POST', path: `/api/events/${en.slug}/registrations`, headers: onHost(COM),
       body: { name: 'Ola', email: 'ola@example.com', guests: [{ name: 'Kari' }] },
     });
-    const token = app.sent.find((m) => m.to === 'ola@example.com').text.match(/avmelding#([\w-]+)/)[1];
+    // Lenken for hele påmeldingen står nederst; lenkene over gjelder hver sin person.
+    const token = [...app.sent.find((m) => m.to === 'ola@example.com').text.matchAll(/avmelding#([\w-]+)/g)].at(-1)[1];
     app.sent.length = 0;
 
     const missing = await app.request({ method: 'POST', path: `/api/events/${en.slug}/cancel`, headers: onHost(COM), body: { token: 'feil' } });

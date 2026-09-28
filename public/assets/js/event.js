@@ -49,14 +49,6 @@ function directionsLink() {
   return href ? h('a', { class: 'directions', href, target: '_blank', rel: 'noopener' }, t('links.directions')) : null;
 }
 
-function calendarLinks() {
-  const { ics, googleCalendar } = event.links ?? {};
-  if (!ics && !googleCalendar) return null;
-  return h('div', { class: 'actions' },
-    ics ? h('a', { class: 'btn secondary small', href: ics }, t('links.calendar')) : null,
-    googleCalendar ? h('a', { class: 'btn secondary small', href: googleCalendar, target: '_blank', rel: 'noopener' }, t('links.googleCalendar')) : null);
-}
-
 function attendance() {
   const open = event.status === 'open';
   // Åpen etter fristen (etteranmelding) vises som «Etteranmelding».
@@ -300,26 +292,40 @@ function registrationForm() {
   return form;
 }
 
-function showSuccess({ booking, emailSent, ticketsUrl }) {
+// Alt den som meldte på trenger, med én gang – det samme som i e-posten: billettene, Wallet, PDF,
+// kalender og avmelding (etter arrangementets brytere).
+function showSuccess({ booking, emailSent, links }) {
   const section = document.getElementById('registration');
   const names = booking.persons.map((p) => p.name);
+  const several = names.length > 1;
+  const wallets = [
+    links.apple && h('a', { class: 'btn wallet-btn apple', href: links.apple }, t(several ? 'links.appleWalletAll' : 'links.appleWallet')),
+    links.google && h('a', { class: 'btn wallet-btn google', href: links.google, rel: 'noopener' }, t(several ? 'links.googleWalletAll' : 'links.googleWallet')),
+  ].filter(Boolean);
+  const extras = [
+    links.pdf && h('a', { class: 'btn secondary small', href: links.pdf, target: '_blank' }, t(several ? 'links.pdfAll' : 'links.pdf')),
+    links.ics && h('a', { class: 'btn secondary small', href: links.ics }, t('links.calendar')),
+    links.googleCalendar && h('a', { class: 'btn secondary small', href: links.googleCalendar, target: '_blank', rel: 'noopener' }, t('links.googleCalendar')),
+  ].filter(Boolean);
   section.replaceChildren(
     h('div', { class: 'success-panel' },
       h('div', { class: 'check', 'aria-hidden': 'true' }, '✓'),
       h('h2', {}, t('form.thanks', { name: booking.contactName })),
-      h('p', {}, names.length > 1 ? t('form.registeredMany', { names: nameList(names) }) : t('form.registeredOne')),
-      // Billettene kan vises med én gang – samme lenke som i e-posten.
-      ticketsUrl
-        ? h('p', {}, h('a', { class: 'btn', href: ticketsUrl }, names.length > 1 ? t('form.viewTickets') : t('form.viewTicket')))
+      h('p', {}, several ? t('form.registeredMany', { names: nameList(names) }) : t('form.registeredOne')),
+      links.tickets
+        ? h('p', {}, h('a', { class: 'btn', href: links.tickets }, several ? t('form.viewTickets') : t('form.viewTicket')))
         : null,
-      calendarLinks(),
+      wallets.length ? h('div', { class: 'actions wallet-actions' }, wallets) : null,
+      extras.length ? h('div', { class: 'actions' }, extras) : null,
       emailSent
         ? h('p', { class: 'muted' }, t('form.emailSent', { email: booking.contactEmail }))
         : notice('warning', t('form.emailFailed')),
-      event.status === 'open'
-        ? h('button', { class: 'btn secondary', type: 'button', onclick: () => section.replaceChildren(...registrationSection()) },
-          t('form.newBooking'))
-        : null,
+      h('div', { class: 'actions' },
+        event.status === 'open'
+          ? h('button', { class: 'btn secondary', type: 'button', onclick: () => section.replaceChildren(...registrationSection()) },
+            t('form.newBooking'))
+          : null,
+        links.cancel ? h('a', { class: 'btn danger small', href: links.cancel }, t('links.cancel')) : null),
     ),
   );
   section.scrollIntoView({ behavior: 'smooth', block: 'start' });

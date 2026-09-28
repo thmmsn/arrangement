@@ -38,12 +38,12 @@ test('versjon 1-database migreres til påmeldinger med flere personer', () => {
     ]);
     assert.deepEqual(rows[0].answers, { f1: 'Nøtter' });
 
-    // Avmeldingslenker som allerede er sendt ut, virker fortsatt.
-    const booking = repo.findBookingByToken(1, hashSecret('gammel-nokkel-ola'));
+    // Hver gjest er blitt sin egen påmelding, med påmeldingsnummer (som avmeldingslenken avledes fra).
+    const booking = repo.findBookingByCode(rows[0].bookingCode);
     assert.deepEqual(booking.persons.map((p) => p.name), ['Ola']);
     assert.equal(repo.deleteFromBooking(1, booking.id, [7]).length, 1);
     assert.equal(repo.countRegistrations(1), 1);
-    assert.equal(repo.findBookingByToken(1, hashSecret('gammel-nokkel-ola')), null);
+    assert.equal(repo.findBookingByCode(rows[0].bookingCode), null);
 
     // Å åpne databasen på nytt kjører ingen migreringer to ganger.
     db.close();
@@ -80,7 +80,7 @@ test('versjon 2-database migreres: eksisterende arrangementer havner på hovedne
     assert.equal(event.site, 'main');
     assert.equal(event.maxPerBooking, 4);
     assert.equal(repo.countRegistrations(1), 1);
-    assert.ok(repo.findBookingByToken(1, hashSecret('nokkel')), 'avmeldingslenken virker fortsatt');
+    assert.equal(repo.findBookingByCode(repo.listRegistrations(1)[0].bookingCode).contactName, 'Ola');
     assert.deepEqual(repo.countEventsBySite(), { main: 1 });
     db.close();
   } finally {
@@ -127,7 +127,7 @@ test('versjon 3-database migreres: billettnumre, hemmelighet og brytere – inge
     assert.equal(repo.findBookingByCode(persons[0].bookingCode).persons.length, 2);
 
     const future = repo.findEvent('pqrstuvwxyza');
-    assert.deepEqual(future.features, { tickets: true, calendar: true, pdf: true, googleWallet: true, appleWallet: true });
+    assert.deepEqual(future.features, { tickets: true, calendar: true, pdf: true, googleWallet: true, appleWallet: true, selfCancel: true });
     assert.equal(future.scannerVersion, 1);
     assert.equal(future.allowLate, false);
     assert.equal(future.skin, null);
@@ -174,6 +174,52 @@ test('versjon 4-database migreres: alle får en dørkode, unik innenfor arrangem
     assert.equal(new Set(codes).size, 40, 'ingen like dørkoder i samme arrangement');
     assert.equal(repo.findRegistrationByDoorCode(1, codes[7]).name, 'Person 7');
     assert.equal(repo.imageMeta(1), null);
+    db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Versjon 6: den tilfeldige avmeldingsnøkkelen fjernes (bookings bygges opp på nytt), og bryteren
+// for selvavmelding kommer til. registrations peker på bookings med ON DELETE CASCADE, så ingen
+// deltakere må forsvinne når den gamle tabellen fjernes.
+test('versjon 5-database migreres: bookings uten avmeldingsnøkkel, ingen deltakere forsvinner', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'arrangement-migrering-'));
+  const path = join(dir, 'arrangement.db');
+  try {
+    const old = new Database(path);
+    old.pragma('foreign_keys = ON');
+    for (const migration of MIGRATIONS.slice(0, 5)) {
+      if (typeof migration === 'function') migration(old);
+      else old.exec(migration);
+    }
+    old.pragma('user_version = 5');
+    const now = '2026-09-01T10:00:00.000Z';
+    old.prepare(`INSERT INTO events (id, slug, admin_key_hash, title, starts_at, organizer_name, organizer_email, created_at, updated_at)
+      VALUES (1, 'abcdefghjkmn', 'x', 'Arrangement', '2099-01-01T10:00:00.000Z', 'Kari', 'kari@example.com', ?, ?)`).run(now, now);
+    old.prepare(`INSERT INTO bookings (id, event_id, contact_name, contact_email, cancel_token_hash, code, late, created_at)
+      VALUES (5, 1, 'Ola', 'ola@example.com', 'hash', 'bbbbbbbbbb', 1, ?)`).run(now);
+    const insert = old.prepare(`INSERT INTO registrations (event_id, booking_id, position, name, email, answers, ticket_code, door_code, created_at)
+      VALUES (1, 5, ?, ?, '', '{}', ?, ?, ?)`);
+    insert.run(0, 'Ola', 'cccccccccc', 'AAAAA', now);
+    insert.run(1, 'Kari', 'dddddddddd', 'BBBBB', now);
+    old.close();
+
+    const db = openDatabase(path);
+    assert.equal(db.pragma('user_version', { simple: true }), MIGRATIONS.length);
+    assert.equal(db.pragma('foreign_keys', { simple: true }), 1, 'fremmednøklene er slått på igjen');
+    const columns = db.prepare('PRAGMA table_info(bookings)').all().map((c) => c.name);
+    assert.ok(!columns.includes('cancel_token_hash'));
+    const repo = createRepository(db);
+    const booking = repo.findBookingByCode('bbbbbbbbbb');
+    assert.equal(booking.id, 5);
+    assert.equal(booking.late, true);
+    assert.deepEqual(booking.persons.map((p) => [p.name, p.code, p.doorCode]), [['Ola', 'cccccccccc', 'AAAAA'], ['Kari', 'dddddddddd', 'BBBBB']]);
+    assert.equal(repo.findEvent('abcdefghjkmn').features.selfCancel, true);
+    // Koblingen virker fortsatt: slettes arrangementet, forsvinner påmeldingen og deltakerne.
+    db.prepare('DELETE FROM events WHERE id = 1').run();
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM bookings').get().n, 0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM registrations').get().n, 0);
     db.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });

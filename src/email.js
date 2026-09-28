@@ -102,6 +102,16 @@ function emailUi(site) {
     small(html) {
       return p(`<span style="color:${c.muted};font-size:13px;">${html}</span>`);
     },
+    /** Svarte knapper for Apple Wallet og Google Wallet, side om side (brytes på smale skjermer). */
+    walletButtons(buttons) {
+      if (!buttons.length) return '';
+      const one = ([href, label]) => `<a href="${escapeHtml(href)}" style="display:inline-block;background:#000000;color:#ffffff;text-decoration:none;padding:11px 18px;margin:0 8px 8px 0;border-radius:8px;font-family:Arial,sans-serif;font-size:14px;font-weight:bold;">${escapeHtml(label)}</a>`;
+      return `<p style="margin:0 0 16px;">${buttons.map(one).join('')}</p>`;
+    },
+    /** Lenker på én linje, skilt med «·». */
+    linkLine(items) {
+      return items.length ? p(items.map(([href, label]) => link(href, escapeHtml(label))).join(' &nbsp;·&nbsp; ')) : '';
+    },
     /**
      * En oversatt setning med en lenke midt i: «Meld deg av {link}, så …». Teksten escapes,
      * lenken settes inn som HTML. Setningsbyggingen ligger i ordboken, så den passer hvert språk.
@@ -137,18 +147,36 @@ function personRows(ui, event, person) {
   ];
 }
 
-// Én person vises som en enkel tabell; flere personer får hver sin overskrift («Person 1», «Person 2» …).
+// Lenkene for én person i bekreftelsen: billett, Wallet, PDF og avmelding (til å videresende).
+function personLinkList(ui, links = {}) {
+  const { t } = ui;
+  return [
+    [links.ticket, t('email.confirmation.ticketLink')],
+    [links.apple, t('links.appleWallet')],
+    [links.google, t('links.googleWallet')],
+    [links.pdf, t('links.pdf')],
+    [links.cancel, t('links.cancel')],
+  ].filter(([href]) => href);
+}
+
+// Én person vises som en enkel tabell; flere personer får hver sin overskrift («Person 1», «Person 2» …)
+// og, i bekreftelsen, sine egne lenker (person.links).
 function personsHtml(ui, event, persons) {
   if (persons.length === 1) return ui.detailsTable(personRows(ui, event, persons[0]));
   return persons.map((person, i) => `
     <h2 style="font-weight:normal;font-size:19px;margin:20px 0 0;">${escapeHtml(ui.t('email.person', { n: i + 1 }))}</h2>
-    ${ui.detailsTable(personRows(ui, event, person))}`).join('');
+    ${ui.detailsTable(personRows(ui, event, person))}
+    ${ui.linkLine(personLinkList(ui, person.links))}`).join('');
 }
 
 function personsText(ui, event, persons) {
   if (persons.length === 1) return detailsText(personRows(ui, event, persons[0]));
   return persons
-    .map((person, i) => `${ui.t('email.person', { n: i + 1 })}\n${detailsText(personRows(ui, event, person))}`)
+    .map((person, i) => [
+      ui.t('email.person', { n: i + 1 }),
+      detailsText(personRows(ui, event, person)),
+      ...personLinkList(ui, person.links).map(([href, label]) => `${label}: ${href}`),
+    ].join('\n'))
     .join('\n\n');
 }
 
@@ -163,12 +191,11 @@ function countText(ui, event, count) {
     : ui.t('email.countWithoutCapacity', { count });
 }
 
-// Lenkene under billettknappen: Wallet, kalender, veibeskrivelse og arrangementssiden.
-function extraLinks(ui, links, eventUrl) {
+// Lenkene under Wallet-knappene: PDF, kalender, veibeskrivelse og arrangementssiden.
+function extraLinks(ui, links, eventUrl, several) {
   const { t } = ui;
   return [
-    [links.apple, t('links.appleWallet')],
-    [links.google, t('links.googleWallet')],
+    [links.pdf, t(several ? 'links.pdfAll' : 'links.pdf')],
     [links.ics, t('links.calendar')],
     [links.googleCalendar, t('links.googleCalendar')],
     [links.directions, t('links.directions')],
@@ -177,11 +204,13 @@ function extraLinks(ui, links, eventUrl) {
 }
 
 /**
- * Bekreftelse til den som meldte på. Én e-post for hele påmeldingen, med alle personene.
- * Svar på e-posten går til arrangøren.
- * `links` (valgfritt): billettside, Wallet, kalender og veibeskrivelse, etter arrangementets brytere.
+ * Bekreftelse til den som meldte på. Én e-post for hele påmeldingen, med alle personene. Den som
+ * melder på flere, får alt for hver person (billett, Wallet, PDF og avmelding i person.links) og
+ * videresender selv. Svar på e-posten går til arrangøren.
+ * `links`: billettside, Wallet, PDF, kalender, veibeskrivelse og avmelding for hele påmeldingen,
+ * etter arrangementets brytere. Uten `links.cancel` (avmelding slått av) svarer gjesten på e-posten.
  */
-export function guestConfirmation({ event, booking, eventUrl, cancelUrl, timeZone, site = DEFAULT_SITE, links = {} }) {
+export function guestConfirmation({ event, booking, eventUrl, timeZone, site = DEFAULT_SITE, links = {} }) {
   const ui = emailUi(site);
   const { t } = ui;
   const { persons, contactName, contactEmail } = booking;
@@ -190,18 +219,31 @@ export function guestConfirmation({ event, booking, eventUrl, cancelUrl, timeZon
   const intro = several
     ? t('email.confirmation.introMany', { count: persons.length, names: nameList(persons, ui.lang) })
     : t('email.confirmation.introOne');
-  const cancelKey = several ? 'email.confirmation.cancelMany' : 'email.confirmation.cancelOne';
   const ticketsLabel = t(several ? 'email.confirmation.viewTickets' : 'email.confirmation.viewTicket');
-  const extras = extraLinks(ui, links, eventUrl);
+  const wallets = [
+    [links.apple, t(several ? 'links.appleWalletAll' : 'links.appleWallet')],
+    [links.google, t(several ? 'links.googleWalletAll' : 'links.googleWallet')],
+  ].filter(([href]) => href);
+  const extras = extraLinks(ui, links, eventUrl, several);
+  const forward = several && links.tickets
+    ? t(links.cancel ? 'email.confirmation.forwardInfo' : 'email.confirmation.forwardInfoNoCancel')
+    : '';
+  const cancelKey = several ? 'email.confirmation.cancelMany' : 'email.confirmation.cancelOne';
+  const cancelHtml = links.cancel
+    ? ui.sentenceWithLink(cancelKey, {}, links.cancel, escapeHtml(t('email.linkHere')))
+    : escapeHtml(t('email.confirmation.cancelByReply'));
+  const cancelText = links.cancel ? t(`${cancelKey}Text`, { url: links.cancel }) : t('email.confirmation.cancelByReply');
 
   const html = ui.layout(subject, `
     ${ui.h1(event.title)}
     ${ui.p(`${escapeHtml(t('email.greeting', { name: contactName }))} ${escapeHtml(intro)}`)}
     ${ui.detailsTable(eventRows(ui, event, timeZone))}
-    ${personsHtml(ui, event, persons)}
     ${links.tickets ? ui.button(links.tickets, ticketsLabel) : ui.button(eventUrl, t('email.confirmation.viewEvent'))}
-    ${extras.length ? ui.p(extras.map(([href, label]) => ui.link(href, escapeHtml(label))).join(' &nbsp;·&nbsp; ')) : ''}
-    ${ui.small(ui.sentenceWithLink(cancelKey, {}, cancelUrl, escapeHtml(t('email.linkHere'))))}
+    ${ui.walletButtons(wallets)}
+    ${ui.linkLine(extras)}
+    ${forward ? ui.p(escapeHtml(forward)) : ''}
+    ${personsHtml(ui, event, persons)}
+    ${ui.small(cancelHtml)}
   `);
   const text = `${t('email.greeting', { name: contactName })}
 
@@ -209,14 +251,15 @@ ${intro}
 
 ${detailsText(eventRows(ui, event, timeZone))}
 
-${personsText(ui, event, persons)}
-
 ${[
     links.tickets ? `${ticketsLabel}: ${links.tickets}` : t('email.confirmation.viewEventText', { url: eventUrl }),
+    ...wallets.map(([href, label]) => `${label}: ${href}`),
     ...extras.map(([href, label]) => `${label}: ${href}`),
   ].join('\n')}
+${forward ? `\n${forward}\n` : ''}
+${personsText(ui, event, persons)}
 
-${t(`${cancelKey}Text`, { url: cancelUrl })}`;
+${cancelText}`;
   return { from: site.emailFrom, to: contactEmail, subject, html, text, replyTo: event.organizerEmail };
 }
 
