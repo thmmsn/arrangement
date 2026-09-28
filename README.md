@@ -142,6 +142,8 @@ docker compose logs -f arrangement  # se at alt starter, og eventuelle advarsler
 
 Etter endringer i `.env`: kjør `docker compose up -d` på nytt, så startes appen med de nye verdiene. Ny versjon av koden: `git pull && docker compose up -d --build`.
 
+**Versjonsnummer:** står nederst til høyre på alle sidene og i oppstartsloggen («Arrangement 2026.9.28.1 kjører …»), så det er lett å se hvilken versjon som kjører. Formatet er `år.måned.dag.løpenummer`: `2026.9.28.1` er første versjon 28. september 2026, `2026.9.28.2` den andre samme dag. Tallene har ingen ledende nuller og sammenlignes del for del som tall, så `2026.10.1.1` kommer etter `2026.9.30.4`. Nummeret står i filen `VERSION` og økes med `npm run bump` før en ny versjon legges på `main` (samme dag: løpenummeret + 1; ny dag: dagens dato og `.1`, i norsk tid). Det ligger i en fil og ikke i git, fordi Docker-bildet bygges uten `.git`-mappen. Den nakne `404`-siden viser ikke versjonen.
+
 Noen innstillinger er låst i `docker-compose.yml` med vilje, uansett hva `.env` sier: databasen ligger alltid i volumet (`/data/arrangement.db`), klient-IP leses fra Cloudflares `cf-connecting-ip`, og appen får ikke se `TUNNEL_TOKEN`.
 
 ### 3. Skjul administrasjonen bak Cloudflare Access
@@ -679,6 +681,10 @@ src/
   html.js        HTML-escaping
   rateLimit.js   Enkel rate limiting
   config.js      Miljøvariabler
+  version.js     Versjonsnummeret (år.måned.dag.løpenummer) fra VERSION
+scripts/
+  bump-version.js  `npm run bump`: øker versjonsnummeret i VERSION
+VERSION          Versjonsnummeret som vises nederst til høyre på sidene
 views/           HTML-sidene (med plassholdere for tema og tekst)
 public/assets/   CSS og JavaScript for frontend
   i18n/          Ordbøkene (nb.js, en.js), oversetter og datoformatering – delt med serveren

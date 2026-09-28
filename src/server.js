@@ -3,6 +3,7 @@ import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { adoptLegacyDatabase, createRepository, openDatabase } from './db.js';
 import { createMailer } from './email.js';
+import { readVersion } from './version.js';
 
 const config = loadConfig();
 const legacy = adoptLegacyDatabase(config.databasePath);
@@ -10,7 +11,9 @@ if (legacy) console.log(`Databasen er flyttet fra ${legacy} til ${config.databas
 const db = openDatabase(config.databasePath);
 const repo = createRepository(db);
 const mailer = createMailer({ apiKey: config.resendApiKey, from: config.emailFrom });
-const app = createApp({ repo, mailer, config });
+const version = readVersion();
+const app = createApp({ repo, mailer, config, version });
+if (!version) console.warn('ADVARSEL: VERSION mangler eller har feil format (år.måned.dag.løpenummer) – ingen versjon vises på sidene.');
 
 for (const warning of config.warnings) console.warn(`ADVARSEL: ${warning}`);
 const accessEnabled = Boolean(config.cfAccessTeamDomain && config.cfAccessAudiences.length);
@@ -74,7 +77,7 @@ const server = app.listen(config.port, () => {
   for (const site of config.sites) {
     console.log(`Nettsted «${site.id}»: ${site.baseUrl} (${site.lang})`);
   }
-  console.log(`Arrangement kjører på port ${config.port}`);
+  console.log(`Arrangement ${version ?? '(ukjent versjon)'} kjører på port ${config.port}`);
 });
 
 // Betrodd LAN-port (LAN_PORT): samme app og database, men alt som kommer inn her er betrodd – admin

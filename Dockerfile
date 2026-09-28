@@ -13,7 +13,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY --from=build /app/node_modules ./node_modules
-COPY package.json ./
+COPY package.json VERSION ./
 COPY src ./src
 COPY views ./views
 COPY public ./public

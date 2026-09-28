@@ -1,6 +1,5 @@
 {
   "name": "arrangement",
-  "version": "1.0.0",
   "description": "Arrangement / Events – enkelt påmeldingssystem med ukjente lenker, billetter, innsjekking og e-post via Resend.",
   "private": true,
   "type": "module",
@@ -11,7 +10,8 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env src/server.js",
     "dev": "node --watch --env-file-if-exists=.env src/server.js",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "bump": "node scripts/bump-version.js"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

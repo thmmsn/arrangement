@@ -87,6 +87,15 @@ main { flex: 1; padding: 40px 0 64px; }
   padding: 20px 0 28px;
   text-align: center;
 }
+/* Versjonsnummeret nederst til høyre på siden (se src/version.js). */
+.site-version {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+  padding: 0 16px;
+  text-align: right;
+}
+.site-footer .container + .site-version { margin-top: 12px; }
 
 h1, h2, h3 {
   font-family: var(--serif);

@@ -18,6 +18,7 @@ import { loadSkins, skinName } from './skins.js';
 import { themeCspSources, themeCss } from './theme.js';
 import { createTicketFeature } from './tickets.js';
 import { createTokens } from './tokens.js';
+import { readVersion } from './version.js';
 import { createViews } from './views.js';
 import {
   deadlineOf, isLate, registrationStatus, translateErrors, validateBooking, validateEvent, ValidationError,
@@ -56,6 +57,7 @@ export const isLan = (req) => req[LAN] === true;
 
 export function createApp({
   repo, mailer, config, logger = console, accessVerifier = defaultAccessVerifier(config), placeSearch = createPlaceSearch(),
+  version = readVersion(),
 }) {
   const app = express();
   app.disable('x-powered-by');
@@ -90,7 +92,7 @@ export function createApp({
     cssHref.set(site.id, `/assets/theme/${file}`);
     themeFiles.set(file, css);
   }
-  const views = createViews(VIEWS);
+  const views = createViews(VIEWS, { version });
   const { skins, warnings: skinWarnings } = loadSkins({ dirs: config.skinDirs ?? [BUILTIN_SKINS, CUSTOM_SKINS] });
   for (const warning of skinWarnings) logger.warn?.(`ADVARSEL: ${warning}`);
   const skinFiles = new Map([...skins.values()].map((skin) => [skin.file, skin.css]));

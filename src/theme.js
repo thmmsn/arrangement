@@ -206,13 +206,16 @@ export function siteHeader(theme, { wide = false, t }) {
   </header>`;
 }
 
-export function siteFooter(theme, { t }) {
+export function siteFooter(theme, { t, version = null }) {
   const text = theme.footerText || theme.siteName;
   const privacy = theme.privacyUrl
     ? `<a href="${escapeHtml(theme.privacyUrl)}" target="_blank" rel="noopener">${escapeHtml(t('common.privacy'))}</a>` : '';
-  if (!text && !privacy) return '';
-  return `<footer class="site-footer">
-    <div class="container">${[text ? escapeHtml(text) : '', privacy].filter(Boolean).join(' · ')}</div>
+  // Versjonsnummeret (se version.js) står nederst til høyre, også når bunnteksten ellers er tom.
+  const versionLine = version ? `\n    <div class="site-version">${escapeHtml(version)}</div>` : '';
+  if (!text && !privacy && !versionLine) return '';
+  const content = text || privacy
+    ? `\n    <div class="container">${[text ? escapeHtml(text) : '', privacy].filter(Boolean).join(' · ')}</div>` : '';
+  return `<footer class="site-footer">${content}${versionLine}
   </footer>`;
 }
 

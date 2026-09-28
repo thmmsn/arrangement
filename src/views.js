@@ -9,12 +9,13 @@ import { siteFooter, siteHeader, themeHead } from './theme.js';
 //   {{t:nøkkel}}                        tekst fra ordboken, HTML-escapet (f.eks. {{t:event.loading}})
 //   <!--THEME-HEAD-->                   stilark, fonter, favicon og arrangementets skin
 //   <!--SITE-HEADER--> / <!--SITE-HEADER wide-->   båndet og logo/navn øverst
-//   <!--SITE-FOOTER-->                  bunntekst og personvernlenke
+//   <!--SITE-FOOTER-->                  bunntekst, personvernlenke og versjonsnummeret
 //   <!--PAGE-META-->                    <meta>-tagger for akkurat denne siden (f.eks. delingstagger
 //                                       for et arrangement), ferdig escapet av den som lager dem
 // Temaet endres bare ved omstart, så hver side lages én gang per nettsted og holdes i minnet.
 // <!--PAGE-META--> er forskjellig for hver forespørsel og settes derfor inn etter mellomlagringen.
-export function createViews(dir) {
+// `version`: appens versjonsnummer (se version.js), vist nederst til høyre på alle sidene.
+export function createViews(dir, { version = null } = {}) {
   const templates = new Map();
   const rendered = new Map();
 
@@ -28,7 +29,7 @@ export function createViews(dir) {
     return html
       .replace('<!--THEME-HEAD-->', themeHead(theme, { cssHref: site.cssHref, skinHref: site.skinHref }))
       .replace(/<!--SITE-HEADER( wide)?-->/, (_, wide) => siteHeader(theme, { wide: Boolean(wide), t }))
-      .replace('<!--SITE-FOOTER-->', siteFooter(theme, { t }))
+      .replace('<!--SITE-FOOTER-->', siteFooter(theme, { t, version }))
       .replaceAll('{{LANG}}', escapeHtml(site.lang))
       .replaceAll('{{SITE_NAME}}', escapeHtml(theme.siteName || t('meta.siteNameFallback')))
       .replace(/\{\{t:([\w.]+)\}\}/g, (_, key) => escapeHtml(t(key)));
