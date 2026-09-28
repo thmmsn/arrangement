@@ -5,9 +5,9 @@ import { loadSites, SiteConfigError } from '../src/sites.js';
 import { createEvent, startApp } from './helpers.js';
 
 // To nettsteder på samme app og database: et norsk hovednettsted og et engelsk ekstra nettsted.
-const MAIN = 'booking.example.no';
-const COM = 'booking.example.com';
-const ADMIN = 'booking-admin.example.no';
+const MAIN = 'arrangement.example.no';
+const COM = 'events.example.com';
+const ADMIN = 'arrangement-admin.example.no';
 const TWO_SITES = {
   ADMIN_NO_AUTH: 'true',
   DOMAIN: MAIN,

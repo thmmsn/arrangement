@@ -70,8 +70,8 @@ test('svikter det ene oppslaget, vises det andre; svikter begge, svarer API-et 5
 });
 
 test('stedsoppslaget ligger bak admin-porten', async () => {
-  const app = await startApp({ ADMIN_HOST: 'admin.example.com', DOMAIN: 'booking.example.com', ADMIN_NO_AUTH: 'true' }, { placeSearch: { search: async () => [] } });
-  assert.equal((await app.request({ path: '/api/admin/places?q=Oslo', headers: { host: 'booking.example.com' } })).status, 404);
+  const app = await startApp({ ADMIN_HOST: 'admin.example.com', DOMAIN: 'events.example.com', ADMIN_NO_AUTH: 'true' }, { placeSearch: { search: async () => [] } });
+  assert.equal((await app.request({ path: '/api/admin/places?q=Oslo', headers: { host: 'events.example.com' } })).status, 404);
   assert.equal((await app.request({ path: '/api/admin/places?q=Oslo', headers: { host: 'admin.example.com' } })).status, 200);
 });
 

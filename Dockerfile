@@ -20,7 +20,7 @@ COPY public ./public
 
 # Databasen ligger i et volum, så den overlever nye versjoner av containeren.
 # Settes her (ikke i .env), slik at databasen alltid havner i volumet.
-ENV DATABASE_PATH=/data/booking.db
+ENV DATABASE_PATH=/data/arrangement.db
 VOLUME /data
 RUN mkdir -p /data && chown node:node /data
 USER node

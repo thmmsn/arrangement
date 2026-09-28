@@ -8,7 +8,7 @@ test('sender riktig forespørsel til Resend', async () => {
     request = { url, ...options, body: JSON.parse(options.body) };
     return new Response(JSON.stringify({ id: 'abc' }), { status: 200 });
   };
-  const mailer = createMailer({ apiKey: 're_test', from: 'Påmelding <booking@example.com>', fetchImpl });
+  const mailer = createMailer({ apiKey: 're_test', from: 'Påmelding <arrangement@example.com>', fetchImpl });
   const result = await mailer.send({ to: 'ola@example.com', subject: 'Hei', html: '<p>Hei</p>', text: 'Hei', replyTo: 'kari@example.com' });
 
   assert.equal(result.id, 'abc');
@@ -16,7 +16,7 @@ test('sender riktig forespørsel til Resend', async () => {
   assert.equal(request.method, 'POST');
   assert.equal(request.headers.Authorization, 'Bearer re_test');
   assert.deepEqual(request.body, {
-    from: 'Påmelding <booking@example.com>',
+    from: 'Påmelding <arrangement@example.com>',
     to: ['ola@example.com'],
     subject: 'Hei',
     html: '<p>Hei</p>',
@@ -48,7 +48,7 @@ const event = {
   capacity: 10,
   fields: [{ id: 'f1', label: 'Allergier', type: 'text' }],
 };
-const urls = { eventUrl: 'https://booking.example.com/abc', cancelUrl: 'https://booking.example.com/abc/avmelding#t', timeZone: 'Europe/Oslo' };
+const urls = { eventUrl: 'https://events.example.com/abc', cancelUrl: 'https://events.example.com/abc/avmelding#t', timeZone: 'Europe/Oslo' };
 
 test('brukerinnhold escapes i HTML-e-posten', () => {
   const message = guestConfirmation({
@@ -76,7 +76,7 @@ test('bekreftelsen til en gruppe går til kontaktpersonen og lister alle persone
   assert.equal(message.to, 'ola@example.com');
   assert.match(message.text, /Du har meldt på 3 personer: Ola, Kari og Per\./);
   assert.match(message.text, /Person 2\nNavn: Kari\nAllergier: Nøtter/);
-  assert.match(message.text, /du velger selv hvem: https:\/\/booking\.example\.com\/abc\/avmelding#t/);
+  assert.match(message.text, /du velger selv hvem: https:\/\/events\.example\.com\/abc\/avmelding#t/);
 });
 
 test('arrangøren får én e-post for hele gruppen', () => {

@@ -57,7 +57,7 @@ describe('billettnøkler', () => {
   });
 
   test('QR-koden er et SVG-bilde med hvit bakgrunn', () => {
-    const svg = qrSvg('https://booking.example.com/t/abc');
+    const svg = qrSvg('https://events.example.com/t/abc');
     assert.match(svg, /^<svg xmlns="http:\/\/www.w3.org\/2000\/svg"/);
     assert.match(svg, /<rect width="\d+" height="\d+" fill="#fff"\/>/);
     assert.match(svg, /<path fill="#000" d="M\d/);
@@ -76,13 +76,13 @@ describe('kalenderfil', () => {
     createdAt: '2030-01-01T10:00:00.000Z',
     updatedAt: '2030-01-01T10:00:30.000Z',
   };
-  const ics = eventIcs({ event, eventUrl: 'https://booking.example.com/abcdefghjkmn', host: 'booking.example.com', now: new Date('2030-02-01T00:00:00Z') });
+  const ics = eventIcs({ event, eventUrl: 'https://events.example.com/abcdefghjkmn', host: 'events.example.com', now: new Date('2030-02-01T00:00:00Z') });
 
   test('gyldig iCalendar: CRLF, UTC-tider, fast UID og SEQUENCE som øker', () => {
     assert.ok(ics.startsWith('BEGIN:VCALENDAR\r\nVERSION:2.0\r\n'));
     assert.ok(ics.endsWith('END:VCALENDAR\r\n'));
     assert.ok(!/[^\r]\n/.test(ics), 'alle linjeskift er CRLF');
-    assert.match(ics, /\r\nUID:abcdefghjkmn@booking\.example\.com\r\n/);
+    assert.match(ics, /\r\nUID:abcdefghjkmn@events\.example\.com\r\n/);
     assert.match(ics, /\r\nDTSTART:20301026T160000Z\r\n/);
     assert.match(ics, /\r\nDTEND:20301026T200000Z\r\n/);
     assert.match(ics, /\r\nSEQUENCE:30\r\n/);
@@ -94,7 +94,7 @@ describe('kalenderfil', () => {
     assert.equal(icsText('a;b,c\\d\ne'), 'a\\;b\\,c\\\\d\\ne');
     const unfolded = ics.replace(/\r\n /g, '');
     assert.match(unfolded, /SUMMARY;LANGUAGE=nb:Fest\\; med\\, komma\\\\ og «norske» tegn/);
-    assert.match(unfolded, /DESCRIPTION;LANGUAGE=nb:Første linje\\nAndre linje\\n\\nhttps:\/\/booking\.example\.com\/abcdefghjkmn/);
+    assert.match(unfolded, /DESCRIPTION;LANGUAGE=nb:Første linje\\nAndre linje\\n\\nhttps:\/\/events\.example\.com\/abcdefghjkmn/);
     for (const line of ics.split('\r\n')) assert.ok(Buffer.byteLength(line) <= 75, `for lang linje: ${line}`);
     const folded = foldLine(`X:${'ø'.repeat(100)}`);
     for (const line of folded.split('\r\n')) {
@@ -112,7 +112,7 @@ describe('kalenderfil', () => {
   });
 
   test('Google Kalender-lenken har tittel, tider og sted', () => {
-    const url = new URL(googleCalendarUrl({ event, eventUrl: 'https://booking.example.com/abcdefghjkmn' }));
+    const url = new URL(googleCalendarUrl({ event, eventUrl: 'https://events.example.com/abcdefghjkmn' }));
     assert.equal(url.searchParams.get('action'), 'TEMPLATE');
     assert.equal(url.searchParams.get('dates'), '20301026T160000Z/20301026T200000Z');
     assert.equal(url.searchParams.get('location'), 'Grendehuset, Nordbygda');
@@ -201,20 +201,20 @@ describe('billettene etter påmelding', () => {
   });
 
   test('billettene sendes til riktig domene (301)', async () => {
-    const app = await startApp({ ADMIN_NO_AUTH: 'true', DOMAIN: 'booking.example.no', SITE_COM_DOMAIN: 'booking.example.com', SITE_COM_LANG: 'en' });
-    const { slug } = await createEvent(app, { site: 'com' }, { host: 'booking.example.no' });
-    const res = await register(app, slug, { headers: { host: 'booking.example.com' } });
-    assert.match(res.json.ticketsUrl, /^https:\/\/booking\.example\.com\/b\//);
+    const app = await startApp({ ADMIN_NO_AUTH: 'true', DOMAIN: 'arrangement.example.no', SITE_COM_DOMAIN: 'events.example.com', SITE_COM_LANG: 'en' });
+    const { slug } = await createEvent(app, { site: 'com' }, { host: 'arrangement.example.no' });
+    const res = await register(app, slug, { headers: { host: 'events.example.com' } });
+    assert.match(res.json.ticketsUrl, /^https:\/\/events\.example\.com\/b\//);
     const path = pathOf(res.json.ticketsUrl);
-    const wrong = await app.request({ path, headers: { host: 'booking.example.no' } });
+    const wrong = await app.request({ path, headers: { host: 'arrangement.example.no' } });
     assert.equal(wrong.status, 301);
-    assert.equal(wrong.headers.location, `https://booking.example.com${path}`);
-    const ics = await app.request({ path: `/${slug}/kalender.ics`, headers: { host: 'booking.example.no' } });
+    assert.equal(wrong.headers.location, `https://events.example.com${path}`);
+    const ics = await app.request({ path: `/${slug}/kalender.ics`, headers: { host: 'arrangement.example.no' } });
     assert.equal(ics.status, 301);
     // Engelsk nettsted: engelske filnavn og tekster.
     const mail = app.sent.find((m) => m.to === 'ola@example.com');
     assert.equal(mail.attachments[1].filename, 'ticket-testarrangement.pdf');
-    assert.match(mail.text, /Show ticket: https:\/\/booking\.example\.com\/b\//);
+    assert.match(mail.text, /Show ticket: https:\/\/events\.example\.com\/b\//);
   });
 
   test('brytere per arrangement: alt er på som standard, og kan slås av', async () => {

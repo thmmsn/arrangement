@@ -23,7 +23,7 @@ export function loadConfig(rawEnv = process.env) {
     emailFrom: mainSite.emailFrom,
     warnings,
     wallet: { apple: wallet.apple, google: wallet.google },
-    databasePath: env.DATABASE_PATH || 'data/booking.db',
+    databasePath: env.DATABASE_PATH || 'data/arrangement.db',
     // Alle data om et arrangement (påmeldinger, navn, e-post, svar) slettes så mange dager etter
     // at det er over. Standard 30.
     deleteAfterDays: parseDays(env.DELETE_AFTER_DAYS, warnings),
@@ -46,7 +46,7 @@ export function loadConfig(rawEnv = process.env) {
     clientIpHeader: (env.CLIENT_IP_HEADER || '').toLowerCase(),
 
     // --- Administrasjon bak Cloudflare Access ---
-    // Eget vertsnavn for admin (f.eks. booking-admin.domain.com). Når det er satt, svarer /admin og
+    // Eget vertsnavn for admin (f.eks. arrangement-admin.domain.no). Når det er satt, svarer /admin og
     // /api/admin bare på dette vertsnavnet, og admin-lenkene i e-postene peker hit.
     adminHost: normalizeHost(env.ADMIN_HOST),
     // Når begge er satt, krever /admin og /api/admin et gyldig Cloudflare Access-token.

@@ -1,7 +1,7 @@
 {
-  "name": "booking",
+  "name": "arrangement",
   "version": "1.0.0",
-  "description": "Enkelt påmeldingssystem for arrangementer – ukjente lenker, egendefinerte felter og e-post via Resend.",
+  "description": "Arrangement / Events – enkelt påmeldingssystem med ukjente lenker, billetter, innsjekking og e-post via Resend.",
   "private": true,
   "type": "module",
   "main": "src/server.js",

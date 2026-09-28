@@ -15,7 +15,7 @@ after(() => servers.forEach((s) => s.close()));
 
 async function start(configOverrides = {}, deps = {}) {
   const config = {
-    baseUrl: 'https://booking.example.com',
+    baseUrl: 'https://events.example.com',
     adminNoAuth: false,
     timeZone: 'Europe/Oslo',
     trustProxy: true, // Verste tilfelle: X-Forwarded-Host skal likevel ikke kunne lure admin-porten.
@@ -87,11 +87,11 @@ function fakeCerts(...keys) {
 // ---------- Eget admin-vertsnavn ----------
 
 describe('ADMIN_HOST: admin bare på eget vertsnavn', () => {
-  const ADMIN = 'booking-admin.example.com';
+  const ADMIN = 'arrangement-admin.example.com';
 
   test('admin-sider og admin-API finnes ikke på det offentlige domenet', async () => {
     const port = await start({ adminHost: ADMIN, adminNoAuth: true });
-    const pub = { host: 'booking.example.com' };
+    const pub = { host: 'events.example.com' };
 
     assert.equal((await request(port, { path: '/admin/ny', headers: pub })).status, 404);
     assert.equal((await request(port, { path: '/api/admin/config', headers: pub })).status, 404);
@@ -111,14 +111,14 @@ describe('ADMIN_HOST: admin bare på eget vertsnavn', () => {
     const create = await request(port, { method: 'POST', path: '/api/admin/events', headers: adm, body: eventBody });
     assert.equal(create.status, 201);
     assert.equal(create.json.adminUrl, `https://${ADMIN}/admin/${create.json.slug}#${create.json.adminKey}`);
-    assert.equal(create.json.eventUrl, `https://booking.example.com/${create.json.slug}`);
+    assert.equal(create.json.eventUrl, `https://events.example.com/${create.json.slug}`);
 
     // Den offentlige siden virker fortsatt på det offentlige domenet.
-    const page = await request(port, { path: `/${create.json.slug}`, headers: { host: 'booking.example.com' } });
+    const page = await request(port, { path: `/${create.json.slug}`, headers: { host: 'events.example.com' } });
     assert.equal(page.status, 200);
 
     // Gamle admin-lenker sendes videre til admin-vertsnavnet.
-    const legacy = await request(port, { path: `/${create.json.slug}/admin`, headers: { host: 'booking.example.com' } });
+    const legacy = await request(port, { path: `/${create.json.slug}/admin`, headers: { host: 'events.example.com' } });
     assert.equal(legacy.status, 301);
     assert.equal(legacy.headers.location, `https://${ADMIN}/admin/${create.json.slug}`);
   });

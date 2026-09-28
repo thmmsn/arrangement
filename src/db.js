@@ -1,5 +1,5 @@
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, mkdirSync, renameSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import Database from 'better-sqlite3';
 import { newCode, newDoorCode } from './ids.js';
 
@@ -178,6 +178,24 @@ export const MIGRATIONS = [
     db.exec('CREATE UNIQUE INDEX registrations_door_code ON registrations(event_id, door_code);');
   },
 ];
+
+// Før prosjektet ble omdøpt til «arrangement», het databasefilen booking.db.
+export const LEGACY_DATABASE_NAME = 'booking.db';
+
+/**
+ * Finnes den gamle databasefilen (booking.db) i samme mappe, men ikke den nye, flyttes den – med
+ * WAL- og SHM-filene – så en eksisterende installasjon beholder alle data etter omdøpingen.
+ * Returnerer stien til den gamle filen hvis den ble flyttet, ellers null.
+ */
+export function adoptLegacyDatabase(path) {
+  if (path === ':memory:' || existsSync(path)) return null;
+  const legacy = join(dirname(path), LEGACY_DATABASE_NAME);
+  if (basename(path) === LEGACY_DATABASE_NAME || !existsSync(legacy)) return null;
+  for (const suffix of ['', '-wal', '-shm']) {
+    if (existsSync(legacy + suffix)) renameSync(legacy + suffix, path + suffix);
+  }
+  return legacy;
+}
 
 export function openDatabase(path) {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });

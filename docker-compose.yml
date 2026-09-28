@@ -7,13 +7,13 @@
 # trafikken for domenene dine inn gjennom tunnelen. HTTPS håndteres av Cloudflare.
 #
 # I Cloudflare-dashbordet (Zero Trust → Networks → Tunnels → din tunnel → Public Hostname):
-#   booking.domain.com        → HTTP  booking:3000
-#   booking-admin.domain.com  → HTTP  booking:3000   (hvis du bruker eget admin-vertsnavn, ADMIN_HOST)
+#   arrangement.domain.no        → HTTP  arrangement:3000
+#   arrangement-admin.domain.no  → HTTP  arrangement:3000   (hvis du bruker eget admin-vertsnavn, ADMIN_HOST)
 #
 # Alle innstillinger ligger i .env. Etter endringer i .env: `docker compose up -d` på nytt.
 
 services:
-  booking:
+  arrangement:
     build: .
     restart: unless-stopped
     env_file: .env
@@ -21,13 +21,13 @@ services:
       # Overstyrer .env med vilje:
       # - databasen skal alltid ligge i volumet (ellers forsvinner den ved neste deploy)
       # - appen kan bare nås gjennom tunnelen, så klientens IP kan trygt leses fra Cloudflares header
-      DATABASE_PATH: /data/booking.db
+      DATABASE_PATH: /data/arrangement.db
       PORT: "3000"
       CLIENT_IP_HEADER: cf-connecting-ip
       # Tunnel-tokenet trengs bare av cloudflared, ikke av appen.
       TUNNEL_TOKEN: ""
     volumes:
-      - booking-data:/data
+      - arrangement-data:/data
       # Egne filer (logo, favicon, CSS) i ./branding blir tilgjengelige som /assets/custom/…
       # f.eks. LOGO_URL=/assets/custom/logo.svg
       - ./branding:/app/branding:ro
@@ -44,7 +44,7 @@ services:
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:?Sett TUNNEL_TOKEN i .env (Zero Trust → Networks → Tunnels)}
     depends_on:
-      - booking
+      - arrangement
 
 volumes:
-  booking-data:
+  arrangement-data:

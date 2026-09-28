@@ -1,9 +1,11 @@
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
-import { createRepository, openDatabase } from './db.js';
+import { adoptLegacyDatabase, createRepository, openDatabase } from './db.js';
 import { createMailer } from './email.js';
 
 const config = loadConfig();
+const legacy = adoptLegacyDatabase(config.databasePath);
+if (legacy) console.log(`Databasen er flyttet fra ${legacy} til ${config.databasePath} (prosjektet heter nå «arrangement»).`);
 const db = openDatabase(config.databasePath);
 const repo = createRepository(db);
 const mailer = createMailer({ apiKey: config.resendApiKey, from: config.emailFrom });
@@ -61,7 +63,7 @@ const server = app.listen(config.port, () => {
   for (const site of config.sites) {
     console.log(`Nettsted «${site.id}»: ${site.baseUrl} (${site.lang})`);
   }
-  console.log(`Booking kjører på port ${config.port}`);
+  console.log(`Arrangement kjører på port ${config.port}`);
 });
 
 // Avslutt pent (f.eks. ved ny deploy), slik at SQLite får lukket filen ordentlig.

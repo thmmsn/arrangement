@@ -33,7 +33,7 @@ Filene ligger i `public/assets/skins/`. Se gjerne i dem når du skal lage en ege
    inneholde små bokstaver (a–z), tall og bindestrek, og kan være maks 40 tegn.
 2. Start containeren på nytt, så skinnen blir lest inn:
    ```sh
-   docker compose up -d --force-recreate booking
+   docker compose up -d --force-recreate arrangement
    ```
    Mappen er montert inn som `/app/skins` (se `docker-compose.yml`). Kjører du uten Docker, leses
    `skins/` i prosjektmappen.
@@ -41,7 +41,7 @@ Filene ligger i `public/assets/skins/`. Se gjerne i dem når du skal lage en ege
 
 En egen skin med samme id som en innebygd (for eksempel `skins/dark.css`) erstatter den innebygde.
 
-Ugyldige filer hoppes over, og årsaken står i loggen ved oppstart (`docker compose logs booking`).
+Ugyldige filer hoppes over, og årsaken står i loggen ved oppstart (`docker compose logs arrangement`).
 Det gjelder feil filnavn, filer større enn 200 kB og `@import` fra adresser nettleseren blokkerer.
 
 ### Toppen av filen

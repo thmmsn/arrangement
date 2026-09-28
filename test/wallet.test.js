@@ -27,8 +27,8 @@ const event = {
   organizerName: 'Arrangør',
 };
 const tickets = [
-  { name: 'Ola Nordmann', code: 'k7hq2mxpr9', doorCode: 'KMRTW', url: 'https://booking.example.com/t/k7hq2mxpr9AAAA', index: 1, total: 2 },
-  { name: 'Kari Nordmann', code: 'p3wn8zqrt2', doorCode: 'PLSXB', url: 'https://booking.example.com/t/p3wn8zqrt2BBBB', index: 2, total: 2 },
+  { name: 'Ola Nordmann', code: 'k7hq2mxpr9', doorCode: 'KMRTW', url: 'https://events.example.com/t/k7hq2mxpr9AAAA', index: 1, total: 2 },
+  { name: 'Kari Nordmann', code: 'p3wn8zqrt2', doorCode: 'PLSXB', url: 'https://events.example.com/t/p3wn8zqrt2BBBB', index: 2, total: 2 },
 ];
 
 // ---------- Testsertifikater: en «WWDR»-CA og et kortsertifikat utstedt av den ----------
@@ -48,7 +48,7 @@ function certificates() {
     return { cert, key: keys.privateKey };
   };
   const ca = make('Test WWDR', 'Test WWDR', null, true);
-  const signer = make('Pass Type ID: pass.no.example.booking', 'Test WWDR', ca.key, false);
+  const signer = make('Pass Type ID: pass.no.example.arrangement', 'Test WWDR', ca.key, false);
   return { ca, signer };
 }
 
@@ -77,13 +77,13 @@ function unzip(buffer) {
 
 describe('Apple Wallet', () => {
   const { ca, signer } = certificates();
-  const config = { passTypeId: 'pass.no.example.booking', teamId: 'ABCDE12345', cert: signer.cert, key: signer.key, wwdr: ca.cert };
-  const opts = { config, event, site, timeZone: 'Europe/Oslo', eventUrl: 'https://booking.example.com/abcdefghjkmn' };
+  const config = { passTypeId: 'pass.no.example.arrangement', teamId: 'ABCDE12345', cert: signer.cert, key: signer.key, wwdr: ca.cert };
+  const opts = { config, event, site, timeZone: 'Europe/Oslo', eventUrl: 'https://events.example.com/abcdefghjkmn' };
 
   test('pass.json: QR med billettlenken, tid og sted så kortet dukker opp av seg selv', () => {
     const pass = passJson({ ...opts, ticket: tickets[0] });
     assert.equal(pass.formatVersion, 1);
-    assert.equal(pass.passTypeIdentifier, 'pass.no.example.booking');
+    assert.equal(pass.passTypeIdentifier, 'pass.no.example.arrangement');
     assert.equal(pass.teamIdentifier, 'ABCDE12345');
     assert.equal(pass.serialNumber, 'k7hq2mxpr9');
     // Under QR-koden står dørkoden, som dørvakten kan taste inn.
@@ -153,7 +153,7 @@ describe('Apple Wallet', () => {
 
   test('oppsett fra filer: PEM, .p12 med passord, og WWDR som DER', () => {
     const pem = forge.pki.certificateToPem(signer.cert) + forge.pki.privateKeyToPem(signer.key);
-    assert.equal(readSignerCertificate(Buffer.from(pem)).cert.subject.getField('CN').value, 'Pass Type ID: pass.no.example.booking');
+    assert.equal(readSignerCertificate(Buffer.from(pem)).cert.subject.getField('CN').value, 'Pass Type ID: pass.no.example.arrangement');
     const p12 = forge.pkcs12.toPkcs12Asn1(signer.key, [signer.cert], 'hemmelig', { algorithm: '3des' });
     const p12Buffer = Buffer.from(forge.asn1.toDer(p12).getBytes(), 'binary');
     assert.ok(readSignerCertificate(p12Buffer, 'hemmelig').key);
@@ -183,7 +183,7 @@ describe('Apple Wallet', () => {
 describe('Google Wallet', () => {
   const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const config = { issuerId: '3388000000012345678', clientEmail: 'wallet@prosjekt.iam.gserviceaccount.com', privateKey };
-  const opts = { config, event, site, eventUrl: 'https://booking.example.com/abcdefghjkmn', tickets };
+  const opts = { config, event, site, eventUrl: 'https://events.example.com/abcdefghjkmn', tickets };
 
   test('lagre-lenken er en RS256-JWT signert med tjenestekontoens nøkkel', () => {
     const url = googleSaveUrl(opts);
@@ -195,12 +195,12 @@ describe('Google Wallet', () => {
     assert.equal(claims.iss, 'wallet@prosjekt.iam.gserviceaccount.com');
     assert.equal(claims.aud, 'google');
     assert.equal(claims.typ, 'savetowallet');
-    assert.deepEqual(claims.origins, ['https://booking.example.com']);
+    assert.deepEqual(claims.origins, ['https://events.example.com']);
   });
 
   test('klassen har tid, sted og veibeskrivelse; hvert objekt har QR med billettlenken', () => {
-    const { payload } = googleClaims({ ...opts, heroImage: 'https://booking.example.com/abcdefghjkmn/bilde/0123456789abcdef.jpg' });
-    assert.deepEqual(payload.eventTicketClasses[0].heroImage, { sourceUri: { uri: 'https://booking.example.com/abcdefghjkmn/bilde/0123456789abcdef.jpg' } });
+    const { payload } = googleClaims({ ...opts, heroImage: 'https://events.example.com/abcdefghjkmn/bilde/0123456789abcdef.jpg' });
+    assert.deepEqual(payload.eventTicketClasses[0].heroImage, { sourceUri: { uri: 'https://events.example.com/abcdefghjkmn/bilde/0123456789abcdef.jpg' } });
     assert.equal(googleClaims({ ...opts, heroImage: 'http://localhost:3000/x.jpg' }).payload.eventTicketClasses[0].heroImage, undefined);
     const [cls] = payload.eventTicketClasses;
     assert.equal(cls.id, '3388000000012345678.event-abcdefghjkmn');

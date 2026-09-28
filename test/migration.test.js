@@ -9,8 +9,8 @@ import { hashSecret } from '../src/ids.js';
 
 // Sikrer at en database fra første versjon (én gjest per påmelding) oppgraderes uten tap av data.
 test('versjon 1-database migreres til påmeldinger med flere personer', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'booking-migrering-'));
-  const path = join(dir, 'booking.db');
+  const dir = mkdtempSync(join(tmpdir(), 'arrangement-migrering-'));
+  const path = join(dir, 'arrangement.db');
   try {
     const old = new Database(path);
     old.exec(MIGRATIONS[0]);
@@ -57,8 +57,8 @@ test('versjon 1-database migreres til påmeldinger med flere personer', () => {
 
 // Versjon 3 knytter arrangementer til et nettsted. Eksisterende arrangementer skal havne på hovednettstedet.
 test('versjon 2-database migreres: eksisterende arrangementer havner på hovednettstedet', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'booking-migrering-'));
-  const path = join(dir, 'booking.db');
+  const dir = mkdtempSync(join(tmpdir(), 'arrangement-migrering-'));
+  const path = join(dir, 'arrangement.db');
   try {
     const old = new Database(path);
     old.exec(MIGRATIONS[0]);
@@ -90,8 +90,8 @@ test('versjon 2-database migreres: eksisterende arrangementer havner på hovedne
 
 // Versjon 4: billetter, innsjekking, kartpunkt, etteranmelding, skin og avlysning.
 test('versjon 3-database migreres: billettnumre, hemmelighet og brytere – ingen rapport for gamle frister', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'booking-migrering-'));
-  const path = join(dir, 'booking.db');
+  const dir = mkdtempSync(join(tmpdir(), 'arrangement-migrering-'));
+  const path = join(dir, 'arrangement.db');
   try {
     const old = new Database(path);
     for (const migration of MIGRATIONS.slice(0, 3)) old.exec(migration);
@@ -146,8 +146,8 @@ test('versjon 3-database migreres: billettnumre, hemmelighet og brytere – inge
 
 // Versjon 5: dørkode per person og tabell for opplastede bilder.
 test('versjon 4-database migreres: alle får en dørkode, unik innenfor arrangementet', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'booking-migrering-'));
-  const path = join(dir, 'booking.db');
+  const dir = mkdtempSync(join(tmpdir(), 'arrangement-migrering-'));
+  const path = join(dir, 'arrangement.db');
   try {
     const old = new Database(path);
     for (const migration of MIGRATIONS.slice(0, 4)) {
@@ -175,6 +175,33 @@ test('versjon 4-database migreres: alle får en dørkode, unik innenfor arrangem
     assert.equal(repo.findRegistrationByDoorCode(1, codes[7]).name, 'Person 7');
     assert.equal(repo.imageMeta(1), null);
     db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Prosjektet het «booking» før, og databasefilen booking.db. En eksisterende installasjon skal
+// beholde alle data etter omdøpingen.
+test('den gamle databasefilen booking.db tas over av arrangement.db', async () => {
+  const { adoptLegacyDatabase } = await import('../src/db.js');
+  const dir = mkdtempSync(join(tmpdir(), 'arrangement-omdoping-'));
+  try {
+    const legacy = openDatabase(join(dir, 'booking.db'));
+    createRepository(legacy).createEvent({
+      slug: 'abcdefghjkmn', adminKeyHash: 'x', title: 'Fra før', description: '', location: '', startsAt: '2030-01-01T10:00:00.000Z',
+      endsAt: null, registrationDeadline: null, capacity: null, maxPerBooking: 10, showCount: true, isOpen: true,
+      organizerName: 'Kari', organizerEmail: 'kari@example.com', imageUrl: null, fields: [], site: 'main',
+    });
+    legacy.close();
+
+    const path = join(dir, 'arrangement.db');
+    assert.equal(adoptLegacyDatabase(path), join(dir, 'booking.db'));
+    const db = openDatabase(path);
+    assert.equal(createRepository(db).findEvent('abcdefghjkmn').title, 'Fra før');
+    db.close();
+    // Finnes den nye filen allerede, røres ingenting.
+    assert.equal(adoptLegacyDatabase(path), null);
+    assert.equal(adoptLegacyDatabase(':memory:'), null);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -54,7 +54,7 @@ export function ticketsPdf({ event, site, timeZone, eventUrl, tickets }) {
     size: 'A5',
     margin: 36,
     autoFirstPage: false,
-    info: { Title: pdfSafe(event.title), Author: pdfSafe(theme.siteName || event.organizerName), Creator: 'Booking' },
+    info: { Title: pdfSafe(event.title), Author: pdfSafe(theme.siteName || event.organizerName), Creator: 'Arrangement' },
   });
   const chunks = [];
   doc.on('data', (chunk) => chunks.push(chunk));

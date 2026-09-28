@@ -210,17 +210,17 @@ describe('opplasting i appen', () => {
   });
 
   test('bildet vises bare på arrangementets eget domene', async () => {
-    const app = await startApp({ ADMIN_NO_AUTH: 'true', DOMAIN: 'booking.example.no', SITE_COM_DOMAIN: 'booking.example.com' });
-    const { slug, adminKey } = await createEvent(app, { site: 'com' }, { host: 'booking.example.no' });
+    const app = await startApp({ ADMIN_NO_AUTH: 'true', DOMAIN: 'arrangement.example.no', SITE_COM_DOMAIN: 'events.example.com' });
+    const { slug, adminKey } = await createEvent(app, { site: 'com' }, { host: 'arrangement.example.no' });
     const res = await app.request({
       method: 'PUT', path: `/api/admin/events/${slug}/image`, raw: png(),
-      headers: { host: 'booking.example.no', 'content-type': 'image/png', 'content-length': png().length, authorization: `Bearer ${adminKey}` },
+      headers: { host: 'arrangement.example.no', 'content-type': 'image/png', 'content-length': png().length, authorization: `Bearer ${adminKey}` },
     });
     const path = new URL(res.json.uploadedImage).pathname;
-    assert.match(res.json.uploadedImage, /^https:\/\/booking\.example\.com\//);
-    const wrong = await app.request({ path, headers: { host: 'booking.example.no' } });
+    assert.match(res.json.uploadedImage, /^https:\/\/events\.example\.com\//);
+    const wrong = await app.request({ path, headers: { host: 'arrangement.example.no' } });
     assert.equal(wrong.status, 301);
-    assert.equal(wrong.headers.location, `https://booking.example.com${path}`);
+    assert.equal(wrong.headers.location, `https://events.example.com${path}`);
     assert.equal((await app.request({ path: `/abcdefghjkmn/bilde/${path.split('/').pop()}` })).text, 'Not Found');
   });
 });

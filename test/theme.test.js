@@ -18,8 +18,8 @@ test('.env.example gir ingen advarsler, selv når den leses bokstavelig av docke
   const env = parseEnvLikeDocker(readFileSync(new URL('../.env.example', import.meta.url), 'utf8'));
   const config = loadConfig(env);
   assert.deepEqual(config.warnings, []);
-  assert.equal(config.emailFrom, 'Påmelding <booking@domain.com>');
-  assert.equal(config.baseUrl, 'https://booking.domain.com');
+  assert.equal(config.emailFrom, 'Påmelding <arrangement@domain.no>');
+  assert.equal(config.baseUrl, 'https://arrangement.domain.no');
 });
 
 test('standardtemaet gir det opprinnelige uttrykket', () => {
@@ -127,17 +127,17 @@ test('eget stilark på et annet domene tillates i Content-Security-Policy', asyn
 
 test('e-postene bruker temaets farger, logo (med full adresse) og navn', () => {
   const { mainSite: site } = loadConfig({
-    DOMAIN: 'booking.example.com', COLOR_ACCENT: '#1f4e79', COLOR_ACCENT_TEXT: '#000', LOGO_URL: '/assets/custom/logo.png', SITE_NAME: 'Eksempel',
+    DOMAIN: 'events.example.com', COLOR_ACCENT: '#1f4e79', COLOR_ACCENT_TEXT: '#000', LOGO_URL: '/assets/custom/logo.png', SITE_NAME: 'Eksempel',
   });
   const message = guestConfirmation({
     event: { title: 'Kurs', startsAt: '2026-11-14T17:00:00Z', location: '', organizerName: 'Kari', organizerEmail: 'k@example.com', fields: [] },
     booking: { contactName: 'Ola', contactEmail: 'ola@example.com', persons: [{ name: 'Ola', email: 'ola@example.com', answers: {} }] },
-    eventUrl: 'https://booking.example.com/abc',
-    cancelUrl: 'https://booking.example.com/abc/avmelding#t',
+    eventUrl: 'https://events.example.com/abc',
+    cancelUrl: 'https://events.example.com/abc/avmelding#t',
     timeZone: 'Europe/Oslo',
     site,
   });
-  assert.match(message.html, /<img src="https:\/\/booking\.example\.com\/assets\/custom\/logo\.png" alt="Eksempel"/);
+  assert.match(message.html, /<img src="https:\/\/events\.example\.com\/assets\/custom\/logo\.png" alt="Eksempel"/);
   assert.match(message.html, /background:#1f4e79;color:#000;/);
   assert.doesNotMatch(message.html, /#8b2e2a/);
 });

@@ -7,7 +7,7 @@ import { startApp } from './helpers.js';
 // Kjører hele appen mot en database i minnet, med en falsk e-posttjeneste som bare husker meldingene.
 
 const config = {
-  baseUrl: 'https://booking.example.com',
+  baseUrl: 'https://events.example.com',
   // Testene kjører uten Cloudflare Access, som ved lokal utvikling.
   adminNoAuth: true,
   timeZone: 'Europe/Oslo',
@@ -116,8 +116,8 @@ describe('opprette arrangement', () => {
     const res = await call('/api/admin/events', { method: 'POST', body: eventInput(), });
     assert.equal(res.status, 201);
     assert.match(res.data.slug, /^[a-z2-9]{12}$/);
-    assert.equal(res.data.eventUrl, `https://booking.example.com/${res.data.slug}`);
-    assert.equal(res.data.adminUrl, `https://booking.example.com/admin/${res.data.slug}#${res.data.adminKey}`);
+    assert.equal(res.data.eventUrl, `https://events.example.com/${res.data.slug}`);
+    assert.equal(res.data.adminUrl, `https://events.example.com/admin/${res.data.slug}#${res.data.adminKey}`);
     assert.equal(sent.length, 1);
     assert.equal(sent[0].to, 'kari@example.com');
     assert.ok(sent[0].text.includes(res.data.adminUrl));

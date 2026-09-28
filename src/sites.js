@@ -6,7 +6,7 @@
 // virker uendret.
 //
 // Et ekstra nettsted defineres med et prefiks, SITE_<ID>_, og finnes så snart SITE_<ID>_DOMAIN er satt:
-//   SITE_COM_DOMAIN=booking.domain.com
+//   SITE_COM_DOMAIN=arrangement.domain.no
 //   SITE_COM_LANG=en
 //   SITE_COM_SITE_NAME=…, SITE_COM_LOGO_URL=…, SITE_COM_EMAIL_FROM=…, SITE_COM_BASE_URL=…
 // Temavariabler og EMAIL_FROM som ikke er satt for nettstedet, arves fra hovednettstedet.
@@ -19,13 +19,13 @@ import { DEFAULT_LANG, isLanguage, LANGUAGES, translator } from '../public/asset
 import { LANGUAGE_BOUND_KEYS, loadTheme, THEME_ENV_KEYS } from './theme.js';
 
 export const MAIN_SITE = 'main';
-const DEFAULT_EMAIL_FROM = 'Påmelding <booking@example.com>';
+const DEFAULT_EMAIL_FROM = 'Påmelding <arrangement@example.com>';
 // Variabler hovednettstedet bruker, og som begynner med SITE_ uten å være et prefiks.
 const MAIN_SITE_KEYS = new Set(['SITE_NAME', 'SITE_LANG']);
 
 export class SiteConfigError extends Error {}
 
-/** «Booking.Domain.com:443/sti» → «booking.domain.com». Godtar også «https://…». */
+/** «Arrangement.Domain.no:443/sti» → «arrangement.domain.no». Godtar også «https://…». */
 export function normalizeHost(value) {
   return (value || '').trim().toLowerCase()
     .replace(/^https?:\/\//, '')

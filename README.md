@@ -1,8 +1,10 @@
-# Booking – enkelt påmeldingssystem
+# Arrangement / Events – enkelt påmeldingssystem
+
+*Arrangement* på norsk, *Events* på engelsk.
 
 Et lite og enkelt alternativ til Hoopla for påmelding til arrangementer:
 
-- **Arrangementer kan bare nås via lenke** – `booking.domain.com/<hash>`. Det finnes ingen oversikt, og søkemotorer blir bedt om å holde seg unna.
+- **Arrangementer kan bare nås via lenke** – `arrangement.domain.no/<hash>`. Det finnes ingen oversikt, og søkemotorer blir bedt om å holde seg unna.
 - **Forsidebilde** som lastes opp (GPS og andre metadata fjernes) eller lenkes til.
 - **Påmelding med navn, e-post og egendefinerte felter** (kort tekst, lang tekst, telefon, tall, nedtrekksliste, avkrysning).
 - **Den som melder på kan legge til flere personer** i samme skjema. Hver person er én gjest og tar én plass, og hver person svarer på de egendefinerte feltene (f.eks. allergier). Arrangøren bestemmer hvor mange som kan meldes på om gangen (standard 10, 1 = bare seg selv).
@@ -112,7 +114,7 @@ server
 
 `docker-compose.yml` starter to containere:
 
-- **booking** – appen. Databasen ligger i volumet `booking-data`, så den overlever nye versjoner.
+- **arrangement** – appen. Databasen ligger i volumet `arrangement-data`, så den overlever nye versjoner.
 - **cloudflared** – kobler seg *ut* til Cloudflare. Ingen porter åpnes på serveren; appen kan bare nås gjennom tunnelen.
 
 ### 1. Opprett tunnelen
@@ -123,11 +125,11 @@ server
 
    | Hostname | Service |
    |---|---|
-   | `booking.domain.com` | `HTTP` → `booking:3000` |
-   | `booking.domain.net` *(ett per ekstra nettsted, se [Flere nettsteder](#flere-nettsteder))* | `HTTP` → `booking:3000` |
-   | `booking-admin.domain.com` *(hvis du bruker eget admin-vertsnavn)* | `HTTP` → `booking:3000` |
+   | `arrangement.domain.no` | `HTTP` → `arrangement:3000` |
+   | `events.domain.com` *(ett per ekstra nettsted, se [Flere nettsteder](#flere-nettsteder))* | `HTTP` → `arrangement:3000` |
+   | `arrangement-admin.domain.no` *(hvis du bruker eget admin-vertsnavn)* | `HTTP` → `arrangement:3000` |
 
-   `booking` er navnet på app-containeren i `docker-compose.yml`, så cloudflared finner den direkte.
+   `arrangement` er navnet på app-containeren i `docker-compose.yml`, så cloudflared finner den direkte.
 
 ### 2. Fyll inn `.env` og start
 
@@ -135,12 +137,12 @@ server
 cp .env.example .env
 nano .env                       # DOMAIN, TUNNEL_TOKEN, RESEND_API_KEY, EMAIL_FROM, …
 docker compose up -d --build
-docker compose logs -f booking  # se at alt starter, og eventuelle advarsler
+docker compose logs -f arrangement  # se at alt starter, og eventuelle advarsler
 ```
 
 Etter endringer i `.env`: kjør `docker compose up -d` på nytt, så startes appen med de nye verdiene. Ny versjon av koden: `git pull && docker compose up -d --build`.
 
-Noen innstillinger er låst i `docker-compose.yml` med vilje, uansett hva `.env` sier: databasen ligger alltid i volumet (`/data/booking.db`), klient-IP leses fra Cloudflares `cf-connecting-ip`, og appen får ikke se `TUNNEL_TOKEN`.
+Noen innstillinger er låst i `docker-compose.yml` med vilje, uansett hva `.env` sier: databasen ligger alltid i volumet (`/data/arrangement.db`), klient-IP leses fra Cloudflares `cf-connecting-ip`, og appen får ikke se `TUNNEL_TOKEN`.
 
 ### 3. Skjul administrasjonen bak Cloudflare Access
 
@@ -148,15 +150,15 @@ All administrasjon ligger under `/admin` (sider) og `/api/admin` (API). Resten �
 
 **A. Eget subdomene (anbefalt)** – enklest å få riktig:
 
-1. Sett `ADMIN_HOST=booking-admin.domain.com` i `.env`. Da finnes `/admin` og `/api/admin` *bare* på det vertsnavnet; på `booking.domain.com` gir de 404. Admin-lenkene i e-postene peker dit.
+1. Sett `ADMIN_HOST=arrangement-admin.domain.no` i `.env`. Da finnes `/admin` og `/api/admin` *bare* på det vertsnavnet; på `arrangement.domain.no` gir de 404. Admin-lenkene i e-postene peker dit.
 2. Legg til vertsnavnet i tunnelen (se over).
-3. **Zero Trust → Access → Applications → Add an application → Self-hosted**, domene `booking-admin.domain.com` (hele), og en policy som slipper inn deg (og eventuelle arrangører), f.eks. *Emails* med innlogging via engangskode.
+3. **Zero Trust → Access → Applications → Add an application → Self-hosted**, domene `arrangement-admin.domain.no` (hele), og en policy som slipper inn deg (og eventuelle arrangører), f.eks. *Emails* med innlogging via engangskode.
 
-> Bruk ett nivå under domenet (`booking-admin.domain.com`), ikke `admin.booking.domain.com` – Cloudflares gratis sertifikat dekker bare ett nivå.
+> Bruk ett nivå under domenet (`arrangement-admin.domain.no`), ikke `admin.arrangement.domain.no` – Cloudflares gratis sertifikat dekker bare ett nivå.
 
 Med flere nettsteder er A det klart beste valget: ellers finnes `/admin` på hvert eneste offentlige domene, og hvert domene trenger sin egen Access-regel. Uten `ADMIN_HOST` skriver appen en advarsel ved oppstart.
 
-**B. Samme domene, egne stier:** Lag én Access-applikasjon for `booking.domain.com` med **to** stier: `admin` og `api/admin`. Glemmer du `api/admin`, er selve dataene ubeskyttet av Access – derfor anbefales C i tillegg.
+**B. Samme domene, egne stier:** Lag én Access-applikasjon for `arrangement.domain.no` med **to** stier: `admin` og `api/admin`. Glemmer du `api/admin`, er selve dataene ubeskyttet av Access – derfor anbefales C i tillegg.
 
 **C. La appen verifisere Access (påkrevd, i tillegg til A eller B):**
 
@@ -177,13 +179,34 @@ Access er den eneste innloggingen – det finnes ikke noe passord. Uten C er opp
 | Oppretting slått av uten Access | At en glemt innstilling åpner for oppretting |
 | Rate limiting per ekte klient-IP | Masseoppretting og spam (maks 20 nye arrangementer per 15 min) |
 
+### Oppgradering fra «booking»
+
+Prosjektet het tidligere *booking*. Tjenesten i `docker-compose.yml` heter nå `arrangement`, volumet `arrangement-data` og databasefilen `arrangement.db`. En eksisterende installasjon beholder dataene slik:
+
+1. **Databasefilen** flyttes automatisk. Finner appen `booking.db`, men ikke `arrangement.db`, i samme mappe, flyttes filen (med `-wal` og `-shm`) ved oppstart, og det står i loggen.
+2. **Docker-volumet** har fått nytt navn, så dataene må kopieres over én gang, før appen startes med den nye versjonen:
+
+   ```bash
+   docker compose down
+   docker volume ls                       # finn det gamle volumet, f.eks. booking_booking-data
+   docker volume create arrangement_arrangement-data
+   docker run --rm -v booking_booking-data:/fra -v arrangement_arrangement-data:/til alpine cp -a /fra/. /til/
+   docker compose up -d --build
+   ```
+
+   Volumnavnet får mappenavnet som prefiks (`<mappe>_arrangement-data`). Kjører du fra en mappe som fortsatt heter `booking`, blir det nye volumet `booking_arrangement-data`, og da skal det navnet brukes i kommandoene over.
+3. **Cloudflare-tunnelen:** tjenesten heter nå `arrangement`, så *Public Hostname* må peke til `HTTP` → `arrangement:3000` (tidligere `booking:3000`).
+4. **GitHub:** navnet på repoet endres under *Settings → General → Repository name*. GitHub sender gamle adresser videre, men oppdater gjerne `git remote set-url origin …`.
+
+Domenene dine endres ikke av omdøpingen. `arrangement.domain.no` og `events.domain.com` i dokumentasjonen er bare eksempler.
+
 ### Sikkerhetskopi
 
 SQLite-databasen er én fil i volumet. Ta en trygg kopi mens appen kjører:
 
 ```bash
-docker compose exec booking node -e "require('better-sqlite3')('/data/booking.db').backup('/data/backup.db').then(() => console.log('ok'))"
-docker compose cp booking:/data/backup.db ./backup-$(date +%F).db
+docker compose exec arrangement node -e "require('better-sqlite3')('/data/arrangement.db').backup('/data/backup.db').then(() => console.log('ok'))"
+docker compose cp arrangement:/data/backup.db ./backup-$(date +%F).db
 ```
 
 ### Uten Docker eller Cloudflare
@@ -200,23 +223,23 @@ Samme app, database og admin kan betjene flere offentlige domener samtidig. Hver
 
 ```ini
 # Hovednettstedet: dagens variabler, uendret
-DOMAIN=booking.domain.com
+DOMAIN=arrangement.domain.no
 SITE_LANG=nb
 SITE_NAME=Påmelding
 LOGO_URL=/assets/custom/logo.svg
-EMAIL_FROM=Påmelding <booking@domain.com>
+EMAIL_FROM=Påmelding <arrangement@domain.no>
 COLOR_ACCENT=#8b2e2a
 
 # Et ekstra nettsted med prefikset SITE_NET_
-SITE_NET_DOMAIN=booking.domain.net
+SITE_NET_DOMAIN=events.domain.com
 SITE_NET_LANG=en
 SITE_NET_SITE_NAME=Registration
 SITE_NET_LOGO_URL=/assets/custom/logo-en.svg
-SITE_NET_EMAIL_FROM=Registration <booking@domain.net>
+SITE_NET_EMAIL_FROM=Registration <events@domain.com>
 # SITE_NET_COLOR_ACCENT er ikke satt → arves fra hovednettstedet (#8b2e2a)
 
 # Anbefalt: admin på eget vertsnavn, så /admin ikke finnes på noen av de offentlige domenene
-ADMIN_HOST=booking-admin.domain.com
+ADMIN_HOST=arrangement-admin.domain.no
 ```
 
 - **Hovednettstedet** kommer fra de vanlige variablene (`DOMAIN`, `BASE_URL`, `EMAIL_FROM`, `SITE_LANG` og temavariablene). Eksisterende installasjoner fortsetter å virke uten endringer, og de får ID-en `main`.
@@ -254,7 +277,7 @@ En test sjekker at alle språk har nøyaktig de samme nøklene og plassholderne,
 
 Hver person i en påmelding får en billett med QR-kode og en **dørkode** på 5 bokstaver, for eksempel `FFRXK`. Bekreftelses-e-posten har en knapp til siden med alle billettene i påmeldingen (`/b/…`). Der kan man bla mellom billettene (1 / 3), laste ned PDF, legge dem i Apple Wallet eller Google Wallet og legge arrangementet i kalenderen. PDF-billetten (én side per person) og kalenderfilen ligger også ved e-posten. Etter påmeldingen vises knappen «Vis billettene» med én gang.
 
-**QR-koden er en lenke:** `https://booking.domain.com/t/<billettnummer><signatur>`. Da kan den skannes med vanlig kamera på alle telefoner. Signaturen er
+**QR-koden er en lenke:** `https://arrangement.domain.no/t/<billettnummer><signatur>`. Da kan den skannes med vanlig kamera på alle telefoner. Signaturen er
 
 $$\text{signatur} = \mathrm{HMAC\text{-}SHA256}(\text{hemmelighet},\ \texttt{ticket:} \,\|\, \text{nummer})$$
 
@@ -352,7 +375,7 @@ Kortet (`.pkpass`) har QR-koden, navnet, tid og sted, og på baksiden lenker til
 
 Oppsett (krever Apple Developer Program):
 
-1. *Certificates, Identifiers & Profiles → Identifiers → Pass Type IDs*: lag en id, f.eks. `pass.no.domain.booking`.
+1. *Certificates, Identifiers & Profiles → Identifiers → Pass Type IDs*: lag en id, f.eks. `pass.no.domain.arrangement`.
 2. Lag et sertifikat for den (*Create Certificate*), last det ned, åpne det i Nøkkelring og eksporter sertifikat og nøkkel som `.p12` med passord.
 3. Last ned Apples mellomsertifikat *Worldwide Developer Relations – G4* fra <https://www.apple.com/certificateauthority/>.
 4. Legg filene i `./secrets` og sett `APPLE_WALLET_*` i `.env` (se `.env.example`). Team ID står øverst til høyre i utviklerkontoen.
@@ -436,9 +459,9 @@ Vedlikeholdet, altså rapporter og sletting, kjøres ved oppstart og deretter hv
 ## Sette opp Resend
 
 1. Opprett konto på <https://resend.com>.
-2. **Domains → Add Domain**: legg til `domain.com` (eller et underdomene som `mail.domain.com`). Resend viser noen DNS-poster (SPF/MX og DKIM, gjerne også DMARC) som du legger inn hos Cloudflare DNS. Vent til domenet står som *Verified*.
+2. **Domains → Add Domain**: legg til `domain.no` (eller et underdomene som `mail.domain.no`). Med et engelsk nettsted på `events.domain.com` legges også `domain.com` til. Resend viser noen DNS-poster (SPF/MX og DKIM, gjerne også DMARC) som du legger inn hos Cloudflare DNS. Vent til domenet står som *Verified*.
 3. **API Keys → Create API Key** med tilgangen *Sending access*. Sett den som `RESEND_API_KEY`.
-4. Sett `EMAIL_FROM` til en adresse på det verifiserte domenet, f.eks. `Påmelding <booking@domain.com>`.
+4. Sett `EMAIL_FROM` til en adresse på det verifiserte domenet, f.eks. `Påmelding <arrangement@domain.no>`.
 
 Svar på e-postene går dit det gir mening (feltet `reply_to`):
 
