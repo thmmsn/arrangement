@@ -15,7 +15,7 @@ Et lite og enkelt alternativ til Hoopla for påmelding til arrangementer:
 - **Oppretting av arrangementer med en nøkkel** (`/admin/ny#<nøkkel>`, `CREATE_KEY`), Cloudflare Access eller kontorets LAN – valgfritt på et eget admin-vertsnavn.
 - **Utseendet styres med miljøvariabler**: navn, logo, farger, fonter, hjørneradius og tekster.
 - **Flere domener, én database og én admin**: hvert domene er et *nettsted* med eget språk (norsk eller engelsk), tema, avsender og base-URL.
-- **Helt lukket uten lenke**: forsiden og alle ukjente adresser svarer bare `404 Not Found` – uten logo, navn eller språk.
+- **Helt lukket uten lenke**: forsiden og alle ukjente adresser svarer bare `404 Not Found` – uten logo, navn eller språk. Forsiden kan i stedet sendes videre til f.eks. firmaets nettsted (`ROOT_REDIRECT`).
 - **Mobilbillett med QR-kode** per person, med dørkode på 5 bokstaver, PDF-billett i e-posten, **Apple Wallet** og **Google Wallet** – som Hoopla.
 - **Innsjekking i døra**: en egen dørvaktlenke. Dørvakten kan skanne QR-koden med vanlig kamera på iPhone, bruke skanneren på siden, taste inn billettnummeret eller søke på navn. Det gir grønt, gult eller rødt svar med «Angre», og innsjekking virker også uten nett.
 - **Kalenderfil (.ics)** til deltakerne, og lenke til Google Kalender.
@@ -57,7 +57,7 @@ arrangement.domain.no/dorvakt/k7hq2mxpr9az#<nøkkel>      innsjekking (dørvakte
 | `/t/<nøkkel>` | Gjesten – og det QR-koden peker på | Én billett. For en innlogget dørvakt: innsjekking |
 | `/<hash>/kalender.ics` | Alle som har lenken til arrangementet | Kalenderfil |
 
-Alt annet – også forsiden `/` – svarer med det samme nakne `404 Not Found` (ren tekst, uten logo, navn eller språk). Det gjelder også ugyldige lenker, både for sider og API, også `/admin/<ukjent hash>` og `/dorvakt/<ukjent hash>`. Uten en gyldig hash kan man dermed ikke se hvilket nettsted eller system som ligger på domenet. Statiske filer (CSS og JavaScript) må være tilgjengelige for at arrangementssidene skal virke, men de inneholder ingen data. Temastilarket har et navn som er en hash av innholdet, så det kan ikke gjettes.
+Alt annet – også forsiden `/` – svarer med det samme nakne `404 Not Found` (ren tekst, uten logo, navn eller språk). Unntaket er forsiden når nettstedet har `ROOT_REDIRECT` (se [Forsiden](#forsiden-404-eller-videre-til-et-annet-nettsted)). Det gjelder også ugyldige lenker, både for sider og API, også `/admin/<ukjent hash>` og `/dorvakt/<ukjent hash>`. Uten en gyldig hash kan man dermed ikke se hvilket nettsted eller system som ligger på domenet. Statiske filer (CSS og JavaScript) må være tilgjengelige for at arrangementssidene skal virke, men de inneholder ingen data. Temastilarket har et navn som er en hash av innholdet, så det kan ikke gjettes.
 
 **Eldre lenker virker fortsatt** (se [Oppgradering: samme hash overalt](#oppgradering-samme-hash-overalt)):
 
@@ -66,6 +66,31 @@ Alt annet – også forsiden `/` – svarer med det samme nakne `404 Not Found` 
 | `/<hash>/skanner#<nøkkel>` (dørvakt) | Samme skannerside, direkte (ingen videresending), med den samme nøkkelen |
 | `https://<ADMIN_HOST>/admin/<hash>#<nøkkel>` (admin) | Virker som før – administrasjonen svarer på alle vertsnavn |
 | `/<hash>/admin#<nøkkel>` (admin, enda eldre) | `301` til `/admin/<hash>` – bare for arrangementer som finnes |
+
+### Forsiden: 404 eller videre til et annet nettsted
+
+Som standard gir forsiden (`https://arrangement.domain.no/`) den samme nakne `404 Not Found` som alt annet uten gyldig lenke. Nettleseren viser det som en nesten tom side med teksten «Not Found» (svart bakgrunn i mørk modus).
+
+Vil du heller at de som går inn på forsiden havner et sted de kjenner igjen – f.eks. firmaets nettsted – setter du `ROOT_REDIRECT`:
+
+```ini
+ROOT_REDIRECT=https://www.domain.no
+# Et ekstra nettsted har sin egen, og arver ikke hovednettstedets:
+SITE_NET_ROOT_REDIRECT=https://www.domain.com/en
+```
+
+| | |
+|---|---|
+| **Hva sendes videre** | Bare akkurat `/` (`GET` og `HEAD`). `/index.html`, ukjente adresser og ugyldige lenker gir fortsatt `404`. En query (`/?x=1`) følger ikke med. |
+| **Statuskode** | `302` (midlertidig), med `Cache-Control: no-store`. Ikke `301`: den husker nettleseren, og da ville en endret eller fjernet adresse ikke slått gjennom for dem som allerede har vært innom. |
+| **Per nettsted** | `ROOT_REDIRECT` gjelder hovednettstedet, `SITE_<ID>_ROOT_REDIRECT` et ekstra nettsted. Den arves ikke – et engelsk domene skal ikke havne på en norsk side bare fordi hovednettstedet har en adresse. Et nettsted uten egen adresse beholder 404. |
+| **Andre vertsnavn** | Et ukjent vertsnavn får hovednettstedet, som ellers – også `ADMIN_HOST`. Forsiden der følger altså `ROOT_REDIRECT`. |
+| **Gyldige verdier** | En full adresse som starter med `https://` (eller `http://`). En sti (`/side`), en adresse uten `https://`, `javascript:` o.l. ignoreres med en advarsel ved oppstart, og forsiden gir da 404. |
+| **Evig løkke** | En adresse som peker på forsiden av nettstedet selv (f.eks. `ROOT_REDIRECT=https://arrangement.domain.no/`), ignoreres med en advarsel. En annen sti på samme domene, f.eks. et arrangement (`https://arrangement.domain.no/<hash>`), er greit. |
+
+Oppstartsloggen viser hva forsiden gjør for hvert nettsted («Nettsted «main»: … forsiden sendes til https://www.domain.no/»). Endringen trer i kraft når appen startes på nytt (`docker compose up -d`).
+
+**Personvern:** Omdirigeringen røper hvem domenet hører til – men det gjør domenenavnet som regel uansett. Den røper ingenting om arrangementene: de kan fortsatt bare nås med lenken.
 
 ### Hvor vanskelig er lenkene å gjette?
 
@@ -363,7 +388,7 @@ ADMIN_HOST=arrangement-admin.domain.no
 ```
 
 - **Hovednettstedet** kommer fra de vanlige variablene (`DOMAIN`, `BASE_URL`, `EMAIL_FROM`, `SITE_LANG` og temavariablene). Eksisterende installasjoner fortsetter å virke uten endringer, og de får ID-en `main`.
-- **Et ekstra nettsted** defineres med prefikset `SITE_<ID>_` og finnes så snart `SITE_<ID>_DOMAIN` er satt. ID-en kan bare inneholde A–Z og 0–9. Det kan sette `DOMAIN`, `BASE_URL`, `LANG`, `EMAIL_FROM` og alle temavariablene.
+- **Et ekstra nettsted** defineres med prefikset `SITE_<ID>_` og finnes så snart `SITE_<ID>_DOMAIN` er satt. ID-en kan bare inneholde A–Z og 0–9. Det kan sette `DOMAIN`, `BASE_URL`, `LANG`, `EMAIL_FROM`, `ROOT_REDIRECT` og alle temavariablene.
 - **Avsenderen følger domenet.** Første ledd i domenet blir adressen, resten blir e-postdomenet, og nettstedets `SITE_NAME` blir navnet (uten `SITE_NAME`: «Påmelding» eller «Registration», etter språket):
 
   | Domene | Avsender |
@@ -373,7 +398,7 @@ ADMIN_HOST=arrangement-admin.domain.no
   | `arkitekt-thommesen.no` (bare to ledd) | `Thommesen Arkitekter <arrangement@arkitekt-thommesen.no>` |
 
   `EMAIL_FROM` (hovednettstedet) og `SITE_<ID>_EMAIL_FROM` overstyrer. Avsenderen arves aldri fra et annet nettsted, og en avsender på et annet domene enn nettstedet gir en advarsel ved oppstart. Oppstartsloggen viser avsenderen for hvert nettsted («Nettsted «no»: … e-post fra …»).
-- **Arv:** Det nettstedet ikke setter selv, arves fra hovednettstedet. Unntaket er `FOOTER_TEXT`, som bare arves når språket er det samme – en norsk bunntekst skal ikke havne på et engelsk nettsted.
+- **Arv:** Det nettstedet ikke setter selv, arves fra hovednettstedet. Unntakene er `FOOTER_TEXT`, som bare arves når språket er det samme – en norsk bunntekst skal ikke havne på et engelsk nettsted – og `ROOT_REDIRECT`, som aldri arves (se [Forsiden](#forsiden-404-eller-videre-til-et-annet-nettsted)).
 - **Språk:** `nb` (norsk bokmål, standard) eller `en` (engelsk). Hovednettstedets språk heter `SITE_LANG`, ikke `LANG`, fordi `LANG` er en standard miljøvariabel i Linux som ofte allerede er satt (f.eks. `en_US.UTF-8`).
 - Legg hvert domene til under *Public Hostname* i Cloudflare-tunnelen, og verifiser avsenderdomenet i Resend.
 
@@ -709,7 +734,7 @@ Skinnen legges oppå temaet og gjelder sidene gjestene og dørvaktene ser. Admin
 ## Sikkerhet og personvern
 
 - **Ingen oversikt over arrangementer**, `robots.txt` med `Disallow: /` og `X-Robots-Tag: noindex`.
-- **Lukket uten lenke:** forsiden, ukjente adresser og ugyldige lenker gir alle det samme nakne `404 Not Found`. `OPTIONS` besvares også med 404, så det ikke røper hvilke adresser som finnes.
+- **Lukket uten lenke:** forsiden, ukjente adresser og ugyldige lenker gir alle det samme nakne `404 Not Found`. `OPTIONS` besvares også med 404, så det ikke røper hvilke adresser som finnes. Med `ROOT_REDIRECT` sendes forsiden (og bare den) videre til adressen du har valgt – da ser man hvem domenet hører til, men fortsatt ingenting om arrangementene.
 - **Hemmelige nøkler** lagres bare som SHA-256-hash og sammenlignes i konstant tid.
 - **Nettstedet og admin-vertsnavnet** avgjøres av `Host`-headeren, ikke `X-Forwarded-Host` (som en klient kan sette selv).
 - **LAN-porten** (`LAN_PORT`) er betrodd fordi forespørselen kom inn på den lytteren – ingen header, query eller informasjonskapsel kan gjøre en forespørsel på `PORT` betrodd.

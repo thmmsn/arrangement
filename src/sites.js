@@ -18,6 +18,10 @@
 // Navnet på avsenderen er nettstedets SITE_NAME (uten det: «Påmelding» / «Registration»). EMAIL_FROM (hovednettstedet) og SITE_<ID>_EMAIL_FROM
 // overstyrer.
 //
+// Forsiden (/) gir som standard den nakne 404-en. Med ROOT_REDIRECT (hovednettstedet) eller
+// SITE_<ID>_ROOT_REDIRECT sendes den videre til en annen adresse, f.eks. firmaets nettsted. Arves ikke:
+// hvert domene bestemmer selv hvor forsiden skal gå (et engelsk domene skal ikke havne på en norsk side).
+//
 // Språket for hovednettstedet heter SITE_LANG og ikke LANG, fordi LANG er en standard
 // miljøvariabel i Linux (f.eks. «en_US.UTF-8») som ofte allerede er satt.
 
@@ -62,14 +66,16 @@ export function loadSites(env, { port = 3000 } = {}) {
   const mainTheme = loadTheme(env, { baseUrl: mainBaseUrl });
   warnings.push(...mainTheme.warnings);
 
+  // Eldre oppsett har bare BASE_URL og ikke DOMAIN – da gjenkjennes nettstedet på vertsnavnet i BASE_URL.
+  const mainHost = mainDomain || (env.BASE_URL ? hostOfUrl(mainBaseUrl) : '');
   const mainSite = makeSite({
     id: MAIN_SITE,
-    // Eldre oppsett har bare BASE_URL og ikke DOMAIN – da gjenkjennes nettstedet på vertsnavnet i BASE_URL.
-    host: mainDomain || (env.BASE_URL ? hostOfUrl(mainBaseUrl) : ''),
+    host: mainHost,
     baseUrl: mainBaseUrl,
     lang: mainLang,
     emailFrom: env.EMAIL_FROM || senderFor(mainDomain, mainTheme.theme.siteName || translator(mainLang)('meta.siteNameFallback')) || DEFAULT_EMAIL_FROM,
     theme: mainTheme.theme,
+    rootRedirect: parseRootRedirect(env.ROOT_REDIRECT, mainHost, 'ROOT_REDIRECT', warnings),
   });
 
   // ---------- Ekstra nettsteder ----------
@@ -117,7 +123,7 @@ export function loadSites(env, { port = 3000 } = {}) {
         source[key] = key;
       }
     }
-    const known = new Set([...THEME_ENV_KEYS, 'DOMAIN', 'BASE_URL', 'LANG', 'EMAIL_FROM']);
+    const known = new Set([...THEME_ENV_KEYS, 'DOMAIN', 'BASE_URL', 'LANG', 'EMAIL_FROM', 'ROOT_REDIRECT']);
     for (const key of Object.keys(vars)) {
       if (!known.has(key)) warnings.push(`${name(key)} ignoreres: ukjent innstilling for et nettsted.`);
     }
@@ -127,7 +133,8 @@ export function loadSites(env, { port = 3000 } = {}) {
     warnings.push(...theme.warnings.filter((w) => w.startsWith(`SITE_${ID}_`)));
 
     const emailFrom = vars.EMAIL_FROM || senderFor(domain, theme.theme.siteName || translator(lang)('meta.siteNameFallback')) || mainSite.emailFrom;
-    sites.push(makeSite({ id, host: domain, baseUrl, lang, emailFrom, theme: theme.theme }));
+    const rootRedirect = parseRootRedirect(vars.ROOT_REDIRECT, domain, name('ROOT_REDIRECT'), warnings);
+    sites.push(makeSite({ id, host: domain, baseUrl, lang, emailFrom, theme: theme.theme, rootRedirect }));
   }
 
   // To nettsteder kan ikke dele domene – da ville det vært tilfeldig hvilket som svarte.
@@ -186,7 +193,7 @@ function displayName(name) {
   return /[()[\]:;@\\,."]/.test(clean) ? `"${clean.replace(/(["\\])/g, '\\$1')}"` : clean;
 }
 
-function makeSite({ id, host, baseUrl, lang, emailFrom, theme }) {
+function makeSite({ id, host, baseUrl, lang, emailFrom, theme, rootRedirect = null }) {
   const t = translator(lang);
   return {
     id,
@@ -195,10 +202,36 @@ function makeSite({ id, host, baseUrl, lang, emailFrom, theme }) {
     lang,
     emailFrom,
     theme,
+    // Adressen forsiden (/) sendes videre til, eller null (forsiden gir den nakne 404-en).
+    rootRedirect,
     t,
     // Navnet som vises i admin når man velger nettsted.
     label: `${theme.siteName || host || id} (${host || baseUrl.replace(/^https?:\/\//, '')}, ${lang})`,
   };
+}
+
+/**
+ * ROOT_REDIRECT / SITE_<ID>_ROOT_REDIRECT: en full http(s)-adresse, f.eks. https://domain.no.
+ * Noe annet (en sti, en adresse uten https://, javascript: …) ignoreres med en advarsel, og forsiden gir
+ * da 404 som før. Det samme gjelder en adresse som peker på forsiden av nettstedet selv – den ville sendt
+ * nettleseren i ring. En annen sti på samme domene (f.eks. et arrangement) er greit.
+ */
+function parseRootRedirect(value, host, name, warnings) {
+  const raw = (value || '').trim();
+  if (!raw) return null;
+  let url = null;
+  try {
+    url = new URL(raw);
+  } catch { /* ugyldig adresse */ }
+  if (!url || !['https:', 'http:'].includes(url.protocol) || url.username || url.password || /[\s"'<>\\]/.test(raw)) {
+    warnings.push(`${name}=${JSON.stringify(value)} ignoreres: må være en full adresse som starter med https://, f.eks. https://domain.no. Forsiden gir 404.`);
+    return null;
+  }
+  if (host && url.hostname === host && url.pathname === '/') {
+    warnings.push(`${name}=${raw} ignoreres: peker på forsiden av nettstedet selv (${host}) og ville gitt en evig løkke. Forsiden gir 404.`);
+    return null;
+  }
+  return url.href;
 }
 
 function parseLang(value, fallback, name, warnings) {

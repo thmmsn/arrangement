@@ -79,7 +79,8 @@ const maintenanceTimer = setInterval(maintenance, 10 * 60_000);
 
 const server = app.listen(config.port, () => {
   for (const site of config.sites) {
-    console.log(`Nettsted «${site.id}»: ${site.baseUrl} (${site.lang}), e-post fra ${site.emailFrom}`);
+    const root = site.rootRedirect ? `forsiden sendes til ${site.rootRedirect}` : 'forsiden gir 404';
+    console.log(`Nettsted «${site.id}»: ${site.baseUrl} (${site.lang}), e-post fra ${site.emailFrom}, ${root}`);
   }
   console.log(`Arrangement ${version ?? '(ukjent versjon)'} kjører på port ${config.port}`);
 });

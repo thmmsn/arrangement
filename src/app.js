@@ -329,6 +329,15 @@ export function createApp({
 
   // ---------- Sider ----------
 
+  // Forsiden. Uten ROOT_REDIRECT (eller SITE_<ID>_ROOT_REDIRECT) for nettstedet: den samme nakne 404-en
+  // som alt annet uten gyldig lenke. Med: videre til adressen, f.eks. firmaets nettsted. 302 og ikke 301,
+  // fordi nettleseren husker en 301 – da ville en endret eller fjernet adresse ikke slått gjennom for dem
+  // som har vært innom. Bare akkurat / sendes videre; /index.html og alt annet gir fortsatt 404.
+  app.get('/', (req, res) => {
+    if (!req.site.rootRedirect) return notFound(req, res);
+    res.set('Cache-Control', 'no-store').redirect(302, req.site.rootRedirect);
+  });
+
   app.get('/admin', creatorGate('page'), (req, res) => res.redirect('/admin/ny'));
   app.get('/admin/ny', creatorGate('page'), (req, res) => sendPage(res, 'new', mainSite));
   // Siden for ett arrangement vises for alle arrangementer som finnes. Den har ingen data: dataene
@@ -893,7 +902,7 @@ export function createApp({
   app.use('/api/admin', adminApi);
   app.use('/api', api);
 
-  // Alt annet – også forsiden – finnes ikke.
+  // Alt annet finnes ikke – også forsiden, med mindre nettstedet har ROOT_REDIRECT.
   app.use(notFound);
 
   // ---------- Vedlikehold (kjøres jevnlig av server.js) ----------

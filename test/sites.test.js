@@ -449,6 +449,75 @@ describe('et offentlig domene er helt lukket uten gyldig lenke', () => {
   });
 });
 
+describe('forsiden kan sendes videre (ROOT_REDIRECT)', () => {
+  const NO_HOME = 'https://www.example.no/';
+  const COM_HOME = 'https://www.example.com/en/';
+
+  test('hvert nettsted har sin egen adresse, og den arves ikke', () => {
+    const { sites, warnings } = loadSites({ ...TWO_SITES, ROOT_REDIRECT: 'https://www.example.no' });
+    assert.deepEqual(warnings, []);
+    const byId = Object.fromEntries(sites.map((site) => [site.id, site.rootRedirect]));
+    // Et engelsk domene skal ikke havne på den norske siden bare fordi hovednettstedet har en adresse.
+    assert.deepEqual(byId, { main: NO_HOME, com: null });
+    const both = loadSites({ ...TWO_SITES, ROOT_REDIRECT: NO_HOME, SITE_COM_ROOT_REDIRECT: ` ${COM_HOME} ` });
+    assert.deepEqual(both.warnings, []);
+    assert.equal(both.sites.find((site) => site.id === 'com').rootRedirect, COM_HOME);
+    // Uten innstillingen: ingen omdirigering, som før.
+    assert.equal(loadSites(TWO_SITES).mainSite.rootRedirect, null);
+  });
+
+  test('ugyldige adresser og adresser som ville gitt en evig løkke ignoreres med en advarsel', () => {
+    for (const value of ['www.example.no', '/sti', '//www.example.no', 'javascript:alert(1)', 'ftp://example.no', 'https://bruker:passord@example.no', 'https://example.no/"><script>']) {
+      const { mainSite, warnings } = loadSites({ DOMAIN: MAIN, ROOT_REDIRECT: value });
+      assert.equal(mainSite.rootRedirect, null, value);
+      assert.equal(warnings.length, 1, value);
+      assert.match(warnings[0], /^ROOT_REDIRECT=.* ignoreres: må være en full adresse/, value);
+    }
+    // Forsiden av nettstedet selv – også med en annen port eller en query – ville sendt nettleseren i ring.
+    for (const value of [`https://${MAIN}`, `https://${MAIN}/`, `http://${MAIN.toUpperCase()}:8080/?x=1`]) {
+      const { mainSite, warnings } = loadSites({ DOMAIN: MAIN, ROOT_REDIRECT: value });
+      assert.equal(mainSite.rootRedirect, null, value);
+      assert.match(warnings.join('\n'), /evig løkke/, value);
+    }
+    const com = loadSites({ ...TWO_SITES, SITE_COM_ROOT_REDIRECT: `https://${COM}/` });
+    assert.match(com.warnings.join('\n'), /^SITE_COM_ROOT_REDIRECT=.*evig løkke/m);
+    // En annen sti på samme domene (f.eks. et arrangement) er ingen løkke.
+    assert.equal(loadSites({ DOMAIN: MAIN, ROOT_REDIRECT: `https://${MAIN}/abcdefghjkmn` }).mainSite.rootRedirect, `https://${MAIN}/abcdefghjkmn`);
+    // Et annet domene som bare ligner, er heller ingen løkke.
+    assert.equal(loadSites({ DOMAIN: MAIN, ROOT_REDIRECT: 'http://example.no' }).mainSite.rootRedirect, 'http://example.no/');
+  });
+
+  test('forsiden gir 302 til nettstedets adresse – alt annet uten gyldig lenke gir fortsatt 404', async () => {
+    const app = await startApp({ ...TWO_SITES, ROOT_REDIRECT: NO_HOME, SITE_COM_ROOT_REDIRECT: COM_HOME });
+    for (const [host, target] of [[MAIN, NO_HOME], [COM, COM_HOME], ['ukjent.example.org', NO_HOME]]) {
+      for (const method of ['GET', 'HEAD']) {
+        const res = await app.request({ method, path: '/', headers: onHost(host) });
+        assert.equal(res.status, 302, `${method} ${host}`);
+        assert.equal(res.headers.location, target, `${method} ${host}`);
+        assert.equal(res.headers['cache-control'], 'no-store', `${method} ${host}`);
+      }
+      // En query følger ikke med – den kunne vært hva som helst.
+      assert.equal((await app.request({ path: '/?ref=x', headers: onHost(host) })).headers.location, target, host);
+      for (const path of ['/index.html', '/abcdefghjkmn', '/admin/abcdefghjkmn']) {
+        const res = await app.request({ path, headers: onHost(host) });
+        assert.equal(res.status, 404, `${host}${path}`);
+        assert.equal(res.text, 'Not Found', `${host}${path}`);
+      }
+      // OPTIONS røper fortsatt ingenting.
+      assert.equal((await app.request({ method: 'OPTIONS', path: '/', headers: onHost(host) })).status, 404, host);
+    }
+  });
+
+  test('et nettsted uten adresse beholder den nakne 404-en på forsiden', async () => {
+    const app = await startApp({ ...TWO_SITES, ROOT_REDIRECT: NO_HOME });
+    assert.equal((await app.request({ path: '/', headers: onHost(MAIN) })).status, 302);
+    const com = await app.request({ path: '/', headers: onHost(COM) });
+    assert.equal(com.status, 404);
+    assert.equal(com.text, 'Not Found');
+    assert.equal(com.headers.location, undefined);
+  });
+});
+
 test('loadConfig gir hovednettstedets verdier som før', () => {
   const config = loadConfig(TWO_SITES);
   assert.equal(config.baseUrl, `https://${MAIN}`);
