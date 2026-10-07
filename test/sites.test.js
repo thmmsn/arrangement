@@ -579,4 +579,26 @@ describe('avsender per domene i appen', () => {
     await app2.request({ method: 'POST', path: '/api/admin/events', body: { title: 'x', startsAt: '2030-01-01T10:00:00Z', organizerName: 'A', organizerEmail: 'a@example.com', site: 'no' } });
     assert.equal(errors.length, 2, 'én gang til arrangøren og én til administratoren – ingen nye forsøk');
   });
+
+  test('avviser Microsoft 365 avsenderen (postkassen finnes ikke), sendes e-posten også fra hovednettstedets avsender', async () => {
+    const sent = [];
+    // Som mailer.js: avvist avsender er merket med senderRejected, uansett tjeneste og ordlyd.
+    const mailer = {
+      async send(message) {
+        if (message.from.includes('@arkitekt-thommesen.no')) {
+          throw Object.assign(new Error('Microsoft 365 svarte 404 for avsenderen arrangement@arkitekt-thommesen.no: ErrorInvalidUser'), { senderRejected: true });
+        }
+        sent.push(message);
+        return { id: 'x' };
+      },
+    };
+    const app = await startApp(ENV, { mailer });
+    const created = await createEvent(app, { site: 'no' });
+    const reg = await app.request({
+      method: 'POST', path: `/api/events/${created.slug}/registrations`, headers: onHost('arrangement.arkitekt-thommesen.no'),
+      body: { name: 'Ola', email: 'ola@example.com' },
+    });
+    assert.equal(reg.json.emailSent, true);
+    assert.equal(sent.find((m) => m.to === 'ola@example.com').from, 'Thommesen Arkitekter <arrangement@thommesenarchitecture.com>');
+  });
 });

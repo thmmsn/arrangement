@@ -9,7 +9,7 @@ Et lite og enkelt alternativ til Hoopla for påmelding til arrangementer:
 - **Påmelding med navn, e-post og egendefinerte felter** (kort tekst, lang tekst, telefon, tall, nedtrekksliste, avkrysning).
 - **Den som melder på kan legge til flere personer** i samme skjema. Hver person er én gjest og tar én plass, og hver person svarer på de egendefinerte feltene (f.eks. allergier). Arrangøren bestemmer hvor mange som kan meldes på om gangen (standard 10, 1 = bare seg selv).
 - **Antall påmeldte vises** på arrangementssiden (kan skrus av), med ledige plasser hvis det er et tak.
-- **E-post via [Resend](https://resend.com)**: én bekreftelse til den som meldte på (med alle personene), ett varsel til arrangøren, admin-lenke ved opprettelse og kvittering ved avmelding.
+- **E-post via Cloudflare, Microsoft 365, SMTP eller Resend** (med reserve, se [Sette opp e-post](#sette-opp-e-post)): én bekreftelse til den som meldte på (med alle personene), ett varsel til arrangøren, admin-lenke ved opprettelse og kvittering ved avmelding.
 - **Avmelding**: den som meldte på, kan melde av hele eller deler av påmeldingen, og hver person har sin egen avmeldingslenke til å videresende. Arrangøren kan slå avmelding av per arrangement.
 - **Samme hash i alle lenkene til et arrangement**, på arrangementets eget domene: `/<hash>` (påmelding), `/admin/<hash>#<nøkkel>` (administrasjon) og `/dorvakt/<hash>#<nøkkel>` (dørvakt). Nøkkelen etter `#` er det eneste som gir tilgang, så Cloudflare Access trengs ikke.
 - **Oppretting av arrangementer med en nøkkel** (`/admin/ny#<nøkkel>`, `CREATE_KEY`), Cloudflare Access eller kontorets LAN – valgfritt på et eget admin-vertsnavn.
@@ -132,7 +132,7 @@ npm run dev               # starter på http://localhost:3000 og laster på nytt
 
 1. Gå til <http://localhost:3000/admin/ny> og opprett et arrangement. Lokalt må `ADMIN_NO_AUTH=true` være satt (eller `CREATE_KEY`, og da åpner du `http://localhost:3000/admin/ny#<nøkkel>`) – ellers er oppretting slått av.
 2. Du får en påmeldingslenke, en administrasjonslenke og en dørvaktlenke – alle med samme hash.
-3. Uten `RESEND_API_KEY` skrives e-postene til terminalen, så du ser nøyaktig hva som ville blitt sendt (inkludert avmeldingslenken).
+3. Uten e-posttjeneste (`MAIL_PROVIDER`) skrives e-postene til terminalen, så du ser nøyaktig hva som ville blitt sendt (inkludert avmeldingslenken).
 
 Vil du prøve to nettsteder lokalt, kan du bruke `localhost` og `127.0.0.1` som to «domener»:
 
@@ -187,7 +187,7 @@ server
 
 ```bash
 cp .env.example .env
-nano .env                       # DOMAIN, TUNNEL_TOKEN, RESEND_API_KEY, EMAIL_FROM, …
+nano .env                       # DOMAIN, TUNNEL_TOKEN, MAIL_PROVIDER (e-post), EMAIL_FROM, …
 docker compose up -d --build
 docker compose logs -f arrangement  # se at alt starter, og eventuelle advarsler
 ```
@@ -400,7 +400,7 @@ ADMIN_HOST=arrangement-admin.domain.no
   `EMAIL_FROM` (hovednettstedet) og `SITE_<ID>_EMAIL_FROM` overstyrer. Avsenderen arves aldri fra et annet nettsted, og en avsender på et annet domene enn nettstedet gir en advarsel ved oppstart. Oppstartsloggen viser avsenderen for hvert nettsted («Nettsted «no»: … e-post fra …»).
 - **Arv:** Det nettstedet ikke setter selv, arves fra hovednettstedet. Unntakene er `FOOTER_TEXT`, som bare arves når språket er det samme – en norsk bunntekst skal ikke havne på et engelsk nettsted – og `ROOT_REDIRECT`, som aldri arves (se [Forsiden](#forsiden-404-eller-videre-til-et-annet-nettsted)).
 - **Språk:** `nb` (norsk bokmål, standard) eller `en` (engelsk). Hovednettstedets språk heter `SITE_LANG`, ikke `LANG`, fordi `LANG` er en standard miljøvariabel i Linux som ofte allerede er satt (f.eks. `en_US.UTF-8`).
-- Legg hvert domene til under *Public Hostname* i Cloudflare-tunnelen, og verifiser avsenderdomenet i Resend.
+- Legg hvert domene til under *Public Hostname* i Cloudflare-tunnelen, og sett opp avsenderen hos e-posttjenesten (se [Sette opp e-post](#sette-opp-e-post)).
 
 Oppsettet sjekkes ved oppstart. To nettsteder med samme domene, en `SITE_<ID>_BASE_URL` som peker på et annet domene enn `SITE_<ID>_DOMAIN` (det ville gitt en evig løkke av omdirigeringer), eller prefikset `SITE_MAIN_` stopper oppstarten med en tydelig feilmelding. Ukjente eller ugyldige verdier gir en advarsel i loggen.
 
@@ -653,19 +653,118 @@ Alle data om et arrangement slettes automatisk `DELETE_AFTER_DAYS` dager (standa
 SQLite kjøres med `secure_delete`, så slettede data overskrives i databasefilen i stedet for å bli liggende i ledige sider. To steder ligger kopier utenfor appens kontroll:
 
 - **sikkerhetskopier du selv har tatt**;
-- **e-postloggen hos Resend** (se Resends innstillinger for hvor lenge den lagres).
+- **loggen hos e-posttjenesten** – Cloudflare, Microsoft 365 (meldingssporingen; ingen kopi i «Sendte elementer») eller Resend. Se tjenestens innstillinger for hvor lenge den lagres.
 
 Vedlikeholdet, altså rapporter og sletting, kjøres ved oppstart og deretter hvert tiende minutt.
 
 ---
 
-## Sette opp Resend
+## Sette opp e-post
+
+Appen kan sende e-post på fire måter. E-postene ser like ut uansett – malene, oppsettet for Outlook, logoen og vedleggene lages i appen (`src/email.js`), og tjenesten leverer bare det ferdige resultatet.
+
+| `MAIL_PROVIDER` | Hva | Databehandler | Merk |
+|---|---|---|---|
+| `cloudflare` | [Cloudflare Email Service](#cloudflare-email-service) (REST-API) | Cloudflare – som allerede ser all trafikk gjennom tunnelen | Krever Workers Paid. I åpen beta (fra april 2026). |
+| `microsoft` | [Microsoft 365](#microsoft-365-microsoft-graph) via Microsoft Graph | Microsoft – som allerede har firmaets e-post | Sender fra en delt postkasse. Bare HTML (ingen tekstversjon). |
+| `smtp` | [Vanlig SMTP](#smtp-som-kopimaskinen), f.eks. Microsoft 365 på kontorets faste IP | Den du sender gjennom | Slik kopimaskiner sender. Serveren må stå på kontorets nett. |
+| `resend` | [Resend](#resend) (REST-API) | Resend | Egen avtale med Resend. |
+
+**Reserve:** Flere tjenester skilt med komma prøves i rekkefølge. Med `MAIL_PROVIDER=cloudflare,microsoft` sendes e-posten med Microsoft 365 hvis Cloudflare feiler, og loggen sier fra («E-post til … via Cloudflare feilet (…). Prøver Microsoft 365.»). Svarer den første tjenesten ikke innen 10 sekunder, prøves den neste – i sjeldne tilfeller har den første likevel sendt e-posten, og mottakeren får den to ganger. Det er bedre enn ingen.
+
+**Uten `MAIL_PROVIDER`** brukes tjenesten som er satt opp (som før: `RESEND_API_KEY` alene gir Resend). Er ingen satt opp, skrives e-postene til konsollen. Er `MAIL_PROVIDER` satt, men innstillinger mangler, sier oppstartsloggen hva som mangler – og e-post sendes ikke i det hele tatt, i stedet for å late som. Gjesten får da beskjed om at bekreftelsen ikke kom frem.
+
+**Ved oppstart** står det i loggen hvilken tjeneste som brukes. For Microsoft 365 og SMTP sjekkes innloggingen og tilkoblingen med en gang («E-post via Microsoft 365: innlogging OK.»), så feil oppsett vises før noen melder seg på.
+
+**Test etter oppsettet** – sender én e-post gjennom hver tjeneste i `MAIL_PROVIDER` (også reservene) og fra hvert nettsteds avsender, med logoen innebygd og et lite vedlegg:
+
+```bash
+npm run test-email -- deg@domene.no
+docker compose exec arrangement node scripts/test-email.js deg@domene.no   # i Docker
+```
+
+**Mange e-poster på en gang** (f.eks. når et arrangement med mange påmeldte avlyses) sendes høyst tre om gangen. Svarer tjenesten 429 (for mange forespørsler), venter appen og prøver igjen, opptil tre ganger, før en eventuell reserve tar over.
+
+**Avsenderen må være satt opp hos tjenesten.** Hvert nettsted sender fra sin egen adresse (se [Flere nettsteder](#flere-nettsteder)). Avviser tjenesten avsenderen – domenet er ikke verifisert (Cloudflare, Resend), eller postkassen finnes ikke eller kan ikke brukes (Microsoft 365, SMTP) – sendes e-posten fra hovednettstedets avsender i stedet, så ingen går glipp av bekreftelsen, og loggen skriver «ADVARSEL: E-posttjenesten godtar ikke avsenderen …». Lenkene i e-posten er fortsatt nettstedets egne.
+
+### Cloudflare Email Service
+
+1. **Workers Paid** må være aktivt på kontoen. Det koster 5 dollar i måneden og har 3 000 e-poster inkludert; deretter 0,35 dollar per 1 000. Med $n$ e-poster i måneden blir prisen
+
+   $$\text{pris} = 5 + 0{,}35 \cdot \max\left(0,\ \frac{n - 3000}{1000}\right) \text{ dollar per måned.}$$
+
+   For eksempel gir $n = 5000$ prisen $5 + 0{,}35 \cdot 2 = 5{,}70$ dollar.
+2. **Email Service → Email Sending**: legg til avsenderdomenet (`arkitekt-thommesen.no`, og `thommesenarchitecture.com` for et nettsted der). Domenet ligger i Cloudflare DNS, så Cloudflare kan legge inn postene selv.
+   - **Domenet har e-posten sin i Microsoft 365.** Rør ikke MX-postene – de skal fortsatt peke til Microsoft. Et domene kan bare ha **én** SPF-post (`v=spf1 …`). Ber Cloudflare om en SPF-post på selve domenet, slås den sammen med den som finnes: `v=spf1 include:spf.protection.outlook.com include:<det Cloudflare oppgir> -all`.
+3. **API-token**: lag et konto-token (*Account API Tokens*) med tillatelsen **Email Sending: Edit**. Sett det som `CLOUDFLARE_EMAIL_TOKEN`. Konto-ID-en står på kontoens oversiktsside; sett den som `CLOUDFLARE_ACCOUNT_ID`.
+4. `MAIL_PROVIDER=cloudflare` (eller `cloudflare,microsoft` med Microsoft 365 som reserve).
+
+Grenser: maks 5 MiB per e-post med vedlegg (vedleggene blir omtrent $\tfrac{4}{3}$ så store som base64, så vedleggene kan til sammen være rundt $5 \cdot \tfrac{3}{4} \approx 3{,}75$ MiB) og maks 32 vedlegg. Nye kontoer har en daglig kvote som øker etter hvert. En mottaker som avviser e-posten for godt («permanent bounce»), gir feil.
+
+### Microsoft 365 (Microsoft Graph)
+
+Appen logger inn som seg selv (en app-registrering) og sender fra avsenderens postkasse med `POST /users/<avsender>/sendMail`. Det koster ingenting ekstra, og leveringen er like god som for vanlig e-post fra firmaet – domenet er allerede satt opp med SPF og DKIM i Microsoft 365.
+
+1. **Delt postkasse for hver avsender.** I Exchange admin center: *Recipients → Mailboxes → Add a shared mailbox*, f.eks. «Thommesen Arkitekter» med adressen `arrangement@arkitekt-thommesen.no`. En delt postkasse trenger ingen lisens. Har et nettsted en annen avsender (f.eks. `arrangement@thommesenarchitecture.com`), trenger den også sin egen postkasse. Navnet mottakerne ser, kan bli postkassens visningsnavn i Microsoft 365, så sett det likt navnet i `EMAIL_FROM`.
+2. **App-registrering.** I Entra admin center: *Applications → App registrations → New registration*, f.eks. «Arrangement», bare for denne organisasjonen. Kopier *Application (client) ID* til `MICROSOFT_CLIENT_ID` og *Directory (tenant) ID* til `MICROSOFT_TENANT_ID`.
+3. **Hemmelighet.** *Certificates & secrets → New client secret*. Kopier **Value** (ikke *Secret ID*) til `MICROSOFT_CLIENT_SECRET`. Hemmeligheten utløper (høyst etter 24 måneder) – sett en påminnelse. Når den har utløpt, står det i oppstartsloggen: «Microsoft-innlogging feilet (401): AADSTS7000222 …».
+4. **Gi appen lov til å sende – bare fra disse postkassene.** Tillatelsen *Mail.Send* gitt i Entra (*API permissions*) gjelder **alle** postkasser i firmaet, også ledelsens. Gi den derfor i Exchange Online i stedet, avgrenset til postkassene over (*RBAC for Applications*), i PowerShell:
+
+   ```powershell
+   Connect-ExchangeOnline
+   # Merk postkassene appen skal få sende fra (gjenta for hver avsender)
+   Set-Mailbox arrangement@arkitekt-thommesen.no -CustomAttribute1 arrangement-app
+   # Appen i Exchange. Objekt-ID-en står under Enterprise applications → Arrangement (ikke under App registrations).
+   New-ServicePrincipal -AppId <MICROSOFT_CLIENT_ID> -ObjectId <objekt-ID> -DisplayName "Arrangement"
+   New-ManagementScope -Name "Arrangement-postkasser" -RecipientRestrictionFilter "CustomAttribute1 -eq 'arrangement-app'"
+   New-ManagementRoleAssignment -App <MICROSOFT_CLIENT_ID> -Role "Application Mail.Send" -CustomResourceScope "Arrangement-postkasser"
+   # Sjekk: InScope skal være True for postkassen – og False for en vanlig ansatt
+   Test-ServicePrincipalAuthorization -Identity <MICROSOFT_CLIENT_ID> -Resource arrangement@arkitekt-thommesen.no
+   ```
+
+   Ikke gi *Mail.Send* under *API permissions* i Entra i tillegg – tillatelsene legges sammen, og den i Entra gjelder alle postkasser. Endringer kan ta opptil et par timer før de virker.
+5. `MAIL_PROVIDER=microsoft`, og kjør `npm run test-email -- deg@domene.no`. «innlogging OK» i oppstartsloggen betyr at app-registreringen og hemmeligheten er riktige; test-e-posten viser at tilgangen til postkassen også er det.
+
+Godt å vite:
+- **Ingen kopi i «Sendte elementer»** (`saveToSentItems: false`), fordi appen lover at alle data slettes etter `DELETE_AFTER_DAYS`. Exchange lagrer likevel sporingsdata (avsender, mottaker, emne) i meldingssporingen sin en tid.
+- **Bare HTML.** Graph tar én brødtekst, så tekstversjonen av e-posten sendes ikke. Alle vanlige e-postprogrammer viser HTML.
+- **Grenser:** hele forespørselen (med vedlegg som base64) kan være på maks 4 MB, og Microsoft 365 tillater 10 000 mottakere per døgn per postkasse. Appen sender høyst tre samtidig (Graph tillater fire per postkasse).
+- **Avsender som ikke virker** (postkassen finnes ikke, eller ligger utenfor tilgangen i punkt 4) gir 404 eller 403. Da sendes e-posten fra hovednettstedets avsender i stedet (se over).
+
+### SMTP (som kopimaskinen)
+
+Vanlig SMTP med [nodemailer](https://nodemailer.com). Det enkleste med Microsoft 365 er å sende slik kopimaskinen gjør: til Microsofts e-posttjener for domenet, uten brukernavn og passord – Microsoft kjenner igjen kontorets faste IP-adresse.
+
+1. **Kobling (connector) i Exchange.** Sender kopimaskinen allerede på denne måten, finnes koblingen, og serveren kan bruke den samme – så lenge den står på kontorets nett og går ut på internett med den samme faste IP-adressen. Ellers: Exchange admin center → *Mail flow → Connectors → Add a connector*, fra *Your organization's email server* til *Office 365*, og velg at den kjennes igjen på IP-adressen (kontorets faste, offentlige IP).
+2. **Tjeneren** er domenets MX-adresse i Microsoft 365, som står i MX-posten for domenet og under *Domains* i Microsoft 365 admin center, f.eks. `arkitekt-thommesen-no.mail.protection.outlook.com`.
+3. I `.env`:
+
+   ```ini
+   MAIL_PROVIDER=smtp
+   SMTP_HOST=arkitekt-thommesen-no.mail.protection.outlook.com
+   SMTP_PORT=25
+   # SMTP_TLS=starttls er standard: Microsoft krypterer forbindelsen, og uten kryptering sendes ingenting.
+   ```
+
+4. Kjør `npm run test-email -- deg@domene.no` – gjerne til en adresse utenfor firmaet, for å se at e-posten slipper ut.
+
+Godt å vite:
+- **Port 25 ut** må være åpen fra serveren. Den er det når kopimaskinen sender på samme måte. Cloudflare-tunnelen har ingenting med utgående e-post å gjøre.
+- **SPF:** Microsoft anbefaler at kontorets IP-adresse står i SPF-posten (`v=spf1 ip4:<kontorets IP> include:spf.protection.outlook.com -all`).
+- **Avsenderen** må være på et domene som hører til Microsoft 365-organisasjonen. Avviser Microsoft avsenderen (550 5.7.60 – har ikke lov til å sende som den), sendes e-posten fra hovednettstedets avsender i stedet (se over).
+- **Direct Send** (samme tjener, men uten kobling) kan bare levere til mottakere i egen organisasjon, og passer derfor ikke – gjestene er utenfor.
+- **Andre SMTP-tjenere** virker også. Med innlogging settes `SMTP_USER` og `SMTP_PASSWORD`. `SMTP_TLS=tls` er for port 465 (kryptert fra start, f.eks. Cloudflares `smtp.mx.cloudflare.net` med brukernavnet `api_token`), og `SMTP_TLS=none` sender ukryptert – bare til en tjener på samme maskin eller et lukket nett. Innlogging med passord mot Microsoft 365 (`smtp.office365.com`) frarådes: Microsoft slår det av som standard fra utgangen av 2026. Bruk koblingen over eller [Microsoft Graph](#microsoft-365-microsoft-graph) i stedet.
+
+### Resend
 
 1. Opprett konto på <https://resend.com>.
 2. **Domains → Add Domain**: legg til `domain.no` (eller et underdomene som `mail.domain.no`). Med et engelsk nettsted på `events.domain.com` legges også `domain.com` til. Resend viser noen DNS-poster (SPF/MX og DKIM, gjerne også DMARC) som du legger inn hos Cloudflare DNS. Vent til domenet står som *Verified*.
 3. **API Keys → Create API Key** med tilgangen *Sending access*. Sett den som `RESEND_API_KEY`.
-4. Avsenderen følger domenet (`arrangement.domain.no` gir `arrangement@domain.no`, se [Flere nettsteder](#flere-nettsteder)). Vil du ha en annen adresse, setter du `EMAIL_FROM` til en adresse på det verifiserte domenet, f.eks. `Påmelding <arrangement@domain.no>`.
-5. **Hvert domene må verifiseres** – med flere nettsteder på ulike domener legges hvert av dem til under **Domains**. Er et domene ikke verifisert ennå, avviser Resend avsenderen. Da sendes e-posten fra hovednettstedets avsender i stedet, så ingen går glipp av bekreftelsen, og loggen skriver «ADVARSEL: Resend godtar ikke avsenderen …». Lenkene i e-posten er fortsatt nettstedets egne.
+4. `MAIL_PROVIDER=resend` (eller la den stå tom, hvis Resend er den eneste tjenesten).
+
+### Avsender og svar
+
+Avsenderen følger domenet (`arrangement.domain.no` gir `arrangement@domain.no`, se [Flere nettsteder](#flere-nettsteder)). Vil du ha en annen adresse, setter du `EMAIL_FROM` til en adresse som er satt opp hos tjenesten, f.eks. `Påmelding <arrangement@domain.no>`.
 
 Svar på e-postene går dit det gir mening (feltet `reply_to`):
 
@@ -681,7 +780,7 @@ Svar på e-postene går dit det gir mening (feltet `reply_to`):
 | Arrangementet er avlyst (kvittering) | Arrangøren og `ADMIN_EMAIL` | – |
 | Avmelding (kvittering og varsel) | Gjesten og arrangøren | Hverandre |
 
-Hvis Resend feiler, blir påmeldingen likevel lagret. Feilen logges, og gjesten får beskjed om at bekreftelsen ikke kom frem.
+Hvis e-posten ikke kan sendes (heller ikke med en eventuell reserve), blir påmeldingen likevel lagret. Feilen logges, og gjesten får beskjed om at bekreftelsen ikke kom frem.
 
 ---
 
@@ -789,7 +888,9 @@ src/
   views.js       Fletter tema og tekst inn i HTML-sidene, per nettsted
   db.js          SQLite: tabeller, migreringer og spørringer
   validation.js  Validering av arrangementer og påmeldinger, og påmeldingsstatus
-  email.js       Resend-klient og e-postmaler
+  email.js       E-postmaler
+  mailer.js      Sending: Cloudflare, Microsoft 365 (Graph), SMTP og Resend, med reserve og kø
+  mailConfig.js  Valg av e-posttjeneste fra miljøvariabler (MAIL_PROVIDER)
   ids.js         Tilfeldige lenker, nøkler og billettnumre, hashing
   tokens.js      Signerte billett-, påmeldings- og dørvaktnøkler (HMAC)
   tickets.js     Billettsider, PDF, Wallet, kalender og innsjekking (sider og API)
@@ -815,6 +916,7 @@ src/
   version.js     Versjonsnummeret (år.måned.dag.løpenummer) fra VERSION
 scripts/
   bump-version.js  `npm run bump`: øker versjonsnummeret i VERSION
+  test-email.js    `npm run test-email -- deg@domene.no`: test-e-post gjennom hver e-posttjeneste
 VERSION          Versjonsnummeret som vises nederst til høyre på sidene
 views/           HTML-sidene (med plassholdere for tema og tekst)
 public/assets/   CSS og JavaScript for frontend

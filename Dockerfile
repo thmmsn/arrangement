@@ -17,6 +17,8 @@ COPY package.json VERSION ./
 COPY src ./src
 COPY views ./views
 COPY public ./public
+# Hjelpeskript, f.eks. test-e-post: docker compose exec arrangement node scripts/test-email.js deg@domene.no
+COPY scripts ./scripts
 
 # Databasen ligger i et volum, så den overlever nye versjoner av containeren.
 # Settes her (ikke i .env), slik at databasen alltid havner i volumet.

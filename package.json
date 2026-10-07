@@ -1,6 +1,6 @@
 {
   "name": "arrangement",
-  "description": "Arrangement / Events – enkelt påmeldingssystem med ukjente lenker, billetter, innsjekking og e-post via Resend.",
+  "description": "Arrangement / Events – enkelt påmeldingssystem med ukjente lenker, billetter, innsjekking og e-post via Cloudflare, Microsoft 365, SMTP eller Resend.",
   "private": true,
   "type": "module",
   "main": "src/server.js",
@@ -11,13 +11,15 @@
     "start": "node --env-file-if-exists=.env src/server.js",
     "dev": "node --watch --env-file-if-exists=.env src/server.js",
     "test": "node --test \"test/*.test.js\"",
-    "bump": "node scripts/bump-version.js"
+    "bump": "node scripts/bump-version.js",
+    "test-email": "node --env-file-if-exists=.env scripts/test-email.js"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
     "express": "^5.2.1",
     "jsqr": "^1.4.0",
     "node-forge": "^1.4.0",
+    "nodemailer": "^10.0.10",
     "pdfkit": "^0.20.2",
     "qrcode": "^1.5.4",
     "sharp": "^0.35.5",

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import sharp from 'sharp';
-import { createMailer, embedLogo, guestConfirmation } from '../src/email.js';
+import { embedLogo, guestConfirmation } from '../src/email.js';
+import { createMailer } from '../src/mailer.js';
 import { createEmailLogo, EMAIL_LOGO_CID, MAX_EMAIL_LOGO_WIDTH } from '../src/emailLogo.js';
 import { loadConfig } from '../src/config.js';
 import { ticketIcon } from '../src/png.js';
@@ -97,7 +98,7 @@ describe('logoen i e-postene', () => {
   test('Resend får vedlegget som innebygd bilde (content_id)', async () => {
     let body;
     const mailer = createMailer({
-      apiKey: 'nøkkel', from: 'a@example.com',
+      providers: [{ id: 'resend', apiKey: 'nøkkel' }], from: 'a@example.com',
       fetchImpl: async (url, options) => { body = JSON.parse(options.body); return { ok: true, json: async () => ({ id: '1' }) }; },
     });
     await mailer.send({
