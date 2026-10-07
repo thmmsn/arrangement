@@ -97,6 +97,127 @@ main { flex: 1; padding: 40px 0 64px; }
 }
 .site-footer .container + .site-version { margin-top: 12px; }
 
+/* En knapp som ser ut som en lenke (åpner et vindu på siden i stedet for å gå til en adresse). */
+.link-button {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.link-button:hover { color: var(--accent-dark); }
+
+/*
+  Vinduet med personvern og databehandleravtaler (LEGAL_FILE, se legalDialog i src/theme.js).
+  Overskriften og «Lukk» står fast; bare teksten imellom ruller. Vinduet er aldri høyere enn skjermen
+  minus en marg (dvh: høyden med mobilens adresselinje synlig – vh er reserven for eldre nettlesere).
+  Bakgrunnen er --surface lagt oppå --bg, så den er tett også når en skin har en gjennomsiktig --surface
+  (Glass): ellers ville siden bak skint gjennom teksten. position/inset/margin står her også, så vinduet
+  legger seg over siden selv i en nettleser uten <dialog> (der legal.js bare setter open-attributtet).
+*/
+.legal-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(720px, calc(100% - 32px));
+  max-width: none;
+  height: fit-content;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(var(--surface), var(--surface)), var(--bg);
+  color: var(--ink);
+  box-shadow: 0 24px 70px rgb(0 0 0 / 0.3);
+  overflow: hidden;
+  z-index: 100;
+}
+.legal-dialog:not([open]) { display: none; }
+.legal-dialog[open] { display: flex; flex-direction: column; }
+.legal-dialog::backdrop { background: rgb(20 16 12 / 0.55); }
+/* Siden bak ruller ikke mens vinduet er åpent – bare teksten i vinduet. */
+html:has(.legal-dialog[open]) { overflow: hidden; }
+
+.legal-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.legal-dialog-head h2 { margin: 0; font-size: 1.6rem; }
+.legal-dialog-x {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  margin: -4px -8px 0 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+}
+.legal-dialog-x:hover { background: var(--accent-soft); color: var(--ink); }
+
+/* Den rullbare teksten. overscroll-behavior hindrer at siden bak begynner å rulle når man når enden. */
+.legal-dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 18px 24px 8px;
+  font-size: 16px;
+  overflow-wrap: break-word;
+}
+.legal-dialog-body:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.legal-dialog-body h2 { font-size: 1.45rem; margin: 1.4em 0 0.5em; }
+.legal-dialog-body h3 { font-size: 1.2rem; margin: 1.2em 0 0.4em; }
+.legal-dialog-body h4 { font-size: 1rem; margin: 1em 0 0.3em; }
+.legal-dialog-body > :first-child { margin-top: 0; }
+.legal-dialog-body ul, .legal-dialog-body ol { margin: 0 0 1em; padding-left: 1.4em; }
+.legal-dialog-body li + li { margin-top: 0.25em; }
+/* Brede tabeller (f.eks. lista over databehandlere) ruller sidelengs for seg selv på smale skjermer. */
+.legal-dialog-body .table-scroll { overflow-x: auto; margin: 0 0 1em; }
+.legal-dialog-body table { width: 100%; border-collapse: collapse; font-size: 15px; margin: 0 0 1em; }
+.legal-dialog-body .table-scroll table { margin: 0; }
+.legal-dialog-body th, .legal-dialog-body td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.legal-dialog-body th { color: var(--muted); font-size: 13px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.legal-dialog-body hr { border: 0; border-top: 1px solid var(--line); margin: 1.5em 0; }
+
+.legal-dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 24px 16px;
+  border-top: 1px solid var(--line);
+}
+
+/* Mobil: vinduet fyller nesten hele skjermen, med litt mindre luft rundt teksten. */
+@media (max-width: 560px) {
+  .legal-dialog {
+    width: calc(100% - 16px);
+    max-height: calc(100vh - 16px);
+    max-height: calc(100dvh - 16px);
+  }
+  .legal-dialog-head { padding: 16px 16px 12px; }
+  .legal-dialog-head h2 { font-size: 1.35rem; }
+  .legal-dialog-body { padding: 14px 16px 6px; }
+  .legal-dialog-foot { padding: 10px 16px 12px; }
+  .legal-dialog-foot .btn { width: 100%; }
+}
+
 h1, h2, h3 {
   font-family: var(--serif);
   font-weight: 600;

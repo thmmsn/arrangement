@@ -31,6 +31,11 @@ export default {
     logoAlt: 'Logo',
   },
 
+  legal: {
+    title: 'Privacy and data processing',
+    close: 'Close',
+  },
+
   status: {
     closed: 'Registration is closed.',
     deadline_passed: 'The registration deadline has passed.',

@@ -1,0 +1,113 @@
+<!--
+  EKSEMPEL – tilpass før bruk. Dette er et utgangspunkt, ikke juridisk rådgivning.
+
+  Slik tas den i bruk:
+    1. Kopier filen til mappen branding:   cp docs/personvern.eksempel.html branding/personvern.html
+    2. Fyll inn alt som står i [hakeparenteser], og fjern det som ikke gjelder dere
+       (f.eks. Cloudflare eller Wallet hvis dere ikke bruker det).
+    3. Sett LEGAL_FILE=personvern.html i .env og start appen på nytt.
+
+  Bunnteksten får da lenken «Personvern og databehandling» (LEGAL_TITLE endrer teksten), som åpner
+  denne teksten i et vindu man kan rulle i. Overskriften i vinduet lages av appen – start derfor med <h2>.
+
+  Tillatt: vanlig HTML som <h2>, <h3>, <p>, <ul>, <ol>, <table>, <a>, <strong>, <hr>.
+  Virker ikke (stoppes av sidenes Content-Security-Policy): <script>, <style>, style="…" og onclick="…".
+  Vinduet er smalt på mobil, så lister leses bedre enn brede tabeller (derfor én liste per leverandør
+  under). Trenger dere en tabell, legg den i <div class="table-scroll"> – da kan den rulles sidelengs.
+
+  Kommentarer som denne sendes ikke med til nettleseren.
+  Merk: filer i branding er offentlige på /assets/custom/<filnavn>, akkurat som logoen.
+-->
+
+<p>Sist oppdatert: [dato]</p>
+
+<h2>Hvem er ansvarlig</h2>
+<p>
+  [Firmanavn], org.nr. [nummer], [adresse], er behandlingsansvarlig for personopplysningene som
+  samles inn ved påmelding på dette nettstedet. Arrangøren av hvert arrangement står oppført på
+  arrangementssiden.
+</p>
+<p>Spørsmål om personvern: <a href="mailto:[e-post]">[e-post]</a>.</p>
+
+<h2>Hvilke opplysninger vi samler inn</h2>
+<ul>
+  <li><strong>Kontaktperson:</strong> navn og e-postadresse.</li>
+  <li><strong>Hver påmeldt person:</strong> navn, valgfri e-postadresse og svar på spørsmålene arrangøren har lagt til (f.eks. allergier eller telefonnummer).</li>
+  <li><strong>Billett:</strong> billettnummer, dørkode og når billetten ble sjekket inn.</li>
+  <li><strong>Arrangør:</strong> navn og e-postadresse.</li>
+</ul>
+<p>
+  IP-adressen din brukes bare et kort øyeblikk, i minnet, for å stoppe automatiserte påmeldinger.
+  Den lagres ikke i databasen. Gjester får ingen informasjonskapsler (cookies). Dørvakter får en
+  informasjonskapsel som holder dem innlogget på innsjekkingssiden.
+</p>
+
+<h2>Hvorfor, og med hvilket grunnlag</h2>
+<p>
+  Opplysningene brukes til å gjennomføre arrangementet: registrere påmeldingen, sende bekreftelse og
+  billett på e-post, sjekke inn ved døren og gi arrangøren en deltakerliste. Grunnlaget er
+  [personvernforordningen artikkel 6 nr. 1 bokstav b (avtale) / bokstav f (berettiget interesse) –
+  velg og begrunn]. Svar på spørsmål om helse, som allergier, er [samtykke etter artikkel 9 nr. 2
+  bokstav a – vurder om dette gjelder dere].
+</p>
+
+<h2>Hvor lenge opplysningene lagres</h2>
+<p>
+  Alle opplysninger om et arrangement og påmeldingene til det slettes automatisk [30] dager etter at
+  arrangementet er over. Melder du deg av, slettes opplysningene om deg med én gang.
+</p>
+
+<h2>Databehandlere</h2>
+<p>
+  Vi bruker disse leverandørene til å drive tjenesten. De behandler opplysninger bare på våre vegne og
+  etter våre instrukser, og vi har inngått databehandleravtale med hver av dem.
+</p>
+
+<h3>Resend, Inc. – e-post</h3>
+<ul>
+  <li><strong>Hva de gjør:</strong> sender e-postene (bekreftelse og billett, avmelding, avlysning, og påmeldinger til arrangøren).</li>
+  <li><strong>Opplysninger:</strong> navn, e-postadresse og innholdet i e-posten.</li>
+  <li><strong>Hvor:</strong> USA, med EUs standard personvernbestemmelser.</li>
+  <li><strong>Avtale:</strong> <a href="https://resend.com/legal/dpa" target="_blank" rel="noopener">Resends databehandleravtale</a></li>
+</ul>
+
+<h3>[Driftsleverandør] – server</h3>
+<ul>
+  <li><strong>Hva de gjør:</strong> kjører nettstedet og databasen.</li>
+  <li><strong>Opplysninger:</strong> alle opplysningene over.</li>
+  <li><strong>Hvor:</strong> [land].</li>
+  <li><strong>Avtale:</strong> [lenke til databehandleravtalen]</li>
+</ul>
+
+<h3>Cloudflare, Inc. – nettverk [fjern hvis dere ikke bruker Cloudflare]</h3>
+<ul>
+  <li><strong>Hva de gjør:</strong> [ligger foran nettstedet og beskytter det / styrer innloggingen for administratorene].</li>
+  <li><strong>Opplysninger:</strong> IP-adresse og trafikken til nettstedet.</li>
+  <li><strong>Hvor:</strong> globalt, med EUs standard personvernbestemmelser.</li>
+  <li><strong>Avtale:</strong> <a href="https://www.cloudflare.com/cloudflare-customer-dpa/" target="_blank" rel="noopener">Cloudflares databehandleravtale</a></li>
+</ul>
+
+<h2>Andre tjenester du selv velger å bruke</h2>
+<ul>
+  <li>
+    <strong>Apple Wallet og Google Wallet:</strong> legger du billetten i lommeboken på telefonen,
+    får Apple eller Google billetten med navnet ditt. Det skjer bare hvis du trykker på knappen.
+    [Fjern hvis Wallet ikke er satt opp.]
+  </li>
+  <li>
+    <strong>Google Kalender og kartlenker:</strong> åpner du arrangementet i Google Kalender, Google
+    Maps eller Apple Kart, sendes tidspunkt og sted dit – ikke opplysninger om deg.
+  </li>
+  <li>
+    <strong>Google Fonts:</strong> skriftene på siden hentes fra Google, som da ser IP-adressen din.
+    [Fjern hvis GOOGLE_FONTS=false.]
+  </li>
+</ul>
+
+<h2>Dine rettigheter</h2>
+<p>
+  Du kan be om innsyn i, retting eller sletting av opplysningene om deg, og du kan melde deg av med
+  lenken i bekreftelses-e-posten. Kontakt oss på <a href="mailto:[e-post]">[e-post]</a>.
+  Mener du at vi behandler opplysningene dine i strid med regelverket, kan du klage til
+  <a href="https://www.datatilsynet.no/" target="_blank" rel="noopener">Datatilsynet</a>.
+</p>
