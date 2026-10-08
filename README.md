@@ -48,6 +48,7 @@ arrangement.domain.no/dorvakt/k7hq2mxpr9az#<nøkkel>      innsjekking (dørvakte
 | Adresse | Hvem | Hva |
 |---|---|---|
 | `/<hash>` | Alle som får lenken | Arrangementsside med påmelding |
+| `/<alias>` | Alle som kjenner aliaset (f.eks. `/julebord-2026`) | Den samme arrangementssiden, direkte. Arrangøren legger til aliasene selv (se [Korte lenker (alias)](#korte-lenker-alias)) |
 | `/<hash>/avmelding#<nøkkel>` | Den som meldte på (e-posten, etter påmeldingen og `/b/…`), eller én person (videresendt) | Avmelding av hele eller deler av påmeldingen – eller bare den ene personen |
 | `/admin/ny` | Administrator: `/admin/ny#<nøkkel>` med `CREATE_KEY`, eller via Cloudflare Access eller LAN | Opprett nytt arrangement |
 | `/admin/<hash>#<nøkkel>` | Arrangøren (lenke i e-posten). Bare nøkkelen kreves | Påmeldte, innsjekking, dørvaktlenke, redigering, CSV, stenging, avlysning, sletting |
@@ -57,7 +58,7 @@ arrangement.domain.no/dorvakt/k7hq2mxpr9az#<nøkkel>      innsjekking (dørvakte
 | `/t/<nøkkel>` | Gjesten – og det QR-koden peker på | Én billett. For en innlogget dørvakt: innsjekking |
 | `/<hash>/kalender.ics` | Alle som har lenken til arrangementet | Kalenderfil |
 
-Alt annet – også forsiden `/` – svarer med det samme nakne `404 Not Found` (ren tekst, uten logo, navn eller språk). Unntaket er forsiden når nettstedet har `ROOT_REDIRECT` (se [Forsiden](#forsiden-404-eller-videre-til-et-annet-nettsted)). Det gjelder også ugyldige lenker, både for sider og API, også `/admin/<ukjent hash>` og `/dorvakt/<ukjent hash>`. Uten en gyldig hash kan man dermed ikke se hvilket nettsted eller system som ligger på domenet. Statiske filer (CSS og JavaScript) må være tilgjengelige for at arrangementssidene skal virke, men de inneholder ingen data. Temastilarket har et navn som er en hash av innholdet, så det kan ikke gjettes.
+Alt annet – også forsiden `/` – svarer med det samme nakne `404 Not Found` (ren tekst, uten logo, navn eller språk). Unntakene er forsiden når nettstedet har `ROOT_REDIRECT`, og aliaser arrangøren har lagt til (se [Korte lenker (alias)](#korte-lenker-alias)) (se [Forsiden](#forsiden-404-eller-videre-til-et-annet-nettsted)). Det gjelder også ugyldige lenker, både for sider og API, også `/admin/<ukjent hash>` og `/dorvakt/<ukjent hash>`. Uten en gyldig hash kan man dermed ikke se hvilket nettsted eller system som ligger på domenet. Statiske filer (CSS og JavaScript) må være tilgjengelige for at arrangementssidene skal virke, men de inneholder ingen data. Temastilarket har et navn som er en hash av innholdet, så det kan ikke gjettes.
 
 **Eldre lenker virker fortsatt** (se [Oppgradering: samme hash overalt](#oppgradering-samme-hash-overalt)):
 
@@ -92,6 +93,29 @@ Oppstartsloggen viser hva forsiden gjør for hvert nettsted («Nettsted «main»
 
 **Personvern:** Omdirigeringen røper hvem domenet hører til – men det gjør domenenavnet som regel uansett. Den røper ingenting om arrangementene: de kan fortsatt bare nås med lenken.
 
+### Korte lenker (alias)
+
+Hash-lenken (`/k7hq2mxpr9az`) er vanskelig å huske og å skrive av en plakat. Arrangøren kan derfor legge til **alias** – lesbare adresser til det samme arrangementet – på admin-siden, under «Korte lenker (alias)»:
+
+```
+arrangement.domain.no/julebord-2026   →  samme side som  arrangement.domain.no/k7hq2mxpr9az
+arrangement.domain.no/julebord        →  (et arrangement kan ha mange alias)
+```
+
+| | |
+|---|---|
+| **Hvordan** | Skriv navnet i feltet etter `https://<domene>/` og trykk «Legg til». Hvert alias har knappene «Kopier», «Åpne» og «Fjern». |
+| **Hvor mange** | Så mange arrangøren vil, opptil 50 per arrangement. |
+| **Gyldige navn** | 3–60 tegn: små bokstaver `a–z`, tall og bindestrek mellom ordene. Store bokstaver gjøres små, og mellomrom og `_` blir bindestrek («Julebord 2026» → `julebord-2026`). Ikke `æ`, `ø` og `å`: de blir til `%C3%A6` o.l. når adressen kopieres, og er vanskelige å taste på et utenlandsk tastatur. `admin`, `api`, `assets` og `dorvakt` er reservert av appen. |
+| **Hva aliaset gjør** | Viser arrangementssiden direkte – ingen videresending, så adressefeltet beholder `…/julebord-2026`. Påmelding, avmeldingssiden (`/<alias>/avmelding`) og kalenderfilen (`/<alias>/kalender.ics`) virker også under aliaset. |
+| **Hovedlenken** | Er fortsatt hash-lenken. Den står i e-postene, på billettene og i delingstaggene (`og:url`), og den virker uansett hvilke alias som legges til eller fjernes. |
+| **Ett navnerom** | Hash-er og alias deler ett navnerom, på tvers av alle nettstedene: et navn kan bare peke på ett arrangement. Et alias som allerede er i bruk – som alias eller som hash for et annet arrangement – avvises («allerede i bruk»), og en ny hash trekkes på nytt hvis den skulle falle sammen med et alias. |
+| **Domenet** | Aliaset hører til arrangementet, ikke domenet: adressen bygges fra arrangementets nettsted. Åpnes det på feil domene, sendes nettleseren videre med `302` (ikke `301`, som hash-lenkene) – aliaset kan senere fjernes og tas av et arrangement på et annet domene, og da skal ingen nettleser huske den gamle videresendingen. |
+| **Fjerning og sletting** | Et fjernet alias slutter å virke med en gang (naken `404`). Aliasene slettes sammen med arrangementet (30 dager etter at det er over, eller når arrangøren sletter det), og navnet blir da ledig igjen – f.eks. `julebord` til neste års julebord. |
+| **Tilgang** | Bare med arrangementets admin-nøkkel. Et alias gir ingen tilgang hash-en ikke gir: `/admin/<alias>` og `/dorvakt/<alias>` virker, men krever nøklene etter `#` akkurat som før. |
+
+**Personvern:** Et alias er laget for å være lett å huske – og er dermed lett å gjette. Hash-en har $31^{12} \approx 2^{59{,}4}$ muligheter (se under), mens et alias som `julebord` kan treffes på første forsøk av alle som prøver vanlige ord. Arrangementer som ikke skal være kjent utenfor de inviterte, bør derfor bare deles med hash-lenken, eller få et alias som ikke er lett å gjette.
+
 ### Hvor vanskelig er lenkene å gjette?
 
 `<hash>` er 12 tilfeldige tegn fra et alfabet på 31 tegn (små bokstaver og tall, uten `0 o 1 l i`, som lett forveksles). Antall mulige lenker er
@@ -105,6 +129,8 @@ Admin-nøkkelen er 24 tilfeldige byte, altså $2^{192} \approx 6{,}3 \cdot 10^{5
 $$\frac{2^{192}}{2 \cdot 10^{9}\ \text{s}^{-1}} \approx 3{,}1 \cdot 10^{48}\ \text{s} \approx 10^{41}\ \text{år}$$
 
 å treffe én bestemt nøkkel. Universet er rundt $1{,}4 \cdot 10^{10}$ år gammelt.
+
+Et alias (se [Korte lenker (alias)](#korte-lenker-alias)) velges av arrangøren for å være lett å huske, og har ingen slik beskyttelse.
 
 Dørvaktnøkkelen er en HMAC-SHA-256 forkortet til 128 bit, altså $2^{128} \approx 3{,}4 \cdot 10^{38}$ muligheter (se [Dørvaktlenken](#dørvaktlenken)).
 
@@ -757,6 +783,7 @@ Skinnen legges oppå temaet og gjelder sidene gjestene og dørvaktene ser. Admin
 meta            Hemmeligheten billett-, påmeldings- og dørvaktnøklene avledes fra
 events          Arrangementet (nettsted, tittel, tid, sted med kartpunkt, kapasitet, felter, brytere,
                 skin, etteranmelding, avlysning, dørvaktversjon, når rapporten ble sendt …)
+ ├─ event_aliases  Alias (lesbare adresser) til arrangementet. Aliaset er primærnøkkelen: unikt overalt
  └─ bookings    Én påmelding: kontaktperson, påmeldingsnummer, etteranmelding
      └─ registrations   Én rad per gjest: navn, valgfri e-post, svar, billettnummer og innsjekking
 ```
@@ -774,6 +801,7 @@ Databasen oppgraderes automatisk ved oppstart (`PRAGMA user_version`):
 | 5 | Dørkode per person (eksisterende påmeldinger får en) og tabellen `event_images` for opplastede bilder. |
 | 6 | Bryter for selvavmelding (`events.self_cancel_enabled`, på). Den tilfeldige avmeldingsnøkkelen (`bookings.cancel_token_hash`) fjernes – avmeldingsnøklene avledes nå fra påmeldings- og billettnummeret. `bookings` bygges opp på nytt med de samme id-ene. |
 | 7 | Delingsbildet (`event_images.og_data`). Eksisterende forsidebilder får det ved første vedlikehold etter oppgraderingen. |
+| 8 | Tabellen `event_aliases` for alias (korte lenker). Eksisterende arrangementer har ingen alias. |
 
 Migreringene kjøres med fremmednøkler slått av, og hver migrering kjører `PRAGMA foreign_key_check` før den lagres (slik SQLite anbefaler for ombygging av tabeller). Ellers ville `DROP TABLE bookings` i versjon 6 slettet alle deltakerne via `ON DELETE CASCADE`.
 
@@ -790,7 +818,7 @@ src/
   db.js          SQLite: tabeller, migreringer og spørringer
   validation.js  Validering av arrangementer og påmeldinger, og påmeldingsstatus
   email.js       Resend-klient og e-postmaler
-  ids.js         Tilfeldige lenker, nøkler og billettnumre, hashing
+  ids.js         Tilfeldige lenker, nøkler og billettnumre, hashing, regler for alias
   tokens.js      Signerte billett-, påmeldings- og dørvaktnøkler (HMAC)
   tickets.js     Billettsider, PDF, Wallet, kalender og innsjekking (sider og API)
   qr.js          QR-koder (SVG og rutenett til PDF)
@@ -845,6 +873,8 @@ test/            Tester (node:test)
 | `POST` / `DELETE` | `/api/admin/events/:slug/registrations/:id/checkin` | Admin-nøkkel. Sjekk inn / angre |
 | `POST` | `/api/admin/events/:slug/scanner/rotate` | Admin-nøkkel. Ny dørvaktlenke |
 | `POST` / `DELETE` | `/api/admin/events/:slug/cancel` | Admin-nøkkel. Avlys (`{ notify, message }`) / opphev |
+| `POST` | `/api/admin/events/:slug/aliases` | Admin-nøkkel. Legg til alias: `{ alias }` (normaliseres). `201` med `alias` og alle `aliases: [{ alias, url }]`; `400` (ugyldig navn eller over 50) eller `409` (i bruk), med feilen i `errors.alias` |
+| `DELETE` | `/api/admin/events/:slug/aliases/:alias` | Admin-nøkkel. Fjern alias. Svaret har de som er igjen; `404` hvis arrangementet ikke har aliaset |
 | `PUT` / `DELETE` | `/api/admin/events/:slug/image` | Admin-nøkkel. Last opp forsidebilde (selve bildet som body, `Content-Type: image/…`) / fjern. Svaret har `uploadedImage` og `ogImage` (delingsbildet) |
 | `GET` | `/api/tickets/:nøkkel`, `/api/bookings/:nøkkel` | Billettlenken. Billetten(e), lenker og om telefonen er dørvakt |
 | `POST` | `/api/events/:slug/scanner/login` | Dørvaktnøkkel i body. Setter informasjonskapselen |
@@ -854,6 +884,8 @@ test/            Tester (node:test)
 *Oppretting* = riktig vertsnavn (hvis `ADMIN_HOST` er satt), og `Authorization: Bearer <CREATE_KEY>`, et gyldig Cloudflare Access-token eller LAN-porten. Uten det: `403` (på feil vertsnavn: naken `404`).
 
 *Admin-nøkkel* = `Authorization: Bearer <admin-nøkkel>` for akkurat det arrangementet, på hvilket som helst vertsnavn. Uten riktig nøkkel: `401`. Ukjent arrangement: naken `404`.
+
+`:slug` er arrangementets hash, eller et av aliasene (se [Korte lenker (alias)](#korte-lenker-alias)). Svarene bruker alltid hash-en (`slug`, `url`).
 
 ---
 

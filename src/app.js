@@ -2,13 +2,13 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { CapacityError } from './db.js';
+import { AliasError, CapacityError } from './db.js';
 import { registrationsToCsv } from './csv.js';
 import * as templates from './email.js';
 import { createEmailLogo } from './emailLogo.js';
 import { accessTokenFrom, AccessError, createAccessVerifier } from './cfAccess.js';
 import { escapeHtml } from './html.js';
-import { hashSecret, newSecret, newSlug, secretMatches, SLUG_PATTERN } from './ids.js';
+import { hashSecret, isAlias, newSecret, newSlug, secretMatches, SLUG_PATTERN } from './ids.js';
 import { rateLimit } from './rateLimit.js';
 import { ImageError, MAX_IMAGE_BYTES, processImage } from './images.js';
 import { createLogoLoader } from './logo.js';
@@ -22,7 +22,7 @@ import { createTokens } from './tokens.js';
 import { readVersion } from './version.js';
 import { createViews } from './views.js';
 import {
-  deadlineOf, isLate, registrationStatus, translateErrors, validateBooking, validateEvent, ValidationError,
+  deadlineOf, isLate, registrationStatus, translateErrors, validateAlias, validateBooking, validateEvent, ValidationError,
 } from './validation.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -182,9 +182,10 @@ export function createApp({
 
   // Feil nettsted for arrangementet. Offentlig: 301 til arrangementets eget domene, med samme sti (og
   // nettleseren tar med #nøkkelen). På LAN: samme adresse på LAN-porten med ?site=<id>, så man blir på
-  // kontornettet – 302, fordi den ikke skal huskes av nettleseren.
-  function redirectToSite(req, res, site) {
-    if (!isLan(req)) return res.redirect(301, `${site.baseUrl}${req.originalUrl}`);
+  // kontornettet – 302, fordi den ikke skal huskes av nettleseren. Også 302 når arrangementet ble funnet
+  // via et alias: et alias kan fjernes og senere brukes av et arrangement på et annet domene.
+  function redirectToSite(req, res, site, event = null) {
+    if (!isLan(req)) return res.redirect(event?.viaAlias ? 302 : 301, `${site.baseUrl}${req.originalUrl}`);
     const url = new URL(req.originalUrl, 'http://lan');
     url.searchParams.set('site', site.id);
     // Alltid en sti på samme vertsnavn: nøyaktig én / først, så Location aldri kan bli «//annet-domene».
@@ -349,9 +350,16 @@ export function createApp({
   app.get('/admin/:slug', adminPage);
   app.get('/admin/:slug/avlys', adminPage);
 
+  // Hash-en eller et alias (se ids.js) – i alle adresser: /<alias>, /<alias>/avmelding, /admin/<alias> …
+  // Et alias gir ingen tilgang hash-en ikke gir: nøklene etter # kreves akkurat som før. Et arrangement
+  // funnet via alias merkes (viaAlias), så en videresending til riktig domene ikke huskes av nettleseren
+  // (se redirectToSite) – aliaset kan senere fjernes og tas av et arrangement på et annet domene.
   function findEventBySlug(value) {
-    const slug = String(value).toLowerCase();
-    return SLUG_PATTERN.test(slug) ? repo.findEvent(slug) : null;
+    const name = String(value).toLowerCase();
+    const event = SLUG_PATTERN.test(name) ? repo.findEvent(name) : null;
+    if (event || !isAlias(name)) return event;
+    const aliased = repo.findEventByAlias(name);
+    return aliased && { ...aliased, viaAlias: true };
   }
 
   // Gammel admin-adresse fra før admin ble samlet under /admin. Nettleseren tar med #nøkkelen videre.
@@ -360,7 +368,7 @@ export function createApp({
   app.get('/:slug/admin', (req, res) => {
     const event = findEventBySlug(req.params.slug);
     if (!event) return notFound(req, res);
-    res.redirect(301, `/admin/${event.slug}`);
+    res.redirect(event.viaAlias ? 302 : 301, `/admin/${event.slug}`);
   });
 
   tickets.mountPages(app);
@@ -372,7 +380,7 @@ export function createApp({
     const event = findEventBySlug(req.params.slug);
     if (!event) return notFound(req, res);
     const site = siteOf(event);
-    if (site !== req.site) return redirectToSite(req, res, site);
+    if (site !== req.site) return redirectToSite(req, res, site, event);
     sendPage(res, view, site, 200, event, view === 'event' ? shareMeta(event, site) : '');
   };
   // Opplastet forsidebilde (<hash>.<filtype>) og delingsbildet laget fra det (<hash>-deling.jpg).
@@ -388,7 +396,7 @@ export function createApp({
     const image = isOg ? repo.ogImage(event.id) : repo.image(event.id);
     if (!image) return notFound(req, res);
     const site = siteOf(event);
-    if (site !== req.site) return redirectToSite(req, res, site);
+    if (site !== req.site) return redirectToSite(req, res, site, event);
     res.type(isOg ? OG_IMAGE_TYPE : image.type).set('Cache-Control', 'private, max-age=86400').send(image.data);
   });
   app.get('/:slug', eventPage('event'));
@@ -493,6 +501,10 @@ export function createApp({
       uploadedImage: uploadedImageUrl(event),
       // Delingsbildet (og:image) som er laget fra det opplastede bildet.
       ogImage: ogImageUrl(event),
+      // Lesbare adresser til det samme arrangementet (se «Alias»), og starten på dem til skjemaet.
+      aliases: aliasesOf(event),
+      maxAliases: MAX_ALIASES,
+      baseUrl: siteOf(event).baseUrl,
       // Dørvaktlenken kan alltid vises på nytt: nøkkelen er avledet (se tokens.js).
       scannerUrl: event.features.tickets ? tickets.scannerUrl(event) : null,
       checkedIn: repo.countCheckedIn(event.id),
@@ -734,7 +746,8 @@ export function createApp({
   adminApi.post('/events', createLimiter, requireCreator, async (req, res) => {
     const data = validateEvent(req.body, { siteIds, skinIds });
     let slug = newSlug();
-    while (repo.findEvent(slug)) slug = newSlug(); // Kollisjon er svært usannsynlig, men sjekkes likevel.
+    // Kollisjon er svært usannsynlig, men sjekkes likevel – også mot alias, som deler navnerom med hash-ene.
+    while (repo.isNameTaken(slug)) slug = newSlug();
     const adminKey = newSecret();
 
     const event = repo.createEvent({ ...data, slug, adminKeyHash: hashSecret(adminKey) });
@@ -826,6 +839,35 @@ export function createApp({
   adminApi.delete('/events/:slug/image', loadAdminEvent, requireEventAdmin, (req, res) => {
     repo.deleteImage(req.event.id);
     res.json({ uploadedImage: null, ogImage: null });
+  });
+
+  // ---------- Alias ----------
+  // Lesbare adresser (<domene>/julebord) i tillegg til hash-en. Hash-lenken er fortsatt hovedlenken (i
+  // e-postene, delingstaggene og billettene); et alias viser bare den samme siden. Aliaset følger
+  // arrangementets nettsted, og forsvinner når arrangementet slettes.
+  const MAX_ALIASES = 50;
+  const aliasesOf = (event) => repo.listAliases(event.id).map((alias) => ({ alias, url: `${siteOf(event).baseUrl}/${alias}` }));
+
+  // body: { alias } – normaliseres («Julebord 2026» → «julebord-2026»). Svaret har alle aliasene.
+  adminApi.post('/events/:slug/aliases', loadAdminEvent, requireEventAdmin, (req, res) => {
+    const alias = validateAlias(req.body?.alias);
+    try {
+      repo.addAlias(req.event.id, alias, MAX_ALIASES);
+    } catch (err) {
+      if (!(err instanceof AliasError)) throw err;
+      const error = err.reason === 'taken'
+        ? adminT('validation.aliasTaken', { alias })
+        : adminT('validation.aliasTooMany', { max: MAX_ALIASES });
+      return res.status(err.reason === 'taken' ? 409 : 400).json({ error, errors: { alias: error } });
+    }
+    res.status(201).json({ alias, aliases: aliasesOf(req.event) });
+  });
+
+  adminApi.delete('/events/:slug/aliases/:alias', loadAdminEvent, requireEventAdmin, (req, res) => {
+    if (!repo.removeAlias(req.event.id, req.params.alias.toLowerCase())) {
+      return res.status(404).json({ error: adminT('errors.aliasNotFound') });
+    }
+    res.json({ aliases: aliasesOf(req.event) });
   });
 
   // Opphev avlysningen (f.eks. ved et feiltrykk). Ingen får e-post om dette.

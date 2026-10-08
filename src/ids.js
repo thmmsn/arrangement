@@ -17,6 +17,28 @@ export function newSlug() {
   return randomCode(SLUG_LENGTH);
 }
 
+// Alias: en lesbar adresse arrangøren velger selv, f.eks. <domene>/julebord-2026, som viser det samme
+// arrangementet som <domene>/<hash>. Små bokstaver a–z, tall og enkle bindestreker mellom ordene –
+// ikke æ, ø og å, som blir til %C3%A6 o.l. når adressen kopieres. Hash-er og alias deler ett navnerom
+// (se db.js), så en adresse peker aldri på to arrangementer.
+export const ALIAS_MIN_LENGTH = 3;
+export const ALIAS_MAX_LENGTH = 60;
+export const ALIAS_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+// Første del av stier appen bruker selv. Kortere navn enn ALIAS_MIN_LENGTH (som /t/ og /b/) er
+// uansett utelukket.
+export const RESERVED_ALIASES = new Set(['admin', 'api', 'assets', 'dorvakt']);
+
+/** Kan dette være et alias? (Formatet – ikke om det finnes.) */
+export function isAlias(value) {
+  return typeof value === 'string' && value.length >= ALIAS_MIN_LENGTH && value.length <= ALIAS_MAX_LENGTH
+    && ALIAS_PATTERN.test(value);
+}
+
+/** Det arrangøren skriver («Julebord 2026») → «julebord-2026». Gyldigheten sjekkes i validation.js. */
+export function normalizeAlias(input) {
+  return String(input ?? '').trim().toLowerCase().replace(/^\/+/, '').replace(/[\s_]+/g, '-');
+}
+
 // Billettnummer (én per person) og påmeldingsnummer: 10 tegn fra samme alfabet, 31^10 ≈ 2^49
 // muligheter. Nummeret alene gir ingen tilgang – lenken til billetten har i tillegg en signatur
 // (se tickets.js). Nummeret vises på billetten, så døra kan taste det inn om QR-koden ikke virker.

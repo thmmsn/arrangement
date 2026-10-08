@@ -358,6 +358,23 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .linkbox .btn { white-space: nowrap; }
 .linkbox input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
 
+/* Korte lenker (alias). Lenke og tre knapper får ikke plass på én linje på en telefon: der får lenken
+   en egen linje. Feltet for en ny lenke står etter starten på adressen (https://<domene>/). */
+@media (max-width: 520px) {
+  .linkbox.alias-row { flex-wrap: wrap; }
+  .linkbox.alias-row input { flex-basis: 100%; }
+}
+.alias-input { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.alias-input .prefix {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.alias-input input { flex: 1 1 180px; width: auto; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.alias-input .btn { white-space: nowrap; }
+.alias-form .muted.small { margin: 6px 0 0; }
+
 .stats {
   display: flex;
   flex-wrap: wrap;

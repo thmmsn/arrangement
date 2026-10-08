@@ -1,5 +1,7 @@
 import { FEATURES } from './db.js';
-import { newFieldId } from './ids.js';
+import {
+  ALIAS_MAX_LENGTH, ALIAS_MIN_LENGTH, isAlias, newFieldId, normalizeAlias, RESERVED_ALIASES,
+} from './ids.js';
 
 // Validering skjer alltid på serveren. Frontend validerer også, men det er bare for brukervennlighet –
 // alt som kommer inn over nettet må regnes som upålitelig.
@@ -291,6 +293,24 @@ export function validateBooking(input, fields, maxPerBooking = 1) {
 
   if (Object.keys(errors).length) throw new ValidationError(errors);
   return { contact, persons: [contact, ...guests] };
+}
+
+// ---------- Alias ----------
+
+/**
+ * Det arrangøren skrev inn som alias → det normaliserte aliaset («Julebord 2026» → «julebord-2026»).
+ * Kaster ValidationError med feltet «alias». Om navnet er ledig, avgjøres i databasen (se db.js).
+ */
+export function validateAlias(input) {
+  const alias = normalizeAlias(input);
+  let error = null;
+  if (!alias) error = msg('aliasRequired');
+  else if (alias.length < ALIAS_MIN_LENGTH || alias.length > ALIAS_MAX_LENGTH) {
+    error = msg('aliasLength', { min: ALIAS_MIN_LENGTH, max: ALIAS_MAX_LENGTH });
+  } else if (!isAlias(alias)) error = msg('aliasInvalid');
+  else if (RESERVED_ALIASES.has(alias)) error = msg('aliasReserved', { alias });
+  if (error) throw new ValidationError({ alias: error });
+  return alias;
 }
 
 // ---------- Status ----------

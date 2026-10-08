@@ -211,6 +211,18 @@ export const MIGRATIONS = [
   `
   ALTER TABLE event_images ADD COLUMN og_data BLOB;
   `,
+
+  // 8: Alias – lesbare adresser (<domene>/julebord) til et arrangement, i tillegg til hash-en. Et
+  // arrangement kan ha mange. De slettes sammen med arrangementet (ON DELETE CASCADE), og navnet blir
+  // da ledig igjen. Aliaset er primærnøkkelen, så to arrangementer kan aldri ha det samme.
+  `
+  CREATE TABLE event_aliases (
+    alias      TEXT    PRIMARY KEY,
+    event_id   INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    created_at TEXT    NOT NULL
+  );
+  CREATE INDEX event_aliases_event_id ON event_aliases(event_id);
+  `,
 ];
 
 // Før prosjektet ble omdøpt til «arrangement», het databasefilen booking.db.
@@ -277,12 +289,27 @@ export class CapacityError extends Error {
   }
 }
 
+/** Aliaset kan ikke legges til. `reason`: 'taken' (navnet er i bruk) eller 'tooMany' (taket er nådd). */
+export class AliasError extends Error {
+  constructor(reason) {
+    super(`Alias avvist: ${reason}`);
+    this.reason = reason;
+  }
+}
+
 // Samler all SQL på ett sted. Resten av appen jobber med vanlige JS-objekter (camelCase).
 export function createRepository(db) {
   const stmt = {
     meta: db.prepare('SELECT value FROM meta WHERE key = ?'),
     eventBySlug: db.prepare('SELECT * FROM events WHERE slug = ?'),
     eventById: db.prepare('SELECT * FROM events WHERE id = ?'),
+    eventByAlias: db.prepare('SELECT e.* FROM events e JOIN event_aliases a ON a.event_id = e.id WHERE a.alias = ?'),
+    // Hash-er og alias deler ett navnerom: et navn er opptatt hvis det er det ene eller det andre.
+    nameTaken: db.prepare('SELECT 1 FROM events WHERE slug = @name UNION ALL SELECT 1 FROM event_aliases WHERE alias = @name'),
+    aliases: db.prepare('SELECT alias FROM event_aliases WHERE event_id = ? ORDER BY created_at, alias'),
+    countAliases: db.prepare('SELECT COUNT(*) AS n FROM event_aliases WHERE event_id = ?'),
+    insertAlias: db.prepare('INSERT INTO event_aliases (alias, event_id, created_at) VALUES (?, ?, ?)'),
+    deleteAlias: db.prepare('DELETE FROM event_aliases WHERE event_id = ? AND alias = ?'),
     insertEvent: db.prepare(`
       INSERT INTO events (slug, admin_key_hash, title, description, location, starts_at, ends_at,
         registration_deadline, capacity, max_per_booking, show_count, is_open, organizer_name,
@@ -437,6 +464,14 @@ export function createRepository(db) {
     return { bookingId, bookingCode, persons, ids: persons.map((p) => p.id), count: count + booking.persons.length };
   });
 
+  // Sjekk og innsetting i samme skrivetransaksjon (BEGIN IMMEDIATE), så to arrangører som tar det samme
+  // navnet samtidig, aldri begge får det – og taket per arrangement holder også ved samtidige forespørsler.
+  const addAliasTx = db.transaction((eventId, alias, max) => {
+    if (stmt.nameTaken.get({ name: alias })) throw new AliasError('taken');
+    if (stmt.countAliases.get(eventId).n >= max) throw new AliasError('tooMany');
+    stmt.insertAlias.run(alias, eventId, new Date().toISOString());
+  });
+
   // Sletter de valgte personene i én påmelding, og selve påmeldingen hvis ingen er igjen.
   const deleteFromBookingTx = db.transaction((eventId, bookingId, ids) => {
     const deleted = [];
@@ -460,6 +495,26 @@ export function createRepository(db) {
     },
     findEventById(id) {
       return mapEvent(stmt.eventById.get(id));
+    },
+    /** Arrangementet med dette aliaset, eller null. */
+    findEventByAlias(alias) {
+      return mapEvent(stmt.eventByAlias.get(alias));
+    },
+    /** Er navnet brukt som hash eller alias (av et hvilket som helst arrangement)? */
+    isNameTaken(name) {
+      return Boolean(stmt.nameTaken.get({ name }));
+    },
+    /** Aliasene til arrangementet, eldste først. */
+    listAliases(eventId) {
+      return stmt.aliases.all(eventId).map((row) => row.alias);
+    },
+    /** Legger til et alias (allerede validert). Kaster AliasError hvis navnet er tatt eller taket `max` er nådd. */
+    addAlias(eventId, alias, max) {
+      addAliasTx.immediate(eventId, alias, max);
+    },
+    /** true = fjernet, false = arrangementet hadde ikke dette aliaset. */
+    removeAlias(eventId, alias) {
+      return stmt.deleteAlias.run(eventId, alias).changes > 0;
     },
     /** Avlyser arrangementet (at = tidspunkt), eller opphever avlysningen (at = null). */
     setCancelled(id, at, message = null) {

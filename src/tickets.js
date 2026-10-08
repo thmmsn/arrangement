@@ -285,7 +285,7 @@ export function createTicketFeature(ctx) {
   const onRightSite = (req, res, event) => {
     const site = siteOf(event);
     if (site === req.site) return true;
-    redirectToSite(req, res, site);
+    redirectToSite(req, res, site, event);
     return false;
   };
 

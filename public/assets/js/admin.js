@@ -1,5 +1,6 @@
 import {
-  api, copyToClipboard, uploadImage, formatAnswer, formatEventTime, formatShort, h, notice, secretFromHash, slugFromPath, t,
+  api, clearFieldErrors, copyToClipboard, uploadImage, formatAnswer, formatEventTime, formatShort, h, notice, secretFromHash,
+  showFieldErrors, slugFromPath, t,
 } from './common.js';
 import { createEventForm } from './event-form.js';
 
@@ -75,6 +76,7 @@ function render() {
     h('p', { class: 'muted' }, formatEventTime(event.startsAt, event.endsAt, tz), event.location ? ` · ${event.location}` : ''),
     event.cancelledAt ? notice('error', t('admin.cancelledBanner', { date: formatShort(event.cancelledAt, tz) })) : null,
     overviewCard(),
+    aliasCard(),
     event.scannerUrl ? scannerCard() : null,
     guestsCard(),
     editCard(),
@@ -131,6 +133,73 @@ function overviewCard() {
         h('a', { class: 'btn secondary small', href: url, target: '_blank', rel: 'noopener' }, t('common.open')))),
     h('div', { class: 'actions' }, toggle),
   );
+}
+
+// Korte lenker (alias): lesbare adresser til det samme arrangementet, f.eks. <domene>/julebord.
+// Arrangøren kan legge til mange og fjerne dem igjen. Påmeldingslenken (hash-en) er fortsatt hovedlenken.
+function aliasCard() {
+  const list = event.aliases.length
+    ? event.aliases.map(({ alias, url }) => {
+      const field = h('input', { type: 'text', value: url, readOnly: true, 'aria-label': t('admin.aliasLink') });
+      field.addEventListener('focus', () => field.select());
+      const copy = h('button', { class: 'btn secondary small', type: 'button' }, t('common.copy'));
+      copy.addEventListener('click', () => copyToClipboard(url, copy, field));
+      const remove = h('button', { class: 'btn danger small', type: 'button' }, t('common.remove'));
+      remove.addEventListener('click', () => removeAlias(alias, url, remove));
+      return h('div', { class: 'linkbox alias-row' }, field, copy,
+        h('a', { class: 'btn secondary small', href: url, target: '_blank', rel: 'noopener' }, t('common.open')), remove);
+    })
+    : h('p', { class: 'muted' }, t('admin.aliasNone'));
+
+  const input = h('input', {
+    type: 'text', id: 'alias-new', maxLength: 60, placeholder: t('admin.aliasPlaceholder'),
+    autocapitalize: 'none', autocomplete: 'off', spellcheck: false,
+  });
+  const add = h('button', { class: 'btn small', type: 'submit' }, t('admin.aliasAdd'));
+  const form = h('form', { class: 'alias-form', novalidate: true },
+    h('div', { class: 'form-row', 'data-error-for': 'alias' },
+      h('label', { for: 'alias-new' }, t('admin.aliasNew')),
+      h('div', { class: 'alias-input' }, h('span', { class: 'prefix' }, `${event.baseUrl}/`), input, add),
+      h('p', { class: 'muted small' }, t('admin.aliasHint'))));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    clearFieldErrors(form);
+    add.disabled = true;
+    try {
+      const result = await api(`/admin/events/${slug}/aliases`, { method: 'POST', body: { alias: input.value }, headers: auth });
+      event.aliases = result.aliases;
+      const added = result.aliases.find((a) => a.alias === result.alias);
+      flash = notice('success', t('admin.aliasAdded', { url: added?.url ?? result.alias }));
+      render();
+      document.getElementById('alias-new')?.focus();
+    } catch (err) {
+      add.disabled = false;
+      if (err.errors?.alias) showFieldErrors(form, err.errors);
+      else alert(err.message);
+    }
+  });
+
+  return h('section', { class: 'card', id: 'alias-card' },
+    h('h2', {}, t('admin.aliasHeading')),
+    h('p', { class: 'muted small' },
+      t('admin.aliasIntro', { example: `${event.baseUrl}/${t('admin.aliasPlaceholder')}`, max: event.maxAliases })),
+    h('p', { class: 'muted small' }, t('admin.aliasWarning')),
+    list,
+    form);
+}
+
+async function removeAlias(alias, url, button) {
+  if (!confirm(t('admin.aliasRemoveConfirm', { url }))) return;
+  button.disabled = true;
+  try {
+    const result = await api(`/admin/events/${slug}/aliases/${encodeURIComponent(alias)}`, { method: 'DELETE', headers: auth });
+    event.aliases = result.aliases;
+    flash = notice('success', t('admin.aliasRemoved', { url }));
+    render();
+  } catch (err) {
+    button.disabled = false;
+    alert(err.message);
+  }
 }
 
 // Antall påmeldinger (grupper). Én påmelding kan gjelde flere personer.

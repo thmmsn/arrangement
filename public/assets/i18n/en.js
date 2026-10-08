@@ -179,6 +179,18 @@ export default {
     cancelDoneSilent: 'The event is cancelled. Nobody was emailed.',
     uncancelButton: 'Undo cancellation',
     uncancelDone: 'The cancellation has been undone.',
+    aliasHeading: 'Short links (aliases)',
+    aliasIntro: 'Create readable addresses for the event, e.g. {example}. They show the same page as the registration link above, which still works and is used in the emails. You can add as many as you like (up to {max}).',
+    aliasWarning: 'Unlike the registration link, a short link is easy to guess: anyone who tries the address will find the event.',
+    aliasNone: 'No short links yet.',
+    aliasLink: 'Short link',
+    aliasNew: 'New short link',
+    aliasHint: 'Lowercase letters a–z, digits and hyphens. Spaces become hyphens.',
+    aliasPlaceholder: 'christmas-party-2026',
+    aliasAdd: 'Add',
+    aliasAdded: 'The short link {url} has been added.',
+    aliasRemoveConfirm: 'Remove {url}? The link stops working immediately.',
+    aliasRemoved: 'The short link {url} has been removed.',
   },
 
   create: {
@@ -470,6 +482,7 @@ export default {
     imageInvalid: 'Invalid image. Use JPEG, PNG or WebP.',
     imageTooLarge: 'The image is too large (max {max} MB).',
     imageTooManyPixels: 'The image has too many pixels. Use a smaller image.',
+    aliasNotFound: 'The event does not have this short link.',
   },
 
   validation: {
@@ -510,6 +523,12 @@ export default {
     invalidPhone: 'Invalid phone number',
     onlyYourself: 'You can only register yourself for this event.',
     maxPersons: 'You can register at most {max} people at a time.',
+    aliasRequired: 'Enter a name',
+    aliasLength: 'Must be {min}–{max} characters',
+    aliasInvalid: 'Use only lowercase letters a–z, digits and hyphens between words',
+    aliasReserved: '“{alias}” is reserved by the system. Choose another name',
+    aliasTaken: '“{alias}” is already in use. Choose another name',
+    aliasTooMany: 'An event can have at most {max} short links',
   },
 
   csv: {

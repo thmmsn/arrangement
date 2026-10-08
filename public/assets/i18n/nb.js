@@ -179,6 +179,18 @@ export default {
     cancelDoneSilent: 'Arrangementet er avlyst. Ingen fikk e-post.',
     uncancelButton: 'Opphev avlysningen',
     uncancelDone: 'Avlysningen er opphevet.',
+    aliasHeading: 'Korte lenker (alias)',
+    aliasIntro: 'Lag lesbare adresser til arrangementet, f.eks. {example}. De viser den samme siden som påmeldingslenken over, som fortsatt virker og brukes i e-postene. Du kan legge til så mange du vil (maks {max}).',
+    aliasWarning: 'En kort lenke er lett å gjette, i motsetning til påmeldingslenken: alle som prøver adressen, finner arrangementet.',
+    aliasNone: 'Ingen korte lenker ennå.',
+    aliasLink: 'Kort lenke',
+    aliasNew: 'Ny kort lenke',
+    aliasHint: 'Små bokstaver a–z, tall og bindestrek (ikke æ, ø, å). Mellomrom blir til bindestrek.',
+    aliasPlaceholder: 'julebord-2026',
+    aliasAdd: 'Legg til',
+    aliasAdded: 'Den korte lenken {url} er lagt til.',
+    aliasRemoveConfirm: 'Fjerne {url}? Lenken slutter å virke med en gang.',
+    aliasRemoved: 'Den korte lenken {url} er fjernet.',
   },
 
   create: {
@@ -471,6 +483,7 @@ export default {
     imageInvalid: 'Ugyldig bilde. Bruk JPEG, PNG eller WebP.',
     imageTooLarge: 'Bildet er for stort (maks {max} MB).',
     imageTooManyPixels: 'Bildet har for mange piksler. Bruk et mindre bilde.',
+    aliasNotFound: 'Arrangementet har ikke denne korte lenken.',
   },
 
   validation: {
@@ -511,6 +524,12 @@ export default {
     invalidPhone: 'Ugyldig telefonnummer',
     onlyYourself: 'Du kan bare melde på deg selv til dette arrangementet.',
     maxPersons: 'Du kan melde på maks {max} personer om gangen.',
+    aliasRequired: 'Skriv inn et navn',
+    aliasLength: 'Må være {min}–{max} tegn',
+    aliasInvalid: 'Bruk bare små bokstaver a–z, tall og bindestrek mellom ordene (ikke æ, ø, å)',
+    aliasReserved: '«{alias}» er reservert av systemet. Velg et annet navn',
+    aliasTaken: '«{alias}» er allerede i bruk. Velg et annet navn',
+    aliasTooMany: 'Et arrangement kan ha maks {max} korte lenker',
   },
 
   csv: {
