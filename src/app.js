@@ -252,7 +252,12 @@ export function createApp({
     res.type('text/css').set('Cache-Control', 'public, max-age=31536000, immutable').send(css);
   });
   app.get('/assets/vendor/jsqr.js', (req, res) => res.set('Cache-Control', 'public, max-age=86400').type('text/javascript').sendFile(JSQR));
-  app.use('/assets', express.static(ASSETS, { maxAge: '1h' }));
+  // Skript, ordbøker og stilark: «no-cache» – nettleseren (og Cloudflare) beholder filen, men spør hver gang
+  // om den er endret (ETag), og får 304 når den ikke er det. Sidene laster hovedskriptet med versjonen i
+  // adressen (…/admin.js?v=<versjon>), men filene det importerer (common.js, i18n/nb.js …) har den ikke. Med
+  // «max-age» kunne en ny versjon da kjørt med en gammel ordbok, og vist tekstnøkler som «overview.manage»
+  // i stedet for teksten – til hurtigbufferen gikk ut.
+  app.use('/assets', express.static(ASSETS, { setHeaders: (res) => res.set('Cache-Control', 'no-cache') }));
   app.get('/robots.txt', (req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /\n'));
 
   // ---------- Tilgang til administrasjonen ----------

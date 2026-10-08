@@ -11,9 +11,9 @@ import { api, formatEventTime, h, notice, secretFromHash, t } from './common.js'
 import { feedback, resultView } from './staff.js';
 
 const app = document.getElementById('app');
-// Tolkes her, ikke med slugFromPath i common.js: rett etter en ny versjon kan nettleseren ha en eldre
-// common.js i hurtigbufferen (inntil én time), og den kjenner ikke /dorvakt/<slug>. Denne filen lastes
-// alltid i riktig versjon (scanner.js?v=<versjon>), så skanneren virker også i den timen.
+// Tolkes her, ikke med slugFromPath i common.js: fram til 2026.10.8.6 kunne nettleseren ha en eldre
+// common.js i hurtigbufferen (inntil én time), og den kjente ikke /dorvakt/<slug>. Denne filen lastes
+// alltid i riktig versjon (scanner.js?v=<versjon>), så skanneren virker uansett.
 const [first, second] = location.pathname.split('/').filter(Boolean);
 const slug = ((first === 'dorvakt' ? second : first) || '').toLowerCase();
 const key = secretFromHash();

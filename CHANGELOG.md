@@ -12,6 +12,22 @@ Hver versjon under har et avsnitt **Oppgradering** når noe må gjøres i tilleg
 
 ---
 
+## 2026.10.8.6 – 8. oktober 2026
+
+### Feilretting: tekstnøkler som «overview.manage» i stedet for teksten
+
+Etter en oppdatering kunne sidene vise navnet på en tekst – f.eks. «overview.manage» i stedet for «Administrer» – i inntil én time.
+
+**Årsaken:** hovedskriptet på hver side har versjonsnummeret i adressen (`…/overview.js?v=<versjon>`), så nettleseren henter alltid ny versjon av det. Men filene det importerer – `common.js` og ordbøkene i `i18n/` – har det ikke, og de kunne ligge i hurtigbufferen (hos nettleseren og hos Cloudflare) i én time. Hadde du siden åpen før oppdateringen, kjørte det nye skriptet med den gamle ordboken, der de nye tekstene ikke fantes. Det gjaldt alle nye tekster, også i tidligere versjoner.
+
+**Rettingen:** alt under `/assets` sendes nå med `Cache-Control: no-cache`. Nettleseren beholder filene, men spør serveren hver gang om de er endret (ETag), og får `304 Not Modified` når de ikke er det – så det koster nesten ingenting. Etter en oppdatering får den de nye filene med en gang. Temastilarket og skins har innholdshash i navnet og mellomlagres fortsatt for alltid. Se README, «Hurtigbuffer».
+
+### Oppgradering
+
+- **Én gang, rett etter oppgraderingen:** nettlesere som har vært innom de siste 60 minuttene, kan fortsatt ha de gamle filene, fordi den forrige versjonen sa at de kunne brukes i én time. Last siden på nytt med tømming av hurtigbufferen (Ctrl+Shift+R, eller Cmd+Shift+R på Mac) – eller vent en time. Etter det skjer det ikke igjen.
+
+---
+
 ## 2026.10.8.5 – 8. oktober 2026
 
 ### Nytt: «Administrer» på hvert arrangement i oversikten

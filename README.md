@@ -425,7 +425,7 @@ Fra versjon 2026.9.28.3 har alle lenkene til et arrangement samme hash, på arra
 - **Gamle dørvaktlenker** (`/<hash>/skanner#<nøkkel>`) gir den samme siden som før, direkte og uten videresending. Nøkkelen er den samme i den gamle og den nye lenken, fordi den er avledet av arrangementet og ikke av adressen (se `src/tokens.js`).
 - **Dørvakter som allerede er logget inn,** forblir innlogget. Informasjonskapselen (`dv_<hash>`) gjelder hele domenet (`Path=/`) og virker på begge adressene. Køen for innsjekking uten nett er knyttet til hashen, ikke adressen.
 - **Gamle admin-lenker** til `ADMIN_HOST` virker som før. Er Access fortsatt satt opp på det vertsnavnet, logger man inn der som før. Appen krever bare nøkkelen.
-- **Hurtigbufferen i nettleseren:** filene under `/assets` kan ligge i hurtigbufferen i én time. Sidene laster derfor skriptene med versjonsnummeret i adressen (`/assets/js/scanner.js?v=2026.9.28.3`), så en ny versjon aldri kjører et gammelt skript. Skannersiden leser dessuten hashen selv, og ikke via en delt hjelpefunksjon som kunne vært gammel i den timen.
+- **Hurtigbufferen i nettleseren:** sidene laster skriptene med versjonsnummeret i adressen (`/assets/js/scanner.js?v=2026.9.28.3`), så en ny versjon aldri kjører et gammelt skript. Skannersiden leser dessuten hashen selv, og ikke via en delt hjelpefunksjon. Fra 2026.10.8.6 sjekkes alle filene under `/assets` hver gang (`Cache-Control: no-cache`, se [Hurtigbuffer](#hurtigbuffer)).
 - **E-poster** som sendes etter oppgraderingen (rapporten ved påmeldingsfristen, nye arrangementer), har de nye lenkene. E-poster som allerede er sendt, har de gamle, og de virker fortsatt.
 
 Bruker du Cloudflare Access med stiregler på det offentlige domenet (B), bør regelen endres fra `admin` og `api/admin` til bare `admin/ny`. Ellers må arrangørene logge inn via Access for å bruke de nye admin-lenkene. Med eget admin-vertsnavn (A) trengs ingen endring.
@@ -950,6 +950,19 @@ Skinnen legges oppå temaet og gjelder sidene gjestene og dørvaktene ser. Admin
 **Egne skins:** Eieren legger en CSS-fil i mappen `./skins`, som i Docker er montert som `/app/skins`, og starter appen på nytt. Hvordan en skin lages, hvilke variabler som finnes, og hva som er lov (fonter, bilder), står i [docs/skins.md](docs/skins.md).
 
 ---
+
+## Hurtigbuffer
+
+Hvor lenge nettleseren (og Cloudflare, som følger de samme headerne) kan bruke en fil uten å spørre serveren:
+
+| Filer | `Cache-Control` | Hvorfor |
+|---|---|---|
+| Skript, ordbøker og stilark under `/assets` (`js/`, `i18n/`, `css/` …) | `no-cache` | Nettleseren beholder filen, men spør hver gang om den er endret (ETag), og får `304 Not Modified` når den ikke er det. Etter en oppdatering får den den nye filen med en gang. Hovedskriptet har versjonen i adressen (`…/overview.js?v=<versjon>`), men filene det importerer (`common.js`, `i18n/nb.js` …) har den ikke – med en fast levetid kunne en ny versjon kjørt med en gammel ordbok og vist tekstnøkler som «overview.manage» i stedet for teksten. |
+| Temastilarket (`/assets/theme/<hash>.css`) og skins (`/assets/skins/<hash>.css`) | `public, max-age=31536000, immutable` | Navnet er en hash av innholdet, så nytt innhold gir nytt navn. |
+| jsQR (`/assets/vendor/jsqr.js`) | `public, max-age=86400` | Endres bare med en ny versjon av biblioteket. |
+| Eierens filer (`/assets/custom/…`, fra `./branding`) | `public, max-age=3600` | Logo og lignende. En ny logo kan ta inntil en time før alle ser den. |
+| Opplastede forsidebilder (`/<hash>/bilde/…`) | `private, max-age=86400` | Nytt bilde gir ny adresse. `private`: skal ikke ligge igjen hos Cloudflare etter at arrangementet er slettet. |
+| API-et (`/api/…`) og sider med personlige data | `no-store` | Skal aldri lagres. |
 
 ## Sikkerhet og personvern
 

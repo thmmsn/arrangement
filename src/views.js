@@ -15,7 +15,8 @@ import { siteFooter, siteHeader, themeHead } from './theme.js';
 //                                       for et arrangement), ferdig escapet av den som lager dem
 //   {{VERSION}}                         appens versjonsnummer, i skriptadressene (…/admin.js?v={{VERSION}}):
 //                                       en ny versjon gir ny adresse, så nettleseren aldri kjører et
-//                                       gammelt skript fra hurtigbufferen (/assets caches i én time)
+//                                       gammelt skript fra hurtigbufferen. Filene skriptene importerer,
+//                                       sjekkes uansett hver gang (/assets er «no-cache», se app.js)
 // Temaet endres bare ved omstart, så hver side lages én gang per nettsted og holdes i minnet.
 // <!--PAGE-META--> er forskjellig for hver forespørsel og settes derfor inn etter mellomlagringen.
 // `version`: appens versjonsnummer (se version.js), vist nederst til høyre på alle sidene.
