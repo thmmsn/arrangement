@@ -58,7 +58,7 @@ arrangement.domain.no/dorvakt/k7hq2mxpr9az#<nøkkel>      innsjekking (dørvakte
 | `/t/<nøkkel>` | Gjesten – og det QR-koden peker på | Én billett. For en innlogget dørvakt: innsjekking |
 | `/<hash>/kalender.ics` | Alle som har lenken til arrangementet | Kalenderfil |
 
-Alt annet – også forsiden `/` – svarer med det samme nakne `404 Not Found` (ren tekst, uten logo, navn eller språk). Unntakene er forsiden når nettstedet har `ROOT_REDIRECT`, og aliaser arrangøren har lagt til (se [Korte lenker (alias)](#korte-lenker-alias)) (se [Forsiden](#forsiden-404-eller-videre-til-et-annet-nettsted)). Det gjelder også ugyldige lenker, både for sider og API, også `/admin/<ukjent hash>` og `/dorvakt/<ukjent hash>`. Uten en gyldig hash kan man dermed ikke se hvilket nettsted eller system som ligger på domenet. Statiske filer (CSS og JavaScript) må være tilgjengelige for at arrangementssidene skal virke, men de inneholder ingen data. Temastilarket har et navn som er en hash av innholdet, så det kan ikke gjettes.
+Alt annet – også forsiden `/` – svarer med det samme nakne `404 Not Found` (ren tekst, uten logo, navn eller språk). Unntakene er forsiden når nettstedet har `ROOT_REDIRECT` (se [Forsiden](#forsiden-404-eller-videre-til-et-annet-nettsted)), og aliaser arrangøren har lagt til (se [Korte lenker (alias)](#korte-lenker-alias)). Det gjelder også ugyldige lenker, både for sider og API, også `/admin/<ukjent hash>` og `/dorvakt/<ukjent hash>`. Uten en gyldig hash kan man dermed ikke se hvilket nettsted eller system som ligger på domenet. Statiske filer (CSS og JavaScript) må være tilgjengelige for at arrangementssidene skal virke, men de inneholder ingen data. Temastilarket har et navn som er en hash av innholdet, så det kan ikke gjettes.
 
 **Eldre lenker virker fortsatt** (se [Oppgradering: samme hash overalt](#oppgradering-samme-hash-overalt)):
 
@@ -95,7 +95,7 @@ Oppstartsloggen viser hva forsiden gjør for hvert nettsted («Nettsted «main»
 
 ### Korte lenker (alias)
 
-Hash-lenken (`/k7hq2mxpr9az`) er vanskelig å huske og å skrive av en plakat. Arrangøren kan derfor legge til **alias** – lesbare adresser til det samme arrangementet – på admin-siden, under «Korte lenker (alias)»:
+Hash-lenken (`/k7hq2mxpr9az`) er vanskelig å huske og å skrive av en plakat. Fra versjon 2026.10.8.1 kan arrangøren derfor legge til **alias** – lesbare adresser til det samme arrangementet – på admin-siden, under «Korte lenker (alias)»:
 
 ```
 arrangement.domain.no/julebord-2026   →  samme side som  arrangement.domain.no/k7hq2mxpr9az
