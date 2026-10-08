@@ -44,7 +44,11 @@ export function loadConfig(rawEnv = process.env) {
     // Opprettingsnøkkelen: lenken /admin/ny#<nøkkel> gir rett til å opprette arrangementer, uten
     // Cloudflare Access. Minst 32 tegn; en for kort eller ugyldig nøkkel ignoreres, og oppretting er da
     // stengt (med mindre Access eller LAN-porten brukes).
-    createKey: parseCreateKey(env.CREATE_KEY, warnings),
+    createKey: parseKey('CREATE_KEY', env.CREATE_KEY, warnings, 'Ingen kan opprette arrangementer med nøkkel.'),
+    // Oversiktsnøkkelen: lenken /admin#<nøkkel> viser alle arrangementene (uten opplysninger om gjestene).
+    // Samme krav som CREATE_KEY. Nøkkelen kreves alltid – også på LAN-porten og med Cloudflare Access,
+    // som eieren kan legge foran som et ekstra lag. Uten nøkkel finnes oversikten ikke.
+    overviewKey: parseKey('OVERVIEW_KEY', env.OVERVIEW_KEY, warnings, 'Oversikten over alle arrangementer (/admin) er stengt.'),
     // Oppretting av arrangementer uten Cloudflare Access og uten CREATE_KEY. BARE for lokal utvikling –
     // da kan alle som når /admin opprette arrangementer.
     adminNoAuth: ['true', '1', 'yes', 'ja'].includes((env.ADMIN_NO_AUTH || '').trim().toLowerCase()),
@@ -95,13 +99,14 @@ function parseEmails(value, warnings) {
 
 // Bare tegn som kan stå etter # i en lenke uten å kodes (A–Z, a–z, 0–9, - og _), og minst 32 av dem.
 // `openssl rand -hex 32` gir 64 tegn (256 tilfeldige bit).
-const CREATE_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
+// Gjelder både CREATE_KEY og OVERVIEW_KEY.
+const KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
 
-function parseCreateKey(value, warnings) {
+function parseKey(name, value, warnings, consequence) {
   const key = String(value ?? '').trim();
   if (!key) return null;
-  if (CREATE_KEY_PATTERN.test(key)) return key;
-  warnings.push('CREATE_KEY ignoreres: må være minst 32 tegn, og bare A–Z, a–z, 0–9, - og _. Lag en med `openssl rand -hex 32`. Ingen kan opprette arrangementer med nøkkel.');
+  if (KEY_PATTERN.test(key)) return key;
+  warnings.push(`${name} ignoreres: må være minst 32 tegn, og bare A–Z, a–z, 0–9, - og _. Lag en med \`openssl rand -hex 32\`. ${consequence}`);
   return null;
 }
 

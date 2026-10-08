@@ -256,7 +256,7 @@ export function createApp({
 
   // ---------- Tilgang til administrasjonen ----------
   // Alt som har med administrasjon å gjøre ligger under /admin (sider) og /api/admin (API). Det finnes
-  // to slags tilgang, med hver sin nøkkel:
+  // tre slags tilgang, med hver sin nøkkel (den tredje, oversikten, er beskrevet ved overviewKeyHash):
   //
   // 1. Opprette arrangementer: /admin/ny og resten av /api/admin (config, places, POST events).
   //    Slipper inn med den betrodde LAN-porten, opprettingsnøkkelen (CREATE_KEY, lenken
@@ -271,6 +271,12 @@ export function createApp({
   // JavaScript på siden sender dem i «Authorization: Bearer <nøkkel>» til API-et.
 
   const createKeyHash = config.createKey ? hashSecret(config.createKey) : null;
+  // 3. Oversikten over alle arrangementer: /admin#<OVERVIEW_KEY> og GET /api/admin/overview. Krever
+  //    alltid oversiktsnøkkelen – også på LAN-porten og med Cloudflare Access, som eieren kan legge foran
+  //    som et ekstra lag. Med ADMIN_HOST finnes den bare der (og på LAN-porten), som oppretting. Uten
+  //    OVERVIEW_KEY finnes den ikke, og /admin sender videre til /admin/ny som før.
+  const overviewKeyHash = config.overviewKey ? hashSecret(config.overviewKey) : null;
+  const overviewHere = (req) => Boolean(overviewKeyHash) && (isLan(req) || !config.adminHost || hostOf(req) === config.adminHost);
   const bearerOf = (req) => /^Bearer (.+)$/.exec(req.get('authorization') || '')?.[1] ?? '';
 
   // Oppretting (1). Setter req.creator når forespørselen har lov til å opprette arrangementer.
@@ -343,7 +349,9 @@ export function createApp({
     res.set('Cache-Control', 'no-store').redirect(302, req.site.rootRedirect);
   });
 
-  app.get('/admin', creatorGate('page'), (req, res) => res.redirect('/admin/ny'));
+  // Siden har ingen data: de hentes med oversiktsnøkkelen, som bare JavaScript på siden kjenner (etter #).
+  app.get('/admin', (req, res, next) => (overviewHere(req) ? sendPage(res, 'overview', mainSite) : next()),
+    creatorGate('page'), (req, res) => res.redirect('/admin/ny'));
   app.get('/admin/ny', creatorGate('page'), (req, res) => sendPage(res, 'new', mainSite));
   // Siden for ett arrangement vises for alle arrangementer som finnes. Den har ingen data: dataene
   // krever admin-nøkkelen, som bare JavaScript på siden kjenner.
@@ -417,7 +425,11 @@ export function createApp({
   const adminApi = express.Router({ caseSensitive: true });
   // Ett arrangement krever admin-nøkkelen; alt annet under /api/admin gjelder oppretting.
   const apiCreatorGate = creatorGate('api');
-  const adminApiGate = (req, res, next) => (EVENT_ADMIN_PATH.test(req.path) ? eventAdminGate : apiCreatorGate)(req, res, next);
+  const adminApiGate = (req, res, next) => {
+    // Express godtar også /overview/ for ruten – porten må gjøre det samme.
+    if (/^\/overview\/?$/.test(req.path)) return overviewGate(req, res, next);
+    return (EVENT_ADMIN_PATH.test(req.path) ? eventAdminGate : apiCreatorGate)(req, res, next);
+  };
   adminApi.use(adminApiGate, express.json({ limit: '100kb' }), noStore);
 
   const registerLimiter = limiter(limits.register);
@@ -439,6 +451,25 @@ export function createApp({
     const event = findEventBySlug(req.params.slug);
     if (!event) return res.status(404).json({ error: adminT('errors.eventNotFound') });
     req.event = event;
+    next();
+  }
+
+  // Oversikten (3). Finnes den ikke her (ingen OVERVIEW_KEY, eller feil vertsnavn med ADMIN_HOST), er
+  // svaret den nakne 404-en. Uten riktig nøkkel: 401.
+  function overviewGate(req, res, next) {
+    req.t = adminT;
+    if (!overviewHere(req)) return notFound(req, res);
+    if (!secretMatches(bearerOf(req), overviewKeyHash)) {
+      return res.status(401).set('Cache-Control', 'no-store').json({ error: adminT('errors.overviewKeyRequired') });
+    }
+    next();
+  }
+
+  // Sjekken gjentas i ruten, som for requireEventAdmin: ruten skal aldri kunne bli åpen ved en feil.
+  function requireOverviewKey(req, res, next) {
+    if (!overviewHere(req) || !secretMatches(bearerOf(req), overviewKeyHash)) {
+      return res.status(401).json({ error: adminT('errors.overviewKeyRequired') });
+    }
     next();
   }
 
@@ -844,6 +875,47 @@ export function createApp({
   adminApi.delete('/events/:slug/image', loadAdminEvent, requireEventAdmin, (req, res) => {
     repo.deleteImage(req.event.id);
     res.json({ uploadedImage: null, ogImage: null });
+  });
+
+  // ---------- Oversikt over alle arrangementer ----------
+  // Alle arrangementene som finnes (de slettes DELETE_AFTER_DAYS dager etter at de er over), med tall –
+  // aldri opplysninger om gjestene. Admin-lenkene er ikke med: admin-nøklene lagres bare som hash, og
+  // står bare i e-posten til arrangøren (og tjenesteadministratoren, ADMIN_EMAIL).
+  adminApi.get('/overview', requireOverviewKey, (req, res) => {
+    const now = new Date();
+    const events = repo.listEventsOverview().map(({ event, count, bookings, checkedIn, aliases }) => {
+      const site = siteOf(event);
+      return {
+        slug: event.slug,
+        title: event.title,
+        url: eventUrl(event),
+        aliases: aliases.map((alias) => `${site.baseUrl}/${alias}`),
+        site: site.id,
+        location: event.location,
+        startsAt: event.startsAt,
+        endsAt: event.endsAt,
+        registrationDeadline: event.registrationDeadline,
+        status: registrationStatus(event, count, now),
+        cancelledAt: event.cancelledAt,
+        count,
+        capacity: event.capacity,
+        bookings,
+        // Innsjekking finnes bare med billetter.
+        checkedIn: event.features.tickets ? checkedIn : null,
+        organizerName: event.organizerName,
+        organizerEmail: event.organizerEmail,
+        // Over: sluttidspunktet (eller starten, uten slutt) er passert. Slettes da etter DELETE_AFTER_DAYS.
+        ended: new Date(event.endsAt || event.startsAt) <= now,
+        deleteAt: deleteAt(event).toISOString(),
+        createdAt: event.createdAt,
+      };
+    });
+    res.json({
+      timeZone: config.timeZone,
+      deleteAfterDays,
+      sites: sites.map(({ id, label }) => ({ id, label })),
+      events,
+    });
   });
 
   // ---------- Alias ----------

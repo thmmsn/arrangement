@@ -310,6 +310,16 @@ export function createRepository(db) {
     countAliases: db.prepare('SELECT COUNT(*) AS n FROM event_aliases WHERE event_id = ?'),
     insertAlias: db.prepare('INSERT INTO event_aliases (alias, event_id, created_at) VALUES (?, ?, ?)'),
     deleteAlias: db.prepare('DELETE FROM event_aliases WHERE event_id = ? AND alias = ?'),
+    // Oversikten (/admin): alle arrangementene med tall, uten opplysninger om gjestene. Underspørringene
+    // bruker indeksene på event_id, så det er én spørring uansett hvor mange arrangementer det er.
+    overview: db.prepare(`
+      SELECT e.*,
+        (SELECT COUNT(*) FROM registrations r WHERE r.event_id = e.id) AS registration_count,
+        (SELECT COUNT(*) FROM registrations r WHERE r.event_id = e.id AND r.checked_in_at IS NOT NULL) AS checked_in_count,
+        (SELECT COUNT(*) FROM bookings b WHERE b.event_id = e.id) AS booking_count
+      FROM events e
+      ORDER BY e.starts_at, e.id`),
+    allAliases: db.prepare('SELECT event_id, alias FROM event_aliases ORDER BY created_at, alias'),
     insertEvent: db.prepare(`
       INSERT INTO events (slug, admin_key_hash, title, description, location, starts_at, ends_at,
         registration_deadline, capacity, max_per_booking, show_count, is_open, organizer_name,
@@ -511,6 +521,24 @@ export function createRepository(db) {
     /** Legger til et alias (allerede validert). Kaster AliasError hvis navnet er tatt eller taket `max` er nådd. */
     addAlias(eventId, alias, max) {
       addAliasTx.immediate(eventId, alias, max);
+    },
+    /**
+     * Alle arrangementene, eldste start først, med antall påmeldte (`count`), påmeldinger (`bookings`),
+     * innsjekkede (`checkedIn`) og aliasene. Ingen opplysninger om gjestene.
+     */
+    listEventsOverview() {
+      const aliases = new Map();
+      for (const { event_id: eventId, alias } of stmt.allAliases.all()) {
+        if (!aliases.has(eventId)) aliases.set(eventId, []);
+        aliases.get(eventId).push(alias);
+      }
+      return stmt.overview.all().map((row) => ({
+        event: mapEvent(row),
+        count: row.registration_count,
+        bookings: row.booking_count,
+        checkedIn: row.checked_in_count,
+        aliases: aliases.get(row.id) ?? [],
+      }));
     },
     /** true = fjernet, false = arrangementet hadde ikke dette aliaset. */
     removeAlias(eventId, alias) {

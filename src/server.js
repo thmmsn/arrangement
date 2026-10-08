@@ -32,6 +32,11 @@ if (!accessEnabled && !config.createKey && config.adminNoAuth) {
   console.log(`Nye arrangementer kan opprettes med ${creators.join(', ')}.`);
 }
 console.log('Hvert arrangement administreres med sin egen admin-lenke (/admin/<hash>#<nøkkel>) – den krever bare nøkkelen.');
+// Oversikten krever alltid nøkkelen. Med ADMIN_HOST finnes den bare der (og på LAN-porten).
+if (config.overviewKey) {
+  const where = config.adminHost ? ` på ${config.adminHost}${config.lanPort ? ' og LAN-porten' : ''}` : '';
+  console.log(`Oversikten over alle arrangementer: /admin#<nøkkel>${where} (OVERVIEW_KEY).`);
+}
 if (config.adminHost) {
   console.log(`Oppretting (/admin/ny) svarer bare på https://${config.adminHost}/admin/ny`);
 }

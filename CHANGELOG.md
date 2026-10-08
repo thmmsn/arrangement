@@ -12,6 +12,29 @@ Hver versjon under har et avsnitt **Oppgradering** når noe må gjøres i tilleg
 
 ---
 
+## 2026.10.8.3 – 8. oktober 2026
+
+### Nytt: oversikt over alle arrangementer
+
+`/admin#<nøkkel>` viser alle arrangementene som finnes, for deg som drifter tjenesten:
+
+- **Tall øverst:** aktive arrangementer, påmeldte til dem, hvor mange som er åpne for påmelding, og hvor mange som er avlyst.
+- **Kommende og pågående,** tidligste først: tittel (lenke til arrangementssiden), sted, korte lenker, tid, nettsted, påmeldte (`6 av 40`, påmeldinger og innsjekkede), status og arrangør.
+- **Avsluttet** (sammenslått): arrangementer som er over, med datoen alle data slettes.
+- **Søk** i tittel, sted, arrangør, nettsted og lenker, og **«Oppdater»** for ferske tall.
+- **På mobil** blir hver rad et eget kort.
+
+Oversikten viser **ingen opplysninger om gjestene** – bare antall – og **ingen admin-lenker**: admin-nøklene lagres bare som hash og står bare i e-posten til arrangøren (og `ADMIN_EMAIL`).
+
+**Tilgang:** den nye innstillingen `OVERVIEW_KEY` (samme krav som `CREATE_KEY`: minst 32 tegn, lag den med `openssl rand -hex 32`). Nøkkelen kreves **alltid** – også på LAN-porten, med Cloudflare Access og med `ADMIN_NO_AUTH`. Med `ADMIN_HOST` finnes oversikten bare på admin-vertsnavnet (og LAN-porten); på de offentlige domenene gir den den nakne `404`-en. Cloudflare Access kan legges foran som et ekstra lag – helst på hele admin-vertsnavnet, se README, «Oversikt over alle arrangementer».
+
+### Oppgradering
+
+- **Ingenting må gjøres.** Uten `OVERVIEW_KEY` finnes ikke oversikten, og `/admin` sender videre til `/admin/ny` som før.
+- **For å slå den på:** sett `OVERVIEW_KEY` i `.env`, kjør `docker compose up -d`, og åpne `https://<ADMIN_HOST>/admin#<nøkkel>`.
+
+---
+
 ## 2026.10.8.2 – 8. oktober 2026
 
 Tre nye funksjoner – e-post via flere tjenester, personvern og databehandleravtaler i bunnteksten, og korte lenker (alias) – og to feilrettinger.
