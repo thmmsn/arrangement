@@ -12,6 +12,33 @@ Hver versjon under har et avsnitt **Oppgradering** når noe må gjøres i tilleg
 
 ---
 
+## 2026.10.8.4 – 8. oktober 2026
+
+### Endret: du velger selv hvordan oversikten beskyttes
+
+I 2026.10.8.3 krevde oversikten (`/admin`) alltid nøkkelen. Nå velger eieren selv, med `OVERVIEW_AUTH` – en liste skilt med komma, der én av måtene holder:
+
+| `OVERVIEW_AUTH` | Slik kommer man inn | Trenger |
+|---|---|---|
+| `key` | Lenken `/admin#<nøkkel>` | `OVERVIEW_KEY` |
+| `password` | Brukernavn og passord i et skjema på siden, husket i `OVERVIEW_SESSION_DAYS` dager (standard 30), med «Logg ut» | `OVERVIEW_PASSWORD`, og eventuelt `OVERVIEW_USER` |
+| `access` | Innlogget via Cloudflare Access | `CF_ACCESS_TEAM_DOMAIN` og `CF_ACCESS_AUD` |
+| `lan` | Alt som kommer inn på LAN-porten | `LAN_PORT` |
+| `none` | Ingen innlogging | – |
+
+- **Uten `OVERVIEW_AUTH`** brukes det som er satt opp: nøkkel når `OVERVIEW_KEY` er satt, passord når `OVERVIEW_PASSWORD` er satt.
+- **Appen avviser ikke det den synes er svakt.** En kort nøkkel (under 32 tegn) eller et kort passord (under 12 tegn) virker, og loggen gir bare et råd. `none` er et lovlig valg, og loggen sier tydelig hva det betyr. Bare det som ikke kan virke – f.eks. `access` uten `CF_ACCESS_*` – ignoreres med en advarsel.
+- **Passordinnloggingen:** brukernavn og passord sammenlignes samlet, så svaret aldri røper hvilket som var feil. Informasjonskapselen er en HMAC av brukernavn og passord – ikke selve passordet – og sendes bare til oversikts-API-et (`HttpOnly`, `SameSite=Strict`, `Secure` på https). Nytt passord logger ut alle. Høyst 10 forsøk per 15 minutter per IP-adresse.
+- **Med `ADMIN_HOST`** finnes oversikten fortsatt bare på admin-vertsnavnet (og LAN-porten), uansett valg.
+- **Oppstartsloggen** sier hvordan oversikten er beskyttet.
+
+### Oppgradering
+
+- **Med `OVERVIEW_KEY` fra 2026.10.8.3:** ingenting må gjøres – nøkkelen virker som før. Det eneste som har endret seg, er at en kort nøkkel nå godtas (med et råd i loggen) i stedet for å bli ignorert.
+- **For brukernavn og passord:** sett `OVERVIEW_USER` og `OVERVIEW_PASSWORD` i `.env` og kjør `docker compose up -d`. Vil du ha både nøkkel og passord, virker begge når begge er satt.
+
+---
+
 ## 2026.10.8.3 – 8. oktober 2026
 
 ### Nytt: oversikt over alle arrangementer

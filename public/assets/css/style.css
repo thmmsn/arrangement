@@ -753,3 +753,5 @@ tr.added td:nth-child(2) { padding-left: 22px; }
   .overview-table td.num-cell { white-space: normal; }
   .overview-table .badge { justify-self: start; }
 }
+/* Innlogging med passord: et smalt kort, ikke hele bredden. */
+.login-card { max-width: 420px; }

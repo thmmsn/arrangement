@@ -51,7 +51,7 @@ arrangement.domain.no/dorvakt/k7hq2mxpr9az#<nøkkel>      innsjekking (dørvakte
 | `/<alias>` | Alle som kjenner aliaset (f.eks. `/julebord-2026`) | Den samme arrangementssiden, direkte. Arrangøren legger til aliasene selv (se [Korte lenker (alias)](#korte-lenker-alias)) |
 | `/<hash>/avmelding#<nøkkel>` | Den som meldte på (e-posten, etter påmeldingen og `/b/…`), eller én person (videresendt) | Avmelding av hele eller deler av påmeldingen – eller bare den ene personen |
 | `/admin/ny` | Administrator: `/admin/ny#<nøkkel>` med `CREATE_KEY`, eller via Cloudflare Access eller LAN | Opprett nytt arrangement |
-| `/admin` | Administrator: `/admin#<nøkkel>` med `OVERVIEW_KEY` – nøkkelen kreves alltid | Oversikt over alle arrangementer (se [Oversikt over alle arrangementer](#oversikt-over-alle-arrangementer)). Uten `OVERVIEW_KEY`: videre til `/admin/ny` |
+| `/admin` | Administrator, slik eieren har valgt (`OVERVIEW_AUTH`): nøkkel (`/admin#<nøkkel>`), brukernavn og passord, Cloudflare Access, LAN-porten eller ingen innlogging | Oversikt over alle arrangementer (se [Oversikt over alle arrangementer](#oversikt-over-alle-arrangementer)). Uten valgt måte: videre til `/admin/ny` |
 | `/admin/<hash>#<nøkkel>` | Arrangøren (lenke i e-posten). Bare nøkkelen kreves | Påmeldte, innsjekking, dørvaktlenke, redigering, CSV, stenging, avlysning, sletting |
 | `/admin/<hash>/avlys#<nøkkel>` | Arrangøren og tjenesteadministratoren (lenke i e-posten) | Samme side, åpnet på «Avlys arrangement» |
 | `/dorvakt/<hash>#<nøkkel>` | Dørvakter (lenke fra arrangøren) | Innsjekking: skanner, billettnummer og navnesøk |
@@ -233,11 +233,11 @@ All administrasjon ligger under `/admin` (sider) og `/api/admin` (API). Resten �
 
 | | Administrere **ett** arrangement | **Opprette** arrangementer | Se **alle** arrangementer |
 |---|---|---|---|
-| Adresse | `/admin/<hash>#<admin-nøkkel>` | `/admin/ny` (`/admin/ny#<CREATE_KEY>`) | `/admin#<OVERVIEW_KEY>` |
+| Adresse | `/admin/<hash>#<admin-nøkkel>` | `/admin/ny` (`/admin/ny#<CREATE_KEY>`) | `/admin` (`/admin#<OVERVIEW_KEY>` med nøkkel) |
 | Hvem | Arrangøren (lenken kommer på e-post) | Du (og den du gir nøkkelen til) | Du (og den du gir nøkkelen til) |
-| Hva gir tilgang | **Bare admin-nøkkelen** til arrangementet | `CREATE_KEY`, Cloudflare Access **eller** LAN-porten | **Bare `OVERVIEW_KEY`** – også på LAN-porten og med Access |
+| Hva gir tilgang | **Bare admin-nøkkelen** til arrangementet | `CREATE_KEY`, Cloudflare Access **eller** LAN-porten | Det eieren velger i `OVERVIEW_AUTH`: nøkkel, passord, Access, LAN-porten og/eller ingen innlogging |
 | Hvor | Alle vertsnavn: arrangementets domene (nye lenker), `ADMIN_HOST` (eldre lenker) og LAN | Med `ADMIN_HOST`: bare der. Ellers alle vertsnavn | Med `ADMIN_HOST`: bare der (og LAN). Ellers alle vertsnavn |
-| Cloudflare Access | Trengs ikke. Kommer forespørselen gjennom Access likevel, brukes e-postadressen som «sjekket inn av» | Valgfritt – ett av tre alternativer | Valgfritt ekstra lag foran nøkkelen – erstatter den aldri |
+| Cloudflare Access | Trengs ikke. Kommer forespørselen gjennom Access likevel, brukes e-postadressen som «sjekket inn av» | Valgfritt – ett av tre alternativer | Valgfritt: som egen måte (`access`) og/eller som et lag foran hos Cloudflare |
 
 Admin-nøkkelen per arrangement har $2^{192}$ muligheter (se [Hvor vanskelig er lenkene å gjette?](#hvor-vanskelig-er-lenkene-å-gjette)), så den er like sterk som en tilfeldig innloggingsnøkkel. Uten riktig nøkkel svarer API-et `401`, og et ukjent arrangement gir den nakne `404`-en. Nøkkelen gir bare tilgang til det ene arrangementet – aldri til å opprette nye, og aldri til andre arrangementer.
 
@@ -263,21 +263,45 @@ Med `CREATE_KEY` har `ADMIN_NO_AUTH` ingen virkning: nøkkelen kreves alltid.
 
 #### Oversikt over alle arrangementer
 
-`/admin#<nøkkel>` viser alle arrangementene som finnes, med de viktigste tallene. Den er for deg som drifter tjenesten – arrangørene ser bare sine egne arrangementer, med admin-lenken sin.
+`/admin` viser alle arrangementene som finnes, med de viktigste tallene. Den er for deg som drifter tjenesten – arrangørene ser bare sine egne arrangementer, med admin-lenken sin.
 
-1. Lag en tilfeldig nøkkel og sett den i `.env`:
+**Du velger selv hvordan den beskyttes** – eller om den skal beskyttes i det hele tatt. `OVERVIEW_AUTH` er en liste skilt med komma, og én av måtene holder:
 
-   ```bash
-   openssl rand -hex 32
-   ```
+| `OVERVIEW_AUTH` | Slik kommer man inn | Trenger |
+|---|---|---|
+| `key` | Lenken `/admin#<nøkkel>` – lagre den som bokmerke | `OVERVIEW_KEY` |
+| `password` | Et skjema på siden. Innloggingen huskes i `OVERVIEW_SESSION_DAYS` dager (standard 30), og «Logg ut» glemmer den | `OVERVIEW_PASSWORD`, og eventuelt `OVERVIEW_USER` (uten brukernavn spørres det bare om passordet) |
+| `access` | Innlogget via Cloudflare Access – appen sjekker tokenet selv | `CF_ACCESS_TEAM_DOMAIN` og `CF_ACCESS_AUD` |
+| `lan` | Alt som kommer inn på den betrodde LAN-porten | `LAN_PORT` |
+| `none` | Ingen innlogging: alle som når `/admin`, ser oversikten | – |
 
-   ```ini
-   OVERVIEW_KEY=8b1d…7a   # 64 tegn
-   ```
+**Uten `OVERVIEW_AUTH`** brukes det som er satt opp: `key` når `OVERVIEW_KEY` er satt, `password` når `OVERVIEW_PASSWORD` er satt (begge, hvis begge er satt). Er ingen av dem satt, finnes ikke oversikten: API-et gir den nakne `404`-en, og `/admin` sender videre til `/admin/ny` som før.
 
-   Samme krav som `CREATE_KEY`: minst 32 tegn, bare `A–Z`, `a–z`, `0–9`, `-` og `_`. En ugyldig nøkkel ignoreres med en advarsel, og oversikten er da stengt.
-2. `docker compose up -d`. Loggen sier «Oversikten over alle arrangementer: /admin#<nøkkel> …».
-3. Åpne `https://<ADMIN_HOST>/admin#<nøkkel>` (eller `https://arrangement.domain.no/admin#<nøkkel>` uten `ADMIN_HOST`), og lagre den som bokmerke.
+Eksempler:
+
+```ini
+# Brukernavn og passord – det enkleste for de fleste
+OVERVIEW_USER=drift
+OVERVIEW_PASSWORD=et langt passord du husker
+
+# Nøkkel i lenken, eller fritt fra kontorets nett
+OVERVIEW_AUTH=key,lan
+OVERVIEW_KEY=8b1d…7a          # f.eks. fra openssl rand -hex 32
+
+# Bare Cloudflare Access
+OVERVIEW_AUTH=access
+
+# Ingen innlogging – f.eks. når Cloudflare Access ligger foran hele admin-vertsnavnet
+OVERVIEW_AUTH=none
+```
+
+Kjør `docker compose up -d` etter endringen. Oppstartsloggen sier hvordan oversikten er beskyttet («Oversikten over alle arrangementer (/admin) på arrangement-admin.domain.no: brukernavn og passord …»).
+
+**Appen bestemmer ikke hva som er «sikkert nok».** Alt eieren velger, virker:
+
+- **En kort nøkkel eller et kort passord** godtas. Loggen gir bare et råd (under 32 tegn for nøkkelen, under 12 for passordet).
+- **`none`** er et lovlig valg. Loggen sier tydelig fra om at alle som når `/admin`, ser alle arrangementene.
+- **Bare det som ikke kan virke, ignoreres** – med en advarsel som sier hvorfor: et ukjent ord, `key` uten `OVERVIEW_KEY`, `password` uten `OVERVIEW_PASSWORD`, `access` uten `CF_ACCESS_*`, eller `lan` uten `LAN_PORT`.
 
 **Hva oversikten viser:**
 
@@ -295,16 +319,16 @@ Med `CREATE_KEY` har `ADMIN_NO_AUTH` ingen virkning: nøkkelen kreves alltid.
 - **Ingen opplysninger om gjestene** – verken navn, e-postadresser, svar, billettnumre eller dørkoder. Bare antall. Deltakerlisten finnes bare på admin-siden for hvert arrangement, med arrangementets egen nøkkel.
 - **Ingen admin-lenker.** Admin-nøkkelen til et arrangement lagres bare som SHA-256-hash, så appen kan ikke lage lenken på nytt. Den står i e-posten til arrangøren – og til tjenesteadministratoren hvis `ADMIN_EMAIL` er satt.
 
-**Tilgangen:**
+**Slik virker innloggingen:**
 
-- **Nøkkelen kreves alltid** – også på LAN-porten, med et gyldig Cloudflare Access-token og med `ADMIN_NO_AUTH`. Uten riktig nøkkel svarer API-et (`GET /api/admin/overview`) `401`. Siden `/admin` vises uten nøkkel (nettleseren sender aldri det som står etter `#`), men den har ingen data.
-- **Uten `OVERVIEW_KEY` finnes oversikten ikke.** API-et gir den nakne `404`-en, og `/admin` sender videre til `/admin/ny` som før.
-- **Med `ADMIN_HOST`** finnes oversikten bare på admin-vertsnavnet (og LAN-porten). På de offentlige domenene gir både `/admin` og API-et den nakne `404`-en – også med riktig nøkkel.
-- **Egen nøkkel eller samme som `CREATE_KEY`:** begge virker. Med en egen nøkkel kan du gi noen oversikten uten at de kan opprette arrangementer, og bytte den ene uten den andre.
-- **Styrken** er den samme som for `CREATE_KEY`: en tilfeldig nøkkel på 32 tegn fra et alfabet på 64 har $64^{32} = 2^{192}$ muligheter, og `openssl rand -hex 32` gir $16^{64} = 2^{256}$. Nøkkelen sammenlignes som SHA-256-hash i konstant tid, så svartiden røper ikke hvor mange tegn som var riktige.
-- **Bytte nøkkel:** endre `OVERVIEW_KEY` og start på nytt. Den gamle slutter å virke med en gang.
+- **Nøkkel:** står etter `#`, så nettleseren sender den aldri når siden åpnes, og den havner ikke i serverlogger. JavaScript på siden sender den i `Authorization`-headeren. Den sammenlignes som SHA-256-hash i konstant tid, så svartiden røper ikke hvor mange tegn som var riktige. En tilfeldig nøkkel fra `openssl rand -hex 32` har $16^{64} = 2^{256}$ muligheter.
+- **Passord:** brukernavn og passord sammenlignes samlet (som hash, i konstant tid), så svaret røper aldri hvilket av dem som var feil. Innloggingen huskes i informasjonskapselen `ov`: en HMAC-SHA-256 av brukernavn og passord med appens hemmelighet – ikke selve passordet. Den er `HttpOnly`, `SameSite=Strict`, `Secure` på https, og sendes bare til `/api/admin/overview`. **Nytt passord logger ut alle**, fordi verdien endres. «Logg ut» sletter informasjonskapselen i den nettleseren.
+- **Gjetting:** innloggingen med passord er begrenset til 10 forsøk per 15 minutter per IP-adresse (`rateLimits.overviewLogin`). Fra én adresse blir det høyst $10 \cdot \frac{24 \cdot 60}{15} = 960$ forsøk i døgnet. Et passord som står i en ordliste over vanlige passord, kan likevel bli funnet – derfor rådet om lengde i loggen.
+- **Access:** appen sjekker signaturen på tokenet Cloudflare sender med, på samme måte som for oppretting.
+- **Med `ADMIN_HOST`** finnes oversikten bare på admin-vertsnavnet (og LAN-porten), uansett hvilke måter som er valgt – også med `none`. På de offentlige domenene gir både `/admin` og API-et den nakne `404`-en.
+- **Siden `/admin`** har ingen data selv. Dataene hentes fra `GET /api/admin/overview`, som svarer `401` uten tilgang – sammen med hvilke måter som finnes, så siden kan vise skjemaet, nøkkelhintet eller begge.
 
-**Cloudflare Access som ekstra lag:** Den sikreste måten er en Access-applikasjon på hele admin-vertsnavnet (`ADMIN_HOST`, se A under). Der finnes oversikten (siden og API-et), mens arrangørenes nye admin-lenker går til arrangementenes egne domener og ikke berøres. Legg **ikke** en Access-regel på stien `admin` på det offentlige domenet: den gjelder også alt under (`/admin/<hash>`), og da måtte arrangørene logget inn for å bruke admin-lenken sin. Appen sjekker ikke Access-tokenet for oversikten – Access stopper forespørselen hos Cloudflare før den når appen, og nøkkelen kreves uansett.
+**Cloudflare Access som lag foran:** Vil du ha Access foran oversikten (med `access`, `none` eller i tillegg til nøkkel/passord), er den sikreste måten en Access-applikasjon på hele admin-vertsnavnet (`ADMIN_HOST`, se A under). Der finnes oversikten (siden og API-et), mens arrangørenes nye admin-lenker går til arrangementenes egne domener og ikke berøres. Legg **ikke** en Access-regel på stien `admin` på det offentlige domenet: den gjelder også alt under (`/admin/<hash>`), og da måtte arrangørene logget inn for å bruke admin-lenken sin.
 
 #### Opprette arrangementer via Cloudflare Access (valgfritt)
 
@@ -354,7 +378,7 @@ Kontorets LAN ──────────► verten:9067 ──► arrangemen
 |---|---|---|
 | Opprette arrangementer (`/admin/ny`, `/api/admin`) | `CREATE_KEY` eller Access-token, og `ADMIN_HOST` | Tillatt, uten nøkkel, Access og `ADMIN_HOST` |
 | Administrere ett arrangement (`/admin/<hash>`) | Admin-nøkkelen | Admin-nøkkelen – LAN erstatter `CREATE_KEY` og Access, ikke nøkkelen |
-| Oversikt over alle arrangementer (`/admin`) | `OVERVIEW_KEY`, og `ADMIN_HOST` | `OVERVIEW_KEY` – LAN erstatter ikke nøkkelen |
+| Oversikt over alle arrangementer (`/admin`) | Det som er valgt i `OVERVIEW_AUTH`, og `ADMIN_HOST` | Det som er valgt i `OVERVIEW_AUTH` – med `lan` uten innlogging |
 | Rate limiting | Per klient-IP (`CLIENT_IP_HEADER` bak tunnelen) | Av. Klient-IP leses alltid fra socketen |
 | Nettsted | Fra `Host` | Fra `Host`, eller `?site=<id>` (f.eks. `?site=com`) |
 | Arrangement på et annet nettsted | `301` til det offentlige domenet | `302` til samme adresse på LAN med `?site=<id>` |
@@ -378,7 +402,8 @@ Kontorets LAN ──────────► verten:9067 ──► arrangemen
 |---|---|---|
 | Admin-nøkkel per arrangement ($2^{192}$) | Ett arrangement | Alle andre enn arrangøren – og at én arrangør ser andres arrangementer |
 | Opprettingsnøkkelen (`CREATE_KEY`) | Oppretting | Alle som ikke har nøkkelen |
-| Oversiktsnøkkelen (`OVERVIEW_KEY`) – kreves alltid, også på LAN og med Access | Oversikten | Alle som ikke har nøkkelen |
+| Innloggingen eieren har valgt (`OVERVIEW_AUTH`): nøkkel, passord, Access og/eller LAN | Oversikten | Alle som ikke har nøkkelen, passordet, Access-innloggingen eller er på kontorets nett |
+| Maks 10 innloggingsforsøk med passord per 15 minutter per IP | Oversikten | At passordet gjettes |
 | Ingen gjestedata og ingen admin-lenker i oversikten | Oversikten | At en lekket oversiktsnøkkel gir tilgang til deltakerlister eller arrangementene |
 | Cloudflare Access (valgfritt) | Oppretting | Alle som ikke er på lista di |
 | Appens egen Access-sjekk (`CF_ACCESS_*`) | Oppretting | Feilkonfigurerte Access-regler |
@@ -1035,7 +1060,8 @@ test/            Tester (node:test)
 | `GET` | `/api/admin/config` | Oppretting. Gir bl.a. nettstedene som kan velges |
 | `GET` | `/api/admin/places?q=` | Oppretting. Stedsoppslag hos Kartverket |
 | `POST` | `/api/admin/events` | Oppretting. `site` velger nettsted (standard hovednettstedet) |
-| `GET` | `/api/admin/overview` | Oversiktsnøkkel. Alle arrangementene: `events: [{ slug, title, url, aliases, site, location, startsAt, endsAt, registrationDeadline, status, cancelledAt, count, capacity, bookings, checkedIn, organizerName, organizerEmail, ended, deleteAt, createdAt }]`, tidligste start først, og `timeZone`, `deleteAfterDays` og `sites`. Ingen opplysninger om gjestene |
+| `POST` | `/api/admin/overview/login`, `…/logout` | Bare med `password` i `OVERVIEW_AUTH` (ellers naken `404`). Innlogging: `{ username, password }` gir informasjonskapselen `ov`, eller `401`. Utlogging sletter den |
+| `GET` | `/api/admin/overview` | Oversikten. `via` sier hvordan forespørselen slapp inn. Alle arrangementene: `events: [{ slug, title, url, aliases, site, location, startsAt, endsAt, registrationDeadline, status, cancelledAt, count, capacity, bookings, checkedIn, organizerName, organizerEmail, ended, deleteAt, createdAt }]`, tidligste start først, og `timeZone`, `deleteAfterDays` og `sites`. Ingen opplysninger om gjestene |
 | `GET` / `PUT` / `DELETE` | `/api/admin/events/:slug` | Admin-nøkkel |
 | `GET` | `/api/admin/events/:slug/config`, `…/places?q=` | Admin-nøkkel. Samme som over, for skjemaet på admin-siden |
 | `DELETE` | `/api/admin/events/:slug/registrations/:id` | Admin-nøkkel |
@@ -1053,7 +1079,7 @@ test/            Tester (node:test)
 
 *Oppretting* = riktig vertsnavn (hvis `ADMIN_HOST` er satt), og `Authorization: Bearer <CREATE_KEY>`, et gyldig Cloudflare Access-token eller LAN-porten. Uten det: `403` (på feil vertsnavn: naken `404`).
 
-*Oversiktsnøkkel* = `Authorization: Bearer <OVERVIEW_KEY>`, alltid – også på LAN-porten og med Access. Med `ADMIN_HOST` bare der (og på LAN-porten). Uten riktig nøkkel: `401`. Uten `OVERVIEW_KEY`, eller på feil vertsnavn: naken `404`.
+*Oversikten* = én av måtene i `OVERVIEW_AUTH`: `Authorization: Bearer <OVERVIEW_KEY>`, informasjonskapselen `ov` fra innloggingen, et gyldig Access-token, LAN-porten, eller ingenting (`none`). Med `ADMIN_HOST` bare der (og på LAN-porten). Uten tilgang: `401` med `login: { key, password, user, access, lan }` – hvilke måter som finnes. Uten valgt måte, eller på feil vertsnavn: naken `404`.
 
 *Admin-nøkkel* = `Authorization: Bearer <admin-nøkkel>` for akkurat det arrangementet, på hvilket som helst vertsnavn. Uten riktig nøkkel: `401`. Ukjent arrangement: naken `404`.
 

@@ -7,9 +7,10 @@ import { loadConfig } from '../src/config.js';
 import { createRepository, openDatabase } from '../src/db.js';
 import { createEvent, register, request, startApp } from './helpers.js';
 
-// Oversikten over alle arrangementer: /admin#<OVERVIEW_KEY> (siden) og GET /api/admin/overview (dataene).
-// Nøkkelen kreves alltid – også på LAN-porten og med Cloudflare Access. Med ADMIN_HOST finnes oversikten
-// bare der (og på LAN-porten). Uten OVERVIEW_KEY finnes den ikke.
+// Oversikten over alle arrangementer: /admin (siden) og GET /api/admin/overview (dataene). Eieren velger
+// hvordan den beskyttes (OVERVIEW_AUTH): key, password, access, lan eller none – én av dem holder. Uten
+// OVERVIEW_AUTH brukes det som er satt opp (OVERVIEW_KEY og/eller OVERVIEW_PASSWORD). Med ADMIN_HOST finnes
+// oversikten bare der (og på LAN-porten). Uten noen valgt måte finnes den ikke.
 
 const MAIN = 'arrangement.example.no';
 const COM = 'events.example.com';
@@ -44,12 +45,12 @@ describe('uten OVERVIEW_KEY', () => {
     expectNaked404(await overview(app, { ...onHost(MAIN), ...bearer(KEY) }), 'API-et');
   });
 
-  test('en for kort nøkkel ignoreres med en advarsel, og oversikten er stengt', async () => {
-    const config = loadConfig({ DOMAIN: MAIN, OVERVIEW_KEY: 'for-kort' });
-    assert.equal(config.overviewKey, null);
-    assert.ok(config.warnings.some((w) => w.startsWith('OVERVIEW_KEY ignoreres')), config.warnings.join('\n'));
-    const app = await startApp({ DOMAIN: MAIN, OVERVIEW_KEY: 'for-kort' });
-    expectNaked404(await overview(app, bearer('for-kort')), 'for kort nøkkel');
+  test('en kort nøkkel er eierens valg: den virker, og loggen gir bare et råd', async () => {
+    const config = loadConfig({ DOMAIN: MAIN, OVERVIEW_KEY: 'kort' });
+    assert.deepEqual(config.overview.methods, ['key']);
+    assert.ok(config.warnings.some((w) => w.startsWith('OVERVIEW_KEY er bare 4 tegn')), config.warnings.join('\n'));
+    const app = await startApp({ DOMAIN: MAIN, OVERVIEW_KEY: 'kort' });
+    assert.equal((await overview(app, bearer('kort'))).status, 200);
   });
 });
 
@@ -77,11 +78,14 @@ describe('med OVERVIEW_KEY', () => {
     ]) {
       const res = await overview(app, headers);
       assert.equal(res.status, 401, label);
-      assert.match(res.json.error, /OVERVIEW_KEY/, label);
+      assert.equal(res.json.error, 'Ingen tilgang til oversikten.', label);
+      // Siden får vite hvilke måter som finnes, så den kan vise riktig innlogging.
+      assert.deepEqual(res.json.login, { key: true, password: false, user: false, access: false, lan: false }, label);
       assert.equal(res.headers['cache-control'], 'no-store', label);
     }
     const ok = await overview(app, bearer(KEY));
     assert.equal(ok.status, 200);
+    assert.equal(ok.json.via, 'key');
     assert.equal(ok.headers['cache-control'], 'no-store');
     // Med skråstrek til slutt: samme port og samme svar.
     assert.equal((await app.request({ path: '/api/admin/overview/' })).status, 401);
@@ -173,8 +177,8 @@ describe('med ADMIN_HOST, LAN-port og Cloudflare Access', () => {
     return server.address().port;
   };
 
-  async function start(verifier) {
-    const config = loadConfig({ DOMAIN: MAIN, ADMIN_HOST: ADMIN, LAN_PORT: '3001', OVERVIEW_KEY: KEY });
+  async function start(verifier, env = {}) {
+    const config = loadConfig({ DOMAIN: MAIN, ADMIN_HOST: ADMIN, LAN_PORT: '3001', OVERVIEW_KEY: KEY, ...env });
     const repo = createRepository(openDatabase(':memory:'));
     insertEvent(repo, { slug: 'abcdefghjkmn', title: 'Sommerfest' });
     const app = createApp({
@@ -207,10 +211,164 @@ describe('med ADMIN_HOST, LAN-port og Cloudflare Access', () => {
     assert.equal(res.status, 401);
   });
 
+  test('OVERVIEW_AUTH=none gjelder bare der oversikten finnes: de offentlige domenene gir fortsatt 404', async () => {
+    const { pub } = await start(null, { OVERVIEW_AUTH: 'none' });
+    expectNaked404(await pub({ path: '/api/admin/overview', headers: onHost(MAIN) }), 'offentlig domene');
+    const open = await pub({ path: '/api/admin/overview', headers: onHost(ADMIN) });
+    assert.equal(open.status, 200);
+    assert.equal(open.json.via, 'none');
+  });
+
+  test('OVERVIEW_AUTH=lan: LAN-porten slipper inn uten nøkkel, PORT gjør det ikke', async () => {
+    const { pub, lan } = await start(null, { OVERVIEW_AUTH: 'lan' });
+    const viaLan = await lan({ path: '/api/admin/overview' });
+    assert.equal(viaLan.status, 200);
+    assert.equal(viaLan.json.via, 'lan');
+    const viaPort = await pub({ path: '/api/admin/overview', headers: { ...onHost(ADMIN), ...bearer(KEY) } });
+    assert.equal(viaPort.status, 401, 'nøkkelen er ikke valgt, så den gir ikke tilgang');
+    assert.deepEqual(viaPort.json.login, { key: false, password: false, user: false, access: false, lan: true });
+  });
+
+  test('OVERVIEW_AUTH=access: et gyldig Access-token slipper inn, uten nøkkel', async () => {
+    const env = { OVERVIEW_AUTH: 'access', CF_ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com', CF_ACCESS_AUD: 'aud' };
+    const { pub } = await start(async (token) => {
+      if (token !== 'gyldig') throw new AccessError('ugyldig');
+      return { email: 'drift@example.no' };
+    }, env);
+    const ok = await pub({ path: '/api/admin/overview', headers: { ...onHost(ADMIN), 'cf-access-jwt-assertion': 'gyldig' } });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.json.via, 'access');
+    const bad = await pub({ path: '/api/admin/overview', headers: { ...onHost(ADMIN), 'cf-access-jwt-assertion': 'falsk' } });
+    assert.equal(bad.status, 401);
+    assert.equal(bad.json.login.access, true);
+  });
+
   test('på LAN-porten kreves også nøkkelen', async () => {
     const { lan } = await start();
     assert.equal((await lan({ path: '/admin' })).status, 200);
     assert.equal((await lan({ path: '/api/admin/overview' })).status, 401, 'LAN gir ikke tilgang alene');
     assert.equal((await lan({ path: '/api/admin/overview', headers: bearer(KEY) })).status, 200);
+  });
+});
+
+describe('brukernavn og passord (OVERVIEW_AUTH=password)', () => {
+  const PASSWORD = 'riktig hest batteri stift';
+  const ENV = { DOMAIN: MAIN, OVERVIEW_USER: 'drift', OVERVIEW_PASSWORD: PASSWORD };
+  const login = (app, body, headers = {}) => app.request({ method: 'POST', path: '/api/admin/overview/login', headers, body });
+  const cookieOf = (res) => (res.headers['set-cookie'] ?? []).find((c) => c.startsWith('ov='));
+
+  test('uten OVERVIEW_AUTH velges passord fordi OVERVIEW_PASSWORD er satt', () => {
+    assert.deepEqual(loadConfig(ENV).overview.methods, ['password']);
+    assert.deepEqual(loadConfig({ ...ENV, OVERVIEW_KEY: KEY }).overview.methods, ['key', 'password']);
+  });
+
+  test('innlogging gir en informasjonskapsel som bare sendes til oversikts-API-et', async () => {
+    const app = await startApp(ENV);
+    const denied = await overview(app);
+    assert.equal(denied.status, 401);
+    assert.deepEqual(denied.json.login, { key: false, password: true, user: true, access: false, lan: false });
+
+    const wrong = await login(app, { username: 'drift', password: 'feil' });
+    assert.equal(wrong.status, 401);
+    assert.equal(wrong.json.error, 'Feil brukernavn eller passord.');
+    assert.equal(cookieOf(wrong), undefined);
+    assert.equal((await login(app, { username: 'annen', password: PASSWORD })).status, 401, 'feil brukernavn');
+
+    const ok = await login(app, { username: ' drift ', password: PASSWORD });
+    assert.equal(ok.status, 200);
+    const cookie = cookieOf(ok);
+    assert.match(cookie, /HttpOnly/);
+    assert.match(cookie, /SameSite=Strict/);
+    assert.match(cookie, /Path=\/api\/admin\/overview/);
+    assert.match(cookie, /Max-Age=2592000/, '30 dager');
+    assert.match(cookie, /Secure/, 'hovednettstedet er på https');
+    assert.ok(!cookie.includes(PASSWORD) && !cookie.includes(encodeURIComponent(PASSWORD)), 'passordet står ikke i informasjonskapselen');
+
+    const session = { cookie: cookie.split(';')[0] };
+    const res = await overview(app, session);
+    assert.equal(res.status, 200);
+    assert.equal(res.json.via, 'password');
+    assert.equal((await overview(app, { cookie: 'ov=forfalsket' })).status, 401);
+
+    const out = await app.request({ method: 'POST', path: '/api/admin/overview/logout' });
+    assert.equal(out.status, 200);
+    assert.match(cookieOf(out), /Expires=Thu, 01 Jan 1970/);
+  });
+
+  test('uten OVERVIEW_USER spørres det bare om passordet', async () => {
+    const app = await startApp({ DOMAIN: MAIN, OVERVIEW_PASSWORD: PASSWORD });
+    assert.equal((await overview(app)).json.login.user, false);
+    const wrong = await login(app, { password: 'feil' });
+    assert.equal(wrong.json.error, 'Feil passord.');
+    assert.equal((await login(app, { username: 'hva som helst', password: PASSWORD })).status, 200, 'brukernavnet ignoreres');
+  });
+
+  test('nytt passord logger ut alle: den gamle informasjonskapselen virker ikke lenger', async () => {
+    const repo = createRepository(openDatabase(':memory:'));
+    const quiet = { log() {}, error() {}, warn() {} };
+    const appWith = async (password) => {
+      const app = createApp({ repo, config: loadConfig({ ...ENV, OVERVIEW_PASSWORD: password }), mailer: { send: async () => ({}) }, logger: quiet });
+      const server = app.listen(0);
+      await new Promise((resolve) => server.once('listening', resolve));
+      after(() => server.close());
+      return { request: (o) => request(server.address().port, o) };
+    };
+    const before = await appWith(PASSWORD);
+    const cookie = cookieOf(await login(before, { username: 'drift', password: PASSWORD })).split(';')[0];
+    assert.equal((await overview(before, { cookie })).status, 200);
+    const changed = await appWith('et helt nytt passord');
+    assert.equal((await overview(changed, { cookie })).status, 401);
+  });
+
+  test('innloggingen må komme fra samme nettsted (Origin)', async () => {
+    const app = await startApp(ENV);
+    const res = await login(app, { username: 'drift', password: PASSWORD }, { origin: 'https://ond.example.com' });
+    assert.equal(res.status, 403);
+    assert.equal(cookieOf(res), undefined);
+  });
+
+  test('passordet kan ikke prøves i det uendelige: maks 10 forsøk per 15 minutter per IP-adresse', async () => {
+    const app = await startApp(ENV);
+    for (let i = 1; i <= 10; i++) assert.equal((await login(app, { username: 'drift', password: `feil-${i}` })).status, 401, `forsøk ${i}`);
+    assert.equal((await login(app, { username: 'drift', password: PASSWORD })).status, 429, 'også riktig passord stoppes nå');
+  });
+
+  test('innlogging og utlogging finnes bare når passord er valgt', async () => {
+    const app = await startApp({ DOMAIN: MAIN, OVERVIEW_KEY: KEY, OVERVIEW_PASSWORD: PASSWORD, OVERVIEW_AUTH: 'key' });
+    expectNaked404(await login(app, { password: PASSWORD }), 'login');
+    expectNaked404(await app.request({ method: 'POST', path: '/api/admin/overview/logout' }), 'logout');
+  });
+
+  test('flere valgte måter: nøkkelen og passordet virker hver for seg', async () => {
+    const app = await startApp({ ...ENV, OVERVIEW_KEY: KEY });
+    assert.equal((await overview(app, bearer(KEY))).json.via, 'key');
+    const cookie = cookieOf(await login(app, { username: 'drift', password: PASSWORD })).split(';')[0];
+    assert.equal((await overview(app, { cookie })).json.via, 'password');
+  });
+});
+
+describe('OVERVIEW_AUTH i konfigurasjonen', () => {
+  test('det som ikke kan virke, ignoreres med en advarsel som sier hvorfor', () => {
+    const config = loadConfig({ DOMAIN: MAIN, OVERVIEW_AUTH: 'key, password, access, lan, foo' });
+    assert.deepEqual(config.overview.methods, []);
+    for (const start of [
+      'OVERVIEW_AUTH: «key» ignoreres – OVERVIEW_KEY er ikke satt.',
+      'OVERVIEW_AUTH: «password» ignoreres – OVERVIEW_PASSWORD er ikke satt.',
+      'OVERVIEW_AUTH: «access» ignoreres – CF_ACCESS_TEAM_DOMAIN og CF_ACCESS_AUD er ikke satt.',
+      'OVERVIEW_AUTH: «lan» ignoreres – LAN_PORT er ikke satt.',
+      'OVERVIEW_AUTH: «foo» er ukjent',
+    ]) assert.ok(config.warnings.some((w) => w.startsWith(start)), start);
+  });
+
+  test('none er lovlig, men loggen sier tydelig hva det betyr', () => {
+    const config = loadConfig({ DOMAIN: MAIN, OVERVIEW_AUTH: 'none' });
+    assert.deepEqual(config.overview.methods, ['none']);
+    assert.ok(config.warnings.some((w) => w.includes('uten innlogging')));
+  });
+
+  test('et kort passord gir et råd, ikke en avvisning', () => {
+    const config = loadConfig({ DOMAIN: MAIN, OVERVIEW_PASSWORD: 'abc' });
+    assert.deepEqual(config.overview.methods, ['password']);
+    assert.ok(config.warnings.some((w) => w.startsWith('OVERVIEW_PASSWORD er bare 3 tegn')));
   });
 });

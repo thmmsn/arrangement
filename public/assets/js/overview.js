@@ -1,28 +1,84 @@
-import { api, formatEventTime, formatShort, h, secretFromHash, t } from './common.js';
+import { api, formatEventTime, formatShort, h, notice, secretFromHash, t } from './common.js';
 
-// Oversikten over alle arrangementer: /admin#<OVERVIEW_KEY>. Nøkkelen står etter #, så nettleseren
-// sender den aldri når siden åpnes – JavaScript her sender den til API-et i Authorization-headeren.
+// Oversikten over alle arrangementer: /admin. Eieren velger hvordan den beskyttes (OVERVIEW_AUTH): nøkkel
+// etter # (/admin#<nøkkel>), brukernavn og passord, Cloudflare Access, LAN-porten eller ingenting.
+// Nøkkelen står etter #, så nettleseren sender den aldri når siden åpnes – JavaScript her sender den til
+// API-et i Authorization-headeren. Passordinnloggingen huskes i en informasjonskapsel (HttpOnly).
 // Bare tall og offentlig informasjon; ingen opplysninger om gjestene.
 
 const app = document.getElementById('app');
 const key = secretFromHash();
-const auth = { Authorization: `Bearer ${key}` };
+const auth = key ? { Authorization: `Bearer ${key}` } : {};
 
 let data = null;
 let filter = '';
 
 async function load() {
-  if (!key) {
-    app.replaceChildren(h('h1', {}, t('overview.missingKeyTitle')), h('p', {}, t('overview.missingKeyText')));
-    return;
-  }
   try {
     data = await api('/admin/overview', { headers: auth });
   } catch (err) {
+    // 401 forteller hvilke måter eieren har valgt, så siden kan vise riktig innlogging.
+    if (err.status === 401 && err.data?.login) return showLogin(err.data.login, key ? err.message : null);
     app.replaceChildren(h('h1', {}, t('overview.noAccess')), h('p', {}, err.message));
     return;
   }
   render();
+}
+
+// Ingen tilgang ennå: skjema for brukernavn og passord (hvis det er valgt), og de andre måtene.
+function showLogin(login, error) {
+  const status = h('div', {}, error ? notice('error', error) : null);
+  const ways = [
+    login.key ? t('overview.howKey') : null,
+    login.access ? t('overview.howAccess') : null,
+    login.lan ? t('overview.howLan') : null,
+  ].filter(Boolean);
+  const waysList = ways.length ? h('ul', { class: 'muted small' }, ways.map((text) => h('li', {}, text))) : null;
+
+  if (!login.password) {
+    app.replaceChildren(h('h1', {}, t('overview.noAccess')), status, waysList);
+    return;
+  }
+
+  const username = login.user ? h('input', { type: 'text', id: 'ov-user', autocomplete: 'username', required: true }) : null;
+  const password = h('input', { type: 'password', id: 'ov-password', autocomplete: 'current-password', required: true });
+  const button = h('button', { class: 'btn', type: 'submit' }, t('overview.loginButton'));
+  const form = h('form', { class: 'card login-card' },
+    h('p', { class: 'muted' }, t('overview.loginText')),
+    status,
+    username ? h('div', { class: 'form-row' }, h('label', { for: 'ov-user' }, t('overview.username')), username) : null,
+    h('div', { class: 'form-row' }, h('label', { for: 'ov-password' }, t('overview.password')), password),
+    h('div', { class: 'actions' }, button));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    button.disabled = true;
+    try {
+      await api('/admin/overview/login', { method: 'POST', body: { username: username?.value ?? '', password: password.value } });
+      await load();
+    } catch (err) {
+      button.disabled = false;
+      status.replaceChildren(notice('error', err.message));
+      password.select();
+    }
+  });
+
+  app.replaceChildren(
+    h('p', { class: 'kicker' }, t('overview.kicker')),
+    h('h1', {}, t('overview.loginTitle')),
+    form,
+    ways.length ? h('p', { class: 'muted small' }, t('overview.orHeading')) : null,
+    waysList);
+  (username ?? password).focus();
+}
+
+async function logout(button) {
+  button.disabled = true;
+  try {
+    await api('/admin/overview/logout', { method: 'POST' });
+  } finally {
+    data = null;
+    await load();
+  }
 }
 
 // Søket gjelder tittel, sted, arrangør, nettsted og lenkene (også aliasene).
@@ -55,6 +111,9 @@ function render() {
   });
 
   const refresh = h('button', { class: 'btn secondary small', type: 'button' }, t('overview.refresh'));
+  // «Logg ut» bare når innloggingen var med passord – en nøkkel i lenken eller Access logges ikke ut her.
+  const logoutButton = data.via === 'password' ? h('button', { class: 'btn secondary small', type: 'button' }, t('overview.logout')) : null;
+  logoutButton?.addEventListener('click', () => logout(logoutButton));
   refresh.addEventListener('click', async () => {
     refresh.disabled = true;
     await load();
@@ -80,7 +139,8 @@ function render() {
       h('div', { class: 'actions overview-tools' },
         search,
         refresh,
-        h('a', { class: 'btn small', href: '/admin/ny' }, t('overview.newEvent'))),
+        h('a', { class: 'btn small', href: '/admin/ny' }, t('overview.newEvent')),
+        logoutButton),
       h('p', { class: 'muted small' }, t('overview.adminLinksNote'))),
     h('section', { class: 'card' },
       h('h2', {}, t('overview.activeHeading', { count: active.length })),

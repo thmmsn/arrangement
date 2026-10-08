@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
@@ -18,7 +18,7 @@ import { createPlaceSearch } from './places.js';
 import { loadSites } from './sites.js';
 import { loadSkins, skinName } from './skins.js';
 import { themeCspSources, themeCss } from './theme.js';
-import { createTicketFeature } from './tickets.js';
+import { createTicketFeature, parseCookies } from './tickets.js';
 import { createTokens } from './tokens.js';
 import { readVersion } from './version.js';
 import { createViews } from './views.js';
@@ -45,6 +45,7 @@ const DEFAULT_RATE_LIMITS = {
   cancel: { windowMs: 10 * 60_000, max: 30 },
   create: { windowMs: 15 * 60_000, max: 20 },
   scanner: { windowMs: 10 * 60_000, max: 30 }, // innlogging med dørvaktlenken
+  overviewLogin: { windowMs: 15 * 60_000, max: 10 }, // innlogging med passord til oversikten
 };
 
 // ---------- Betrodd LAN-port ----------
@@ -256,7 +257,7 @@ export function createApp({
 
   // ---------- Tilgang til administrasjonen ----------
   // Alt som har med administrasjon å gjøre ligger under /admin (sider) og /api/admin (API). Det finnes
-  // tre slags tilgang, med hver sin nøkkel (den tredje, oversikten, er beskrevet ved overviewKeyHash):
+  // tre slags tilgang (den tredje, oversikten, er beskrevet ved overviewAuth under):
   //
   // 1. Opprette arrangementer: /admin/ny og resten av /api/admin (config, places, POST events).
   //    Slipper inn med den betrodde LAN-porten, opprettingsnøkkelen (CREATE_KEY, lenken
@@ -271,12 +272,25 @@ export function createApp({
   // JavaScript på siden sender dem i «Authorization: Bearer <nøkkel>» til API-et.
 
   const createKeyHash = config.createKey ? hashSecret(config.createKey) : null;
-  // 3. Oversikten over alle arrangementer: /admin#<OVERVIEW_KEY> og GET /api/admin/overview. Krever
-  //    alltid oversiktsnøkkelen – også på LAN-porten og med Cloudflare Access, som eieren kan legge foran
-  //    som et ekstra lag. Med ADMIN_HOST finnes den bare der (og på LAN-porten), som oppretting. Uten
-  //    OVERVIEW_KEY finnes den ikke, og /admin sender videre til /admin/ny som før.
-  const overviewKeyHash = config.overviewKey ? hashSecret(config.overviewKey) : null;
-  const overviewHere = (req) => Boolean(overviewKeyHash) && (isLan(req) || !config.adminHost || hostOf(req) === config.adminHost);
+  // 3. Oversikten over alle arrangementer: /admin og GET /api/admin/overview. Eieren velger selv hvordan
+  //    den beskyttes (OVERVIEW_AUTH, se overviewAuth.js): nøkkel, passord, Cloudflare Access, LAN-porten
+  //    eller ingenting – én av de valgte holder. Med ADMIN_HOST finnes den bare der (og på LAN-porten),
+  //    som oppretting. Uten noen valgt måte finnes den ikke, og /admin sender videre til /admin/ny som før.
+  const overviewAuth = config.overview ?? { methods: [] };
+  const overviewMethods = new Set(overviewAuth.methods);
+  const overviewKeyHash = overviewAuth.key ? hashSecret(overviewAuth.key) : null;
+  // Brukernavn og passord sammenlignes samlet, så svaret aldri røper hvilket av dem som var feil.
+  const loginOf = (user, password) => `${user}\n${password}`;
+  const overviewLoginHash = overviewAuth.password != null ? hashSecret(loginOf(overviewAuth.user, overviewAuth.password)) : null;
+  // Innloggingen huskes i en informasjonskapsel: en HMAC av brukernavn og passord med appens hemmelighet.
+  // Nytt passord (eller brukernavn) = ny verdi, så alle som er logget inn, må logge inn på nytt.
+  const OVERVIEW_COOKIE = 'ov';
+  const OVERVIEW_COOKIE_PATH = '/api/admin/overview';
+  const overviewSession = overviewLoginHash
+    ? createHmac('sha256', repo.secret()).update(`overview-session:${overviewLoginHash}`).digest('base64url')
+    : null;
+  const overviewSessionHash = overviewSession ? hashSecret(overviewSession) : null;
+  const overviewHere = (req) => overviewMethods.size > 0 && (isLan(req) || !config.adminHost || hostOf(req) === config.adminHost);
   const bearerOf = (req) => /^Bearer (.+)$/.exec(req.get('authorization') || '')?.[1] ?? '';
 
   // Oppretting (1). Setter req.creator når forespørselen har lov til å opprette arrangementer.
@@ -427,7 +441,7 @@ export function createApp({
   const apiCreatorGate = creatorGate('api');
   const adminApiGate = (req, res, next) => {
     // Express godtar også /overview/ for ruten – porten må gjøre det samme.
-    if (/^\/overview\/?$/.test(req.path)) return overviewGate(req, res, next);
+    if (/^\/overview(?:\/(?:login|logout))?\/?$/.test(req.path)) return overviewGate(req, res, next);
     return (EVENT_ADMIN_PATH.test(req.path) ? eventAdminGate : apiCreatorGate)(req, res, next);
   };
   adminApi.use(adminApiGate, express.json({ limit: '100kb' }), noStore);
@@ -454,21 +468,75 @@ export function createApp({
     next();
   }
 
-  // Oversikten (3). Finnes den ikke her (ingen OVERVIEW_KEY, eller feil vertsnavn med ADMIN_HOST), er
-  // svaret den nakne 404-en. Uten riktig nøkkel: 401.
-  function overviewGate(req, res, next) {
+  /**
+   * Hvilken av eierens valgte måter slipper forespørselen inn til oversikten? 'none', 'lan', 'key',
+   * 'password' eller 'access' – eller null. Access sjekkes sist, fordi den krever et nettverkskall.
+   */
+  async function overviewVia(req) {
+    if (overviewMethods.has('none')) return 'none';
+    if (overviewMethods.has('lan') && isLan(req)) return 'lan';
+    if (overviewMethods.has('key') && secretMatches(bearerOf(req), overviewKeyHash)) return 'key';
+    if (overviewMethods.has('password')) {
+      const cookie = parseCookies(req.get('cookie'))[OVERVIEW_COOKIE];
+      if (secretMatches(cookie, overviewSessionHash)) return 'password';
+    }
+    if (overviewMethods.has('access') && accessVerifier && !isLan(req)) {
+      const token = accessTokenFrom(req);
+      if (token) {
+        try {
+          req.accessUser = await accessVerifier(token);
+          return 'access';
+        } catch (err) {
+          if (!(err instanceof AccessError)) logger.error('Cloudflare Access-sjekk feilet:', err);
+        }
+      }
+    }
+    return null;
+  }
+
+  // Det siden trenger for å vise riktig innlogging når den ikke slipper inn.
+  const overviewLogin = () => ({
+    key: overviewMethods.has('key'),
+    password: overviewMethods.has('password'),
+    user: overviewMethods.has('password') && Boolean(overviewAuth.user),
+    access: overviewMethods.has('access'),
+    lan: overviewMethods.has('lan'),
+  });
+
+  // Oversikten (3). Finnes den ikke her (ingen valgt måte, eller feil vertsnavn med ADMIN_HOST), er svaret
+  // den nakne 404-en. Innlogging og utlogging slipper alltid gjennom (de finnes bare med passord); selve
+  // oversikten krever en av de valgte måtene, ellers 401 med hvilke måter som finnes.
+  async function overviewGate(req, res, next) {
     req.t = adminT;
+    req.accessUser = null;
     if (!overviewHere(req)) return notFound(req, res);
-    if (!secretMatches(bearerOf(req), overviewKeyHash)) {
-      return res.status(401).set('Cache-Control', 'no-store').json({ error: adminT('errors.overviewKeyRequired') });
+    if (/^\/overview\/(?:login|logout)\/?$/.test(req.path)) {
+      return overviewMethods.has('password') ? next() : notFound(req, res);
+    }
+    req.overviewVia = await overviewVia(req);
+    if (!req.overviewVia) {
+      return res.status(401).set('Cache-Control', 'no-store').json({ error: adminT('errors.overviewDenied'), login: overviewLogin() });
     }
     next();
   }
 
   // Sjekken gjentas i ruten, som for requireEventAdmin: ruten skal aldri kunne bli åpen ved en feil.
-  function requireOverviewKey(req, res, next) {
-    if (!overviewHere(req) || !secretMatches(bearerOf(req), overviewKeyHash)) {
-      return res.status(401).json({ error: adminT('errors.overviewKeyRequired') });
+  // req.overviewVia settes bare av overviewGate.
+  function requireOverview(req, res, next) {
+    if (!overviewHere(req) || !req.overviewVia) {
+      return res.status(401).json({ error: adminT('errors.overviewDenied'), login: overviewLogin() });
+    }
+    next();
+  }
+
+  // Innloggingen skal komme fra admin-siden selv. Informasjonskapselen er SameSite=Strict, og API-et krever
+  // JSON; dette er en ekstra sperre mot CSRF.
+  function overviewSameOrigin(req, res, next) {
+    const origin = req.get('origin');
+    if (origin) {
+      let host = null;
+      try { host = new URL(origin).host; } catch { /* ugyldig */ }
+      if (host !== req.get('host')) return res.status(403).json({ error: adminT('errors.forbidden') });
     }
     next();
   }
@@ -881,7 +949,7 @@ export function createApp({
   // Alle arrangementene som finnes (de slettes DELETE_AFTER_DAYS dager etter at de er over), med tall –
   // aldri opplysninger om gjestene. Admin-lenkene er ikke med: admin-nøklene lagres bare som hash, og
   // står bare i e-posten til arrangøren (og tjenesteadministratoren, ADMIN_EMAIL).
-  adminApi.get('/overview', requireOverviewKey, (req, res) => {
+  adminApi.get('/overview', requireOverview, (req, res) => {
     const now = new Date();
     const events = repo.listEventsOverview().map(({ event, count, bookings, checkedIn, aliases }) => {
       const site = siteOf(event);
@@ -911,11 +979,36 @@ export function createApp({
       };
     });
     res.json({
+      // Hvordan forespørselen slapp inn – siden viser «Logg ut» når det var med passord.
+      via: req.overviewVia,
       timeZone: config.timeZone,
       deleteAfterDays,
       sites: sites.map(({ id, label }) => ({ id, label })),
       events,
     });
+  });
+
+  // Innlogging med brukernavn og passord (OVERVIEW_AUTH=password). body: { username, password }.
+  // Begrenset per IP-adresse (rateLimits.overviewLogin), så passordet ikke kan prøves i det uendelige.
+  const overviewLoginLimiter = limiter(limits.overviewLogin);
+  adminApi.post('/overview/login', overviewLoginLimiter, overviewSameOrigin, (req, res) => {
+    const username = overviewAuth.user ? String(req.body?.username ?? '').trim() : '';
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    if (!secretMatches(loginOf(username, password), overviewLoginHash)) {
+      return res.status(401).json({ error: adminT(overviewAuth.user ? 'errors.overviewLoginFailed' : 'errors.overviewPasswordFailed') });
+    }
+    // Secure når hovednettstedet er på https – men ikke på LAN-porten, som er vanlig http. Der ville
+    // nettleseren ellers forkastet informasjonskapselen.
+    const secure = !isLan(req) && mainSite.baseUrl.startsWith('https:');
+    res.cookie(OVERVIEW_COOKIE, overviewSession, {
+      httpOnly: true, sameSite: 'strict', secure, path: OVERVIEW_COOKIE_PATH, maxAge: overviewAuth.sessionDays * DAY,
+    });
+    res.json({ ok: true });
+  });
+
+  adminApi.post('/overview/logout', overviewSameOrigin, (req, res) => {
+    res.clearCookie(OVERVIEW_COOKIE, { path: OVERVIEW_COOKIE_PATH });
+    res.json({ ok: true });
   });
 
   // ---------- Alias ----------

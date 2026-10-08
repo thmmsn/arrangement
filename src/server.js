@@ -32,10 +32,18 @@ if (!accessEnabled && !config.createKey && config.adminNoAuth) {
   console.log(`Nye arrangementer kan opprettes med ${creators.join(', ')}.`);
 }
 console.log('Hvert arrangement administreres med sin egen admin-lenke (/admin/<hash>#<nøkkel>) – den krever bare nøkkelen.');
-// Oversikten krever alltid nøkkelen. Med ADMIN_HOST finnes den bare der (og på LAN-porten).
-if (config.overviewKey) {
+// Oversikten: hvordan eieren har valgt å beskytte den (OVERVIEW_AUTH). Med ADMIN_HOST finnes den bare der.
+const OVERVIEW_METHOD_TEXT = {
+  key: 'nøkkelen (/admin#<OVERVIEW_KEY>)',
+  password: 'brukernavn og passord (OVERVIEW_USER/OVERVIEW_PASSWORD)',
+  access: 'Cloudflare Access',
+  lan: `LAN-porten ${config.lanPort}`,
+  none: 'uten innlogging',
+};
+if (config.overview.methods.length) {
   const where = config.adminHost ? ` på ${config.adminHost}${config.lanPort ? ' og LAN-porten' : ''}` : '';
-  console.log(`Oversikten over alle arrangementer: /admin#<nøkkel>${where} (OVERVIEW_KEY).`);
+  const how = config.overview.methods.map((m) => OVERVIEW_METHOD_TEXT[m]).join(' eller ');
+  console.log(`Oversikten over alle arrangementer (/admin)${where}: ${how}.`);
 }
 if (config.adminHost) {
   console.log(`Oppretting (/admin/ny) svarer bare på https://${config.adminHost}/admin/ny`);

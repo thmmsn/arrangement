@@ -1,6 +1,7 @@
 // All konfigurasjon leses fra miljøvariabler (se .env.example).
 
 import { loadMailConfig } from './mailConfig.js';
+import { loadOverviewAuth } from './overviewAuth.js';
 import { loadSites, normalizeHost } from './sites.js';
 import { loadWalletConfig } from './walletConfig.js';
 
@@ -17,7 +18,11 @@ export function loadConfig(rawEnv = process.env) {
   const wallet = loadWalletConfig(env);
   // E-posttjenesten (Resend, Cloudflare, Microsoft 365 eller SMTP), med eventuelle reserver.
   const mail = loadMailConfig(env);
-  warnings.push(...wallet.warnings, ...lanWarnings, ...mail.warnings);
+  const cfAccessTeamDomain = normalizeHost(env.CF_ACCESS_TEAM_DOMAIN);
+  const cfAccessAudiences = (env.CF_ACCESS_AUD || '').split(',').map((s) => s.trim()).filter(Boolean);
+  // Oversikten over alle arrangementer: eieren velger hvordan den beskyttes (se overviewAuth.js).
+  const overview = loadOverviewAuth(env, { accessEnabled: Boolean(cfAccessTeamDomain && cfAccessAudiences.length), lanPort });
+  warnings.push(...wallet.warnings, ...lanWarnings, ...mail.warnings, ...overview.warnings);
 
   return {
     port,
@@ -45,10 +50,9 @@ export function loadConfig(rawEnv = process.env) {
     // Cloudflare Access. Minst 32 tegn; en for kort eller ugyldig nøkkel ignoreres, og oppretting er da
     // stengt (med mindre Access eller LAN-porten brukes).
     createKey: parseKey('CREATE_KEY', env.CREATE_KEY, warnings, 'Ingen kan opprette arrangementer med nøkkel.'),
-    // Oversiktsnøkkelen: lenken /admin#<nøkkel> viser alle arrangementene (uten opplysninger om gjestene).
-    // Samme krav som CREATE_KEY. Nøkkelen kreves alltid – også på LAN-porten og med Cloudflare Access,
-    // som eieren kan legge foran som et ekstra lag. Uten nøkkel finnes oversikten ikke.
-    overviewKey: parseKey('OVERVIEW_KEY', env.OVERVIEW_KEY, warnings, 'Oversikten over alle arrangementer (/admin) er stengt.'),
+    // Oversikten over alle arrangementer (/admin): hvilke måter eieren har valgt (OVERVIEW_AUTH), og
+    // nøkkelen, brukernavnet og passordet de trenger. Ingen måter = ingen oversikt.
+    overview: { methods: overview.methods, key: overview.key, user: overview.user, password: overview.password, sessionDays: overview.sessionDays },
     // Oppretting av arrangementer uten Cloudflare Access og uten CREATE_KEY. BARE for lokal utvikling –
     // da kan alle som når /admin opprette arrangementer.
     adminNoAuth: ['true', '1', 'yes', 'ja'].includes((env.ADMIN_NO_AUTH || '').trim().toLowerCase()),
@@ -72,8 +76,8 @@ export function loadConfig(rawEnv = process.env) {
     // (/admin/<hash>#<nøkkel>) virker på alle vertsnavn – der er det nøkkelen som gir tilgang.
     adminHost: normalizeHost(env.ADMIN_HOST),
     // Når begge er satt, gir et gyldig Cloudflare Access-token rett til å opprette arrangementer.
-    cfAccessTeamDomain: normalizeHost(env.CF_ACCESS_TEAM_DOMAIN),
-    cfAccessAudiences: (env.CF_ACCESS_AUD || '').split(',').map((s) => s.trim()).filter(Boolean),
+    cfAccessTeamDomain,
+    cfAccessAudiences,
   };
 }
 
@@ -99,7 +103,6 @@ function parseEmails(value, warnings) {
 
 // Bare tegn som kan stå etter # i en lenke uten å kodes (A–Z, a–z, 0–9, - og _), og minst 32 av dem.
 // `openssl rand -hex 32` gir 64 tegn (256 tilfeldige bit).
-// Gjelder både CREATE_KEY og OVERVIEW_KEY.
 const KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
 
 function parseKey(name, value, warnings, consequence) {
