@@ -2,7 +2,8 @@ import http from 'node:http';
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { adoptLegacyDatabase, createRepository, openDatabase } from './db.js';
-import { createMailer } from './email.js';
+import { createMailer } from './mailer.js';
+import { PROVIDER_NAMES } from './mailConfig.js';
 import { readVersion } from './version.js';
 
 const config = loadConfig();
@@ -10,7 +11,7 @@ const legacy = adoptLegacyDatabase(config.databasePath);
 if (legacy) console.log(`Databasen er flyttet fra ${legacy} til ${config.databasePath} (prosjektet heter nå «arrangement»).`);
 const db = openDatabase(config.databasePath);
 const repo = createRepository(db);
-const mailer = createMailer({ apiKey: config.resendApiKey, from: config.emailFrom });
+const mailer = createMailer({ ...config.mail, from: config.emailFrom });
 const version = readVersion();
 const app = createApp({ repo, mailer, config, version });
 if (!version) console.warn('ADVARSEL: VERSION mangler eller har feil format (år.måned.dag.løpenummer) – ingen versjon vises på sidene.');
@@ -34,8 +35,21 @@ console.log('Hvert arrangement administreres med sin egen admin-lenke (/admin/<h
 if (config.adminHost) {
   console.log(`Oppretting (/admin/ny) svarer bare på https://${config.adminHost}/admin/ny`);
 }
-if (!config.resendApiKey) {
-  console.warn('ADVARSEL: RESEND_API_KEY er ikke satt – e-poster skrives til konsollen i stedet for å sendes.');
+const mailNames = config.mail.providers.map((p) => PROVIDER_NAMES[p.id]);
+if (config.mail.unavailable) {
+  console.error(`ADVARSEL: E-post kan IKKE sendes – ${config.mail.unavailable}`);
+} else if (!mailNames.length) {
+  console.warn('ADVARSEL: Ingen e-posttjeneste er satt opp (MAIL_PROVIDER) – e-poster skrives til konsollen i stedet for å sendes.');
+} else {
+  console.log(`E-post sendes via ${mailNames[0]}${mailNames.length > 1 ? ` (reserve: ${mailNames.slice(1).join(', ')})` : ''}.`);
+  // Sjekker innlogging og tilkobling (Microsoft 365 og SMTP) med en gang, så feil oppsett vises i loggen
+  // ved oppstart og ikke først når noen melder seg på.
+  mailer.verify().then((results) => {
+    for (const { provider, ok, message } of results) {
+      if (ok === true) console.log(`E-post via ${PROVIDER_NAMES[provider]}: ${message}.`);
+      if (ok === false) console.error(`ADVARSEL: E-post via ${PROVIDER_NAMES[provider]} virker ikke: ${message}`);
+    }
+  });
 }
 
 // Uten oppsett vises ingen Wallet-knapper – verken etter påmelding, på billettsiden eller i e-posten.

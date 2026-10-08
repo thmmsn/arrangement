@@ -1,5 +1,6 @@
 // All konfigurasjon leses fra miljøvariabler (se .env.example).
 
+import { loadMailConfig } from './mailConfig.js';
 import { loadSites, normalizeHost } from './sites.js';
 import { loadWalletConfig } from './walletConfig.js';
 
@@ -14,7 +15,9 @@ export function loadConfig(rawEnv = process.env) {
   const { sites, mainSite, warnings } = loadSites(env, { port });
   // Apple Wallet og Google Wallet: valgfrie, og slås av med en advarsel hvis oppsettet er ufullstendig.
   const wallet = loadWalletConfig(env);
-  warnings.push(...wallet.warnings, ...lanWarnings);
+  // E-posttjenesten (Resend, Cloudflare, Microsoft 365 eller SMTP), med eventuelle reserver.
+  const mail = loadMailConfig(env);
+  warnings.push(...wallet.warnings, ...lanWarnings, ...mail.warnings);
 
   return {
     port,
@@ -45,8 +48,10 @@ export function loadConfig(rawEnv = process.env) {
     // Oppretting av arrangementer uten Cloudflare Access og uten CREATE_KEY. BARE for lokal utvikling –
     // da kan alle som når /admin opprette arrangementer.
     adminNoAuth: ['true', '1', 'yes', 'ja'].includes((env.ADMIN_NO_AUTH || '').trim().toLowerCase()),
-    // Uten nøkkel skrives e-postene til konsollen i stedet for å sendes (nyttig i utvikling).
-    resendApiKey: env.RESEND_API_KEY || '',
+    // Tjenestene e-posten sendes med, i rekkefølge (se mailConfig.js). Tom liste: e-postene skrives til
+    // konsollen i stedet (nyttig i utvikling). `unavailable`: MAIL_PROVIDER er satt, men ingen tjeneste er
+    // brukbar – da feiler sendingen.
+    mail: { providers: mail.providers, unavailable: mail.unavailable },
     // Tidssonen arrangementstider vises i, uavhengig av hvor gjesten befinner seg.
     timeZone: env.TIME_ZONE || 'Europe/Oslo',
     // Sett til f.eks. 1 når appen kjører bak én reverse proxy (Caddy, nginx, Fly, Railway …),

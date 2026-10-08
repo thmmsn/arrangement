@@ -3,45 +3,6 @@ import { escapeHtml } from './html.js';
 import { DEFAULT_COLORS } from './theme.js';
 import { translator } from '../public/assets/i18n/index.js';
 
-const RESEND_ENDPOINT = 'https://api.resend.com/emails';
-
-// Liten klient mot Resends REST-API (https://resend.com/docs/api-reference/emails/send-email).
-// Uten API-nøkkel skrives e-posten til konsollen i stedet, slik at alt kan testes lokalt.
-// `from` er standardavsenderen; hver melding kan ha sin egen (nettstedets EMAIL_FROM).
-export function createMailer({ apiKey, from: defaultFrom, fetchImpl = fetch, logger = console }) {
-  return {
-    // attachments: [{ filename, content: Buffer, contentType, contentId }] – f.eks. kalenderfil og
-    // PDF-billett. Med contentId er vedlegget et innebygd bilde, vist i HTML-en med src="cid:<contentId>".
-    async send({ from = defaultFrom, to, subject, html, text, replyTo, attachments = [] }) {
-      if (!apiKey) {
-        const files = attachments.length ? `\nVedlegg: ${attachments.map((a) => `${a.filename} (${a.content.length} byte)`).join(', ')}` : '';
-        logger.log(`\n[e-post – ikke sendt, RESEND_API_KEY mangler]\nFra: ${from}\nTil: ${to}\nEmne: ${subject}${files}\n\n${text}\n`);
-        return { id: 'dev' };
-      }
-      const res = await fetchImpl(RESEND_ENDPOINT, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          from, to: [to], subject, html, text,
-          ...(replyTo && { reply_to: replyTo }),
-          // Resend vil ha innholdet som base64.
-          ...(attachments.length && {
-            attachments: attachments.map((a) => ({
-              filename: a.filename,
-              content: Buffer.from(a.content).toString('base64'),
-              ...(a.contentType && { content_type: a.contentType }),
-              ...(a.contentId && { content_id: a.contentId }),
-            })),
-          }),
-        }),
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!res.ok) throw new Error(`Resend svarte ${res.status}: ${await res.text()}`);
-      return res.json();
-    },
-  };
-}
-
 // ---------- Maler ----------
 //
 // Hver mal får `site` – nettstedet arrangementet hører til – og bruker dets språk (site.t),

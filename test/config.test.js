@@ -14,8 +14,8 @@ test('omsluttende anførselstegn fjernes', () => {
   assert.equal(config.emailFrom, 'Påmelding <arrangement@domain.no>');
   assert.equal(config.timeZone, 'Europe/Oslo');
   // Anførselstegn inne i verdien, eller bare på én side, røres ikke.
-  assert.equal(loadConfig({ RESEND_API_KEY: 'a"b"' }).resendApiKey, 'a"b"');
-  assert.equal(loadConfig({ RESEND_API_KEY: '"' }).resendApiKey, '"');
+  assert.equal(loadConfig({ RESEND_API_KEY: 'a"b"' }).mail.providers[0].apiKey, 'a"b"');
+  assert.equal(loadConfig({ RESEND_API_KEY: '"' }).mail.providers[0].apiKey, '"');
 });
 
 test('TRUST_PROXY tolkes som tall eller boolsk verdi', () => {
@@ -41,7 +41,9 @@ test('alle innstillingene appen leser, er beskrevet i .env.example', async () =>
   const { readFileSync } = await import('node:fs');
   const example = readFileSync(new URL('../.env.example', import.meta.url), 'utf8');
   for (const key of ['ADMIN_EMAIL', 'DELETE_AFTER_DAYS', 'APPLE_WALLET_PASS_TYPE_ID', 'APPLE_WALLET_TEAM_ID', 'APPLE_WALLET_CERT_FILE',
-    'APPLE_WALLET_CERT_PASSWORD', 'APPLE_WALLET_WWDR_FILE', 'GOOGLE_WALLET_ISSUER_ID', 'GOOGLE_WALLET_KEY_FILE']) {
+    'APPLE_WALLET_CERT_PASSWORD', 'APPLE_WALLET_WWDR_FILE', 'GOOGLE_WALLET_ISSUER_ID', 'GOOGLE_WALLET_KEY_FILE',
+    'MAIL_PROVIDER', 'RESEND_API_KEY', 'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_EMAIL_TOKEN', 'MICROSOFT_TENANT_ID', 'MICROSOFT_CLIENT_ID',
+    'MICROSOFT_CLIENT_SECRET', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_TLS', 'SMTP_USER', 'SMTP_PASSWORD']) {
     assert.match(example, new RegExp(`^#? ?${key}=`, 'm'), key);
   }
 });

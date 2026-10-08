@@ -1,6 +1,6 @@
 # Produksjon bak Cloudflare Tunnel.
 #
-#   cp .env.example .env     # fyll inn DOMAIN, TUNNEL_TOKEN, RESEND_API_KEY, EMAIL_FROM …
+#   cp .env.example .env     # fyll inn DOMAIN, TUNNEL_TOKEN, MAIL_PROVIDER (e-post), EMAIL_FROM …
 #   docker compose up -d --build
 #
 # Ingen porter åpnes på serveren for internett: cloudflared kobler seg UT til Cloudflare, og Cloudflare

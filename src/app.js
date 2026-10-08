@@ -529,9 +529,10 @@ export function createApp({
   // E-post skal aldri stoppe en påmelding: feil logges, og svaret forteller om sendingen gikk bra.
   // Logoen bygges inn i hver e-post (se emailLogo.js); kan den ikke det, står lenken til den igjen.
   //
-  // Sikkerhetsnett: avviser Resend avsenderen fordi domenet ikke er verifisert ennå (typisk rett etter at
-  // et nytt domene er lagt til), sendes e-posten på nytt fra hovednettstedets avsender – så gjesten får
-  // bekreftelsen likevel – og loggen sier tydelig fra.
+  // Sikkerhetsnett: avviser e-posttjenesten avsenderen – domenet er ikke verifisert ennå (Resend,
+  // Cloudflare; typisk rett etter at et nytt domene er lagt til), eller postkassen finnes ikke eller kan
+  // ikke brukes (Microsoft 365, SMTP) – sendes e-posten på nytt fra hovednettstedets avsender, så gjesten
+  // får bekreftelsen likevel, og loggen sier tydelig fra. Se `senderRejected` i mailer.js.
   async function sendEmails(messages) {
     const results = await Promise.allSettled(messages.map(async (m) => {
       const { site, ...message } = templates.embedLogo(m, await emailLogoFor(m.site?.theme));
@@ -539,8 +540,8 @@ export function createApp({
         return await mailer.send(message);
       } catch (err) {
         const fallback = mainSite.emailFrom;
-        if (!message.from || message.from === fallback || !/not verified/i.test(err.message)) throw err;
-        logger.error(`ADVARSEL: Resend godtar ikke avsenderen ${message.from} (domenet er ikke verifisert). E-posten til ${message.to} sendes fra ${fallback} i stedet. Verifiser domenet på https://resend.com/domains, eller sett EMAIL_FROM for nettstedet.`);
+        if (!message.from || message.from === fallback || !(err.senderRejected || /not verified/i.test(err.message))) throw err;
+        logger.error(`ADVARSEL: E-posttjenesten godtar ikke avsenderen ${message.from} (${err.message}). E-posten til ${message.to} sendes fra ${fallback} i stedet. Sett opp avsenderen hos e-posttjenesten (se README, «Sette opp e-post»), eller sett EMAIL_FROM for nettstedet.`);
         return mailer.send({ ...message, from: fallback });
       }
     }));
