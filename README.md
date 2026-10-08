@@ -424,7 +424,7 @@ ADMIN_HOST=arrangement-admin.domain.no
   | `arkitekt-thommesen.no` (bare to ledd) | `Thommesen Arkitekter <arrangement@arkitekt-thommesen.no>` |
 
   `EMAIL_FROM` (hovednettstedet) og `SITE_<ID>_EMAIL_FROM` overstyrer. Avsenderen arves aldri fra et annet nettsted, og en avsender på et annet domene enn nettstedet gir en advarsel ved oppstart. Oppstartsloggen viser avsenderen for hvert nettsted («Nettsted «no»: … e-post fra …»).
-- **Arv:** Det nettstedet ikke setter selv, arves fra hovednettstedet. Unntakene er `FOOTER_TEXT`, som bare arves når språket er det samme – en norsk bunntekst skal ikke havne på et engelsk nettsted – og `ROOT_REDIRECT`, som aldri arves (se [Forsiden](#forsiden-404-eller-videre-til-et-annet-nettsted)).
+- **Arv:** Det nettstedet ikke setter selv, arves fra hovednettstedet. Unntakene er `FOOTER_TEXT`, `LEGAL_FILE` og `LEGAL_TITLE`, som bare arves når språket er det samme – en norsk bunntekst eller personverntekst skal ikke havne på et engelsk nettsted – og `ROOT_REDIRECT`, som aldri arves (se [Forsiden](#forsiden-404-eller-videre-til-et-annet-nettsted)).
 - **Språk:** `nb` (norsk bokmål, standard) eller `en` (engelsk). Hovednettstedets språk heter `SITE_LANG`, ikke `LANG`, fordi `LANG` er en standard miljøvariabel i Linux som ofte allerede er satt (f.eks. `en_US.UTF-8`).
 - Legg hvert domene til under *Public Hostname* i Cloudflare-tunnelen, og sett opp avsenderen hos e-posttjenesten (se [Sette opp e-post](#sette-opp-e-post)).
 
@@ -828,6 +828,7 @@ Alt settes i `.env` – se `.env.example` for hele lista med forklaringer. Ugyld
 | `RADIUS` | Hjørneradius i piksler (0 = skarpe hjørner) |
 | `SHOW_BAND` | Det vevde båndet øverst (`true`/`false`) |
 | `FOOTER_TEXT`, `PRIVACY_URL` | Bunntekst og lenke til personvernerklæring |
+| `LEGAL_FILE`, `LEGAL_TITLE` | Personvern og databehandleravtaler i et vindu fra bunnteksten (se under) |
 | `CUSTOM_CSS_URL` | Eget stilark for alt annet |
 
 **Egne filer:** Legg logo, favicon eller stilark i mappen `branding/`. De blir tilgjengelige som `/assets/custom/<filnavn>` – både lokalt og i Docker (mappen monteres inn). Eksempel: `LOGO_URL=/assets/custom/logo.svg`. Logoen brukes også i PDF-billetten og e-postene, og må da være PNG, JPEG eller SVG.
@@ -837,6 +838,20 @@ Alt settes i `.env` – se `.env.example` for hele lista med forklaringer. Ugyld
 **Logoen i e-postene** bygges inn i selve e-posten som et PNG-bilde (vedlegg med Content-ID, vist med `src="cid:logo"`), ikke som en lenke til bildet på nettstedet. En lenke virker dårlig i e-post: Gmail, Outlook og de fleste andre viser ikke SVG i det hele tatt, mange klienter (bl.a. Outlook) viser ikke bilder fra nettet før mottakeren trykker «Vis bilder», og bildet må kunne hentes fra internett (ikke fra localhost, LAN eller bak Cloudflare Access). PNG-en lages én gang ved oppstart fra `LOGO_URL` – SVG tegnes skarpt i riktig størrelse, i dobbel oppløsning for skjermer med høy pikseltetthet – med høyden `LOGO_HEIGHT` og maks 480 piksler bred. Bredde og høyde står både som attributter og i `style`, fordi Outlook for Windows bare ser på attributtene. Kan logoen ikke leses (f.eks. WebP), står lenken til den i e-posten som før, og loggen sier fra ved oppstart.
 
 Nyanser som hover-farger og lyse bakgrunner på meldinger regnes ut fra grunnfargene med CSS `color-mix()`, så hele siden følger med når du bytter `COLOR_ACCENT`.
+
+### Personvern og databehandleravtaler
+
+Bunnteksten kan ha en lenke – «Personvern og databehandling» – som åpner et vindu over siden med eierens egen tekst: hvem som er behandlingsansvarlig, hvilke opplysninger som lagres og hvor lenge, og hvilke databehandlere (e-posttjenesten, driftsleverandøren …) det er inngått databehandleravtale med. Overskriften og «Lukk» står fast, og teksten imellom rulles – også på mobil, der vinduet fyller nesten hele skjermen. Siden bak ruller ikke mens vinduet er åpent.
+
+1. Kopier eksempelet: `cp docs/personvern.eksempel.html branding/personvern.html`. Det beskriver hva appen faktisk lagrer og hvilke tjenester den bruker – men fyll inn alt i `[hakeparenteser]`, fjern det som ikke gjelder dere, og få teksten kontrollert. Eksempelet er et utgangspunkt, ikke juridisk rådgivning.
+2. Sett `LEGAL_FILE=personvern.html` (og eventuelt `LEGAL_TITLE=…` for en annen tekst på lenken).
+3. Start appen på nytt. Filen leses ved oppstart, som resten av temaet.
+
+Filen er vanlig HTML uten hovedoverskrift (den lager appen): `<h2>`, `<h3>`, `<p>`, lister, lenker og tabeller. Den kan også være en hel HTML-side; da brukes det som står i `<body>`. Kommentarer (`<!-- … -->`) sendes ikke med. Sidenes Content-Security-Policy gjelder også her, så `<script>`, `<style>`, `style="…"` og `onclick="…"` virker ikke – appen sier fra i loggen ved oppstart hvis filen har noe av det. En fil som mangler, er tom eller er større enn 256 kB, gir en advarsel i loggen og ingen lenke; sidene virker som før.
+
+Med [flere nettsteder](#flere-nettsteder) kan hvert nettsted ha sin egen fil (`SITE_COM_LEGAL_FILE=privacy.html`). Som `FOOTER_TEXT` arves `LEGAL_FILE` og `LEGAL_TITLE` bare til nettsteder med samme språk – en norsk tekst havner ikke på et engelsk nettsted. Tittelen er ellers på nettstedets språk («Privacy and data processing» på engelsk).
+
+Vinduet er et vanlig HTML-`<dialog>` som åpnes og lukkes med nettleserens egne kommandoknapper (`commandfor`/`command`) og lukkes med Esc eller et klikk utenfor (`closedby="any"`). Nettlesere som ikke kan det ennå, får det samme fra `public/assets/js/legal.js`. **Merk:** filer i `branding/` er offentlige på `/assets/custom/<filnavn>`, akkurat som logoen.
 
 ### Skins per arrangement
 
@@ -925,6 +940,7 @@ src/
   qr.js          QR-koder (SVG og rutenett til PDF)
   pdf.js         PDF-billett (billettform med logo, QR-kode og dørkode)
   logo.js        Logoen til PDF-billetten og e-postene (fra branding/ eller https; PNG, JPEG, SVG)
+  legal.js       Personvern og databehandleravtaler (LEGAL_FILE i branding/), vist i et vindu fra bunnteksten
   emailLogo.js   Logoen bygget inn i e-postene som PNG (Content-ID)
   calendar.js    Kalenderfil (.ics) og Google Kalender-lenke
   appleWallet.js Apple Wallet-kort (.pkpass/.pkpasses) med PKCS#7-signatur

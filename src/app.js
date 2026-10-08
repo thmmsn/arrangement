@@ -11,6 +11,7 @@ import { escapeHtml } from './html.js';
 import { hashSecret, isAlias, newSecret, newSlug, secretMatches, SLUG_PATTERN } from './ids.js';
 import { rateLimit } from './rateLimit.js';
 import { ImageError, MAX_IMAGE_BYTES, processImage } from './images.js';
+import { loadLegalTexts } from './legal.js';
 import { createLogoLoader } from './logo.js';
 import { createOgImage, OG_IMAGE_HEIGHT, OG_IMAGE_TYPE, OG_IMAGE_WIDTH, OgImageError } from './ogImage.js';
 import { createPlaceSearch } from './places.js';
@@ -28,7 +29,7 @@ import {
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VIEWS = path.join(ROOT, 'views');
 const ASSETS = path.join(ROOT, 'public', 'assets');
-// Egne filer (logo, favicon, CSS) fra ./branding, tilgjengelige som /assets/custom/<fil>.
+// Egne filer (logo, favicon, CSS, personvern) fra ./branding, tilgjengelige som /assets/custom/<fil>.
 const BRANDING = path.join(ROOT, 'branding');
 // Skins (utseender per arrangement): de innebygde, og eierens egne i ./skins (se docs/skins.md).
 const BUILTIN_SKINS = path.join(ASSETS, 'skins');
@@ -95,7 +96,10 @@ export function createApp({
     cssHref.set(site.id, `/assets/theme/${file}`);
     themeFiles.set(file, css);
   }
-  const views = createViews(VIEWS, { version });
+  // Personvern og databehandleravtaler (LEGAL_FILE i ./branding), vist i et vindu fra bunnteksten.
+  const { texts: legalTexts, warnings: legalWarnings } = loadLegalTexts(sites, { brandingDir: config.brandingDir ?? BRANDING });
+  for (const warning of legalWarnings) logger.warn?.(`ADVARSEL: ${warning}`);
+  const views = createViews(VIEWS, { version, legal: legalTexts });
   const { skins, warnings: skinWarnings } = loadSkins({ dirs: config.skinDirs ?? [BUILTIN_SKINS, CUSTOM_SKINS] });
   for (const warning of skinWarnings) logger.warn?.(`ADVARSEL: ${warning}`);
   const skinFiles = new Map([...skins.values()].map((skin) => [skin.file, skin.css]));

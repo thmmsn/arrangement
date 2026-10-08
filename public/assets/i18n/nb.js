@@ -31,6 +31,12 @@ export default {
     logoAlt: 'Logo',
   },
 
+  // Vinduet med personvern og databehandleravtaler (LEGAL_FILE). LEGAL_TITLE overstyrer tittelen.
+  legal: {
+    title: 'Personvern og databehandling',
+    close: 'Lukk',
+  },
+
   status: {
     closed: 'Påmeldingen er stengt.',
     deadline_passed: 'Påmeldingsfristen har gått ut.',

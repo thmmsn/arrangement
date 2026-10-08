@@ -46,10 +46,14 @@ export const THEME_ENV_KEYS = [
   'SITE_NAME', 'LOGO_URL', 'LOGO_HEIGHT', 'FAVICON_URL', 'CUSTOM_CSS_URL',
   ...Object.keys(COLOR_ENV),
   'FONT_HEADING', 'FONT_BODY', 'GOOGLE_FONTS', 'RADIUS', 'SHOW_BAND',
-  'FOOTER_TEXT', 'PRIVACY_URL',
+  'FOOTER_TEXT', 'PRIVACY_URL', 'LEGAL_FILE', 'LEGAL_TITLE',
 ];
 // Tekst skrevet på ett språk arves ikke til et nettsted med et annet språk.
-export const LANGUAGE_BOUND_KEYS = ['FOOTER_TEXT'];
+export const LANGUAGE_BOUND_KEYS = ['FOOTER_TEXT', 'LEGAL_FILE', 'LEGAL_TITLE'];
+
+// LEGAL_FILE: en HTML-fil i ./branding, f.eks. «personvern.html» eller «juridisk/personvern.html».
+// Ingen del av stien kan starte med punktum, så «..» (ut av mappen) og skjulte filer er umulige.
+const LEGAL_FILE_PATTERN = /^[a-z0-9_][a-z0-9_.-]*(\/[a-z0-9_][a-z0-9_.-]*)*\.html?$/i;
 
 /**
  * @param {object} env        Miljøvariablene (for et ekstra nettsted: allerede slått sammen med arv)
@@ -120,6 +124,16 @@ export function loadTheme(env, { baseUrl, nameOf = (key) => key }) {
     return fallback;
   };
 
+  // Godtar også adressen filen har på nettstedet (/assets/custom/personvern.html), som LOGO_URL.
+  const legalFile = (name) => {
+    const value = (env[name] || '').trim();
+    if (!value) return '';
+    const file = value.replace(/^\/assets\/custom\//, '');
+    if (LEGAL_FILE_PATTERN.test(file)) return file;
+    warn(name, value, 'må være navnet på en .html-fil i mappen branding, f.eks. personvern.html');
+    return '';
+  };
+
   const logoUrl = url('LOGO_URL');
   const theme = {
     siteName: text('SITE_NAME', 100),
@@ -138,6 +152,9 @@ export function loadTheme(env, { baseUrl, nameOf = (key) => key }) {
     showBand: flag('SHOW_BAND', true),
     footerText: text('FOOTER_TEXT', 300),
     privacyUrl: url('PRIVACY_URL'),
+    // Personvern og databehandleravtaler, vist i et vindu fra bunnteksten (se legal.js).
+    legalFile: legalFile('LEGAL_FILE'),
+    legalTitle: text('LEGAL_TITLE', 100),
   };
   return { theme, warnings };
 }
@@ -206,17 +223,53 @@ export function siteHeader(theme, { wide = false, t }) {
   </header>`;
 }
 
-export function siteFooter(theme, { t, version = null }) {
+/**
+ * Bunnteksten: tekst, personvernlenke, lenken til vinduet med personvern og databehandleravtaler,
+ * og versjonsnummeret.
+ * `legal`: { title, html } fra LEGAL_FILE (se legal.js), eller null. `html` er eierens egen fil og
+ * settes inn som den er – den er like betrodd som resten av oppsettet.
+ */
+export function siteFooter(theme, { t, version = null, legal = null }) {
   const text = theme.footerText || theme.siteName;
   const privacy = theme.privacyUrl
     ? `<a href="${escapeHtml(theme.privacyUrl)}" target="_blank" rel="noopener">${escapeHtml(t('common.privacy'))}</a>` : '';
+  // En knapp, ikke en lenke: den åpner et vindu på siden og går ikke til en annen adresse.
+  const legalButton = legal
+    ? `<button type="button" class="link-button" commandfor="legal-dialog" command="show-modal" aria-haspopup="dialog">${escapeHtml(legal.title)}</button>` : '';
   // Versjonsnummeret (se version.js) står nederst til høyre, også når bunnteksten ellers er tom.
   const versionLine = version ? `\n    <div class="site-version">${escapeHtml(version)}</div>` : '';
-  if (!text && !privacy && !versionLine) return '';
-  const content = text || privacy
-    ? `\n    <div class="container">${[text ? escapeHtml(text) : '', privacy].filter(Boolean).join(' · ')}</div>` : '';
+  if (!text && !privacy && !legalButton && !versionLine) return '';
+  const parts = [text ? escapeHtml(text) : '', privacy, legalButton].filter(Boolean);
+  const content = parts.length ? `\n    <div class="container">${parts.join(' · ')}</div>` : '';
   return `<footer class="site-footer">${content}${versionLine}
-  </footer>`;
+  </footer>${legal ? legalDialog(legal, { t, version }) : ''}`;
+}
+
+/**
+ * Vinduet med personvern og databehandleravtaler. Overskriften og «Lukk» står fast øverst og nederst,
+ * og bare teksten imellom ruller – også på mobil, der vinduet fyller nesten hele skjermen.
+ *
+ * Det åpnes og lukkes med HTML-ens egne kommandoknapper (commandfor/command) og lukkes med Esc eller
+ * et klikk utenfor (closedby="any"), uten skript. legal.js gjør det samme i nettlesere som ennå ikke
+ * kan det. Teksten har tabindex="0", så den kan rulles med tastaturet.
+ */
+function legalDialog(legal, { t, version }) {
+  const title = escapeHtml(legal.title);
+  const close = escapeHtml(t('legal.close'));
+  return `
+  <dialog id="legal-dialog" class="legal-dialog" aria-labelledby="legal-dialog-title" closedby="any">
+    <div class="legal-dialog-head">
+      <h2 id="legal-dialog-title">${title}</h2>
+      <button type="button" class="legal-dialog-x" commandfor="legal-dialog" command="close" aria-label="${close}">×</button>
+    </div>
+    <div class="legal-dialog-body" tabindex="0">
+${legal.html}
+    </div>
+    <div class="legal-dialog-foot">
+      <button type="button" class="btn" commandfor="legal-dialog" command="close">${close}</button>
+    </div>
+  </dialog>
+  <script type="module" src="/assets/js/legal.js?v=${escapeHtml(version ?? '')}"></script>`;
 }
 
 /**
