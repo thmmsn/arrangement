@@ -18,25 +18,48 @@ export function newSlug() {
 }
 
 // Alias: en lesbar adresse arrangøren velger selv, f.eks. <domene>/julebord-2026, som viser det samme
-// arrangementet som <domene>/<hash>. Små bokstaver a–z, tall og enkle bindestreker mellom ordene –
-// ikke æ, ø og å, som blir til %C3%A6 o.l. når adressen kopieres. Hash-er og alias deler ett navnerom
-// (se db.js), så en adresse peker aldri på to arrangementer.
+// arrangementet som <domene>/<hash>. Små bokstaver a–z, æ, ø, å, tall og enkle bindestreker mellom ordene.
+// Æ, ø og å er arrangørens valg: nettlesere viser dem som de er, men noen steder (f.eks. når lenken limes
+// inn i en e-post) blir de til %C3%B8 o.l. Hash-er og alias deler ett navnerom (se db.js), så en adresse
+// peker aldri på to arrangementer.
 export const ALIAS_MIN_LENGTH = 3;
 export const ALIAS_MAX_LENGTH = 60;
-export const ALIAS_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+export const ALIAS_PATTERN = /^[a-z0-9æøå]+(?:-[a-z0-9æøå]+)*$/;
 // Første del av stier appen bruker selv. Kortere navn enn ALIAS_MIN_LENGTH (som /t/ og /b/) er
 // uansett utelukket.
 export const RESERVED_ALIASES = new Set(['admin', 'api', 'assets', 'dorvakt']);
 
-/** Kan dette være et alias? (Formatet – ikke om det finnes.) */
+/** Kan dette være et alias? (Formatet – ikke om det finnes.) Forventer normalisert tekst (se aliasKey). */
 export function isAlias(value) {
   return typeof value === 'string' && value.length >= ALIAS_MIN_LENGTH && value.length <= ALIAS_MAX_LENGTH
     && ALIAS_PATTERN.test(value);
 }
 
-/** Det arrangøren skriver («Julebord 2026») → «julebord-2026». Gyldigheten sjekkes i validation.js. */
+/**
+ * Det som står i en adresse → slik aliaset lagres: små bokstaver, og Unicode på samme form (NFC), så «å»
+ * skrevet som a + ring (som macOS kan gjøre) blir det samme som «å».
+ */
+export function aliasKey(value) {
+  return String(value ?? '').toLowerCase().normalize('NFC');
+}
+
+/**
+ * Det arrangøren skriver → et alias: «Bacalao & venner!» → «bacalao-venner», «Julebord 2026» →
+ * «julebord-2026». En innlimt lenke (https://domene.no/julebord) gir stien (julebord). Bokstaver med
+ * aksent blir uten (é → e, ü → u), men æ, ø og å beholdes. Alt annet enn bokstaver og tall blir bindestrek.
+ * Gyldigheten (lengde, reserverte navn) sjekkes i validation.js.
+ */
 export function normalizeAlias(input) {
-  return String(input ?? '').trim().toLowerCase().replace(/^\/+/, '').replace(/[\s_]+/g, '-');
+  const text = aliasKey(String(input ?? '').trim())
+    .replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/, '') // https://domene.no/julebord → /julebord
+    .replace(/[?#].*$/, '');
+  const plain = [...text].map((ch) => (/[a-z0-9æøå]/.test(ch) ? ch : ch.normalize('NFKD').replace(/\p{M}/gu, ''))).join('');
+  return plain.replace(/[^a-z0-9æøå]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+/** Flere alias på én gang: «julebord, jul; julebord-2026» (komma, semikolon eller linjeskift). */
+export function splitAliases(input) {
+  return String(input ?? '').split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean);
 }
 
 // Billettnummer (én per person) og påmeldingsnummer: 10 tegn fra samme alfabet, 31^10 ≈ 2^49

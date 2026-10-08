@@ -758,3 +758,5 @@ tr.added td:nth-child(2) { padding-left: 22px; }
 /* «Administrer» i oversikten, og veien tilbake fra admin-siden. */
 .overview-table .manage { display: block; width: fit-content; margin-top: 8px; }
 .back-link { margin: 0 0 8px; font-size: 14px; }
+/* Flere navn som ikke kunne legges til: én linje per navn. */
+.alias-form .field-error { white-space: pre-line; }

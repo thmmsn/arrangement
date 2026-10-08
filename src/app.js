@@ -8,7 +8,7 @@ import * as templates from './email.js';
 import { createEmailLogo } from './emailLogo.js';
 import { accessTokenFrom, AccessError, createAccessVerifier } from './cfAccess.js';
 import { escapeHtml } from './html.js';
-import { hashSecret, isAlias, newSecret, newSlug, secretMatches, SLUG_PATTERN } from './ids.js';
+import { aliasKey, hashSecret, isAlias, newSecret, newSlug, secretMatches, SLUG_PATTERN, splitAliases } from './ids.js';
 import { rateLimit } from './rateLimit.js';
 import { ImageError, MAX_IMAGE_BYTES, processImage } from './images.js';
 import { loadLegalTexts } from './legal.js';
@@ -397,7 +397,8 @@ export function createApp({
   // funnet via alias merkes (viaAlias), så en videresending til riktig domene ikke huskes av nettleseren
   // (se redirectToSite) – aliaset kan senere fjernes og tas av et arrangement på et annet domene.
   function findEventBySlug(value) {
-    const name = String(value).toLowerCase();
+    // Express har allerede dekodet adressen (%C3%B8 → ø). aliasKey: små bokstaver og samme Unicode-form.
+    const name = aliasKey(value);
     const event = SLUG_PATTERN.test(name) ? repo.findEvent(name) : null;
     if (event || !isAlias(name)) return event;
     const aliased = repo.findEventByAlias(name);
@@ -1036,23 +1037,59 @@ export function createApp({
   const MAX_ALIASES = 50;
   const aliasesOf = (event) => repo.listAliases(event.id).map((alias) => ({ alias, url: `${siteOf(event).baseUrl}/${alias}` }));
 
-  // body: { alias } – normaliseres («Julebord 2026» → «julebord-2026»). Svaret har alle aliasene.
+  // body: { alias } – ett eller flere navn, skilt med komma, semikolon eller linjeskift. Hvert navn
+  // normaliseres («Bacalao før Qingdao» → «bacalao-før-qingdao», se ids.js) og legges til for seg.
+  // Svaret: added (de som ble lagt til), existing (de arrangementet allerede hadde – ingen feil), failed
+  // ([{ input, error }]) og alle aliasene. 201 når noe ble lagt til, 200 når alt fantes fra før. Ellers 400
+  // (409 når det ene navnet er i bruk av et annet arrangement), med feilen i errors.alias som før.
   adminApi.post('/events/:slug/aliases', loadAdminEvent, requireEventAdmin, (req, res) => {
-    const alias = validateAlias(req.body?.alias);
-    try {
-      repo.addAlias(req.event.id, alias, MAX_ALIASES);
-    } catch (err) {
-      if (!(err instanceof AliasError)) throw err;
-      const error = err.reason === 'taken'
-        ? adminT('validation.aliasTaken', { alias })
-        : adminT('validation.aliasTooMany', { max: MAX_ALIASES });
-      return res.status(err.reason === 'taken' ? 409 : 400).json({ error, errors: { alias: error } });
+    const inputs = typeof req.body?.alias === 'string' ? splitAliases(req.body.alias) : [];
+    if (!inputs.length) validateAlias(''); // kaster «Skriv inn et navn»
+    const added = [];
+    const existing = [];
+    const failed = [];
+    const own = new Set(repo.listAliases(req.event.id));
+    let taken = 0;
+    for (const input of inputs) {
+      let alias;
+      try {
+        alias = validateAlias(input);
+        if (added.includes(alias) || existing.includes(alias)) continue; // samme navn to ganger i lista
+        if (own.has(alias)) {
+          existing.push(alias);
+          continue;
+        }
+        repo.addAlias(req.event.id, alias, MAX_ALIASES);
+        added.push(alias);
+      } catch (err) {
+        if (err instanceof ValidationError) {
+          const { key, vars } = err.errors.alias;
+          failed.push({ input, error: adminT(`validation.${key}`, vars) });
+        } else if (err instanceof AliasError) {
+          if (err.reason === 'taken') taken += 1;
+          failed.push({
+            input,
+            error: err.reason === 'taken'
+              ? adminT('validation.aliasTaken', { alias })
+              : adminT('validation.aliasTooMany', { max: MAX_ALIASES }),
+          });
+        } else {
+          throw err;
+        }
+      }
     }
-    res.status(201).json({ alias, aliases: aliasesOf(req.event) });
+    const aliases = aliasesOf(req.event);
+    if (!added.length && !existing.length) {
+      // Én feil: meldingen som den er. Flere: «navn»: feil, én per linje.
+      const error = failed.length === 1 ? failed[0].error : failed.map((f) => `«${f.input}»: ${f.error}`).join('\n');
+      const status = failed.length === 1 && taken === 1 ? 409 : 400;
+      return res.status(status).json({ error, errors: { alias: error }, added, existing, failed, aliases });
+    }
+    res.status(added.length ? 201 : 200).json({ alias: added[0] ?? existing[0], added, existing, failed, aliases });
   });
 
   adminApi.delete('/events/:slug/aliases/:alias', loadAdminEvent, requireEventAdmin, (req, res) => {
-    if (!repo.removeAlias(req.event.id, req.params.alias.toLowerCase())) {
+    if (!repo.removeAlias(req.event.id, aliasKey(req.params.alias))) {
       return res.status(404).json({ error: adminT('errors.aliasNotFound') });
     }
     res.json({ aliases: aliasesOf(req.event) });

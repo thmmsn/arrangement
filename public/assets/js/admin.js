@@ -158,8 +158,9 @@ function aliasCard() {
     })
     : h('p', { class: 'muted' }, t('admin.aliasNone'));
 
+  // Ikke maxLength: feltet kan ha flere navn skilt med komma. Serveren sjekker lengden på hvert.
   const input = h('input', {
-    type: 'text', id: 'alias-new', maxLength: 60, placeholder: t('admin.aliasPlaceholder'),
+    type: 'text', id: 'alias-new', placeholder: t('admin.aliasPlaceholder'),
     autocapitalize: 'none', autocomplete: 'off', spellcheck: false,
   });
   const add = h('button', { class: 'btn small', type: 'submit' }, t('admin.aliasAdd'));
@@ -175,10 +176,21 @@ function aliasCard() {
     try {
       const result = await api(`/admin/events/${slug}/aliases`, { method: 'POST', body: { alias: input.value }, headers: auth });
       event.aliases = result.aliases;
-      const added = result.aliases.find((a) => a.alias === result.alias);
-      flash = notice('success', t('admin.aliasAdded', { url: added?.url ?? result.alias }));
+      const urlOf = (alias) => result.aliases.find((a) => a.alias === alias)?.url ?? alias;
+      const messages = [];
+      if (result.added.length === 1) messages.push(t('admin.aliasAdded', { url: urlOf(result.added[0]) }));
+      else if (result.added.length) messages.push(t('admin.aliasAddedMany', { count: result.added.length, urls: result.added.map(urlOf).join(', ') }));
+      // Navn arrangementet allerede har, er ingen feil – bare si fra.
+      if (result.existing.length) messages.push(t('admin.aliasExists', { count: result.existing.length, urls: result.existing.map(urlOf).join(', ') }));
+      flash = notice('success', messages.join(' '));
       render();
-      document.getElementById('alias-new')?.focus();
+      // Navnene som ikke gikk, blir stående i feltet med forklaringen under, så de kan rettes.
+      const again = document.getElementById('alias-new');
+      if (result.failed.length && again) {
+        again.value = result.failed.map((f) => f.input).join(', ');
+        showFieldErrors(again.form, { alias: result.failed.map((f) => `«${f.input}»: ${f.error}`).join('\n') });
+      }
+      again?.focus();
     } catch (err) {
       add.disabled = false;
       if (err.errors?.alias) showFieldErrors(form, err.errors);

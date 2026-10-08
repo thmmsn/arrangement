@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import Database from 'better-sqlite3';
 import { AliasError, createRepository, MIGRATIONS, openDatabase } from '../src/db.js';
-import { normalizeAlias } from '../src/ids.js';
+import { normalizeAlias, splitAliases } from '../src/ids.js';
 import { validateAlias, ValidationError } from '../src/validation.js';
 import { createEvent, register, startApp } from './helpers.js';
 
@@ -33,10 +33,26 @@ const expectNaked404 = (res, label) => {
 };
 
 describe('navnet', () => {
-  test('normaliseres: små bokstaver, mellomrom og _ blir bindestrek, / foran fjernes', () => {
+  test('normaliseres: det arrangøren skriver, blir et alias i stedet for en feil', () => {
     assert.equal(normalizeAlias('  Julebord 2026 '), 'julebord-2026');
     assert.equal(normalizeAlias('/sommer_fest'), 'sommer-fest');
     assert.equal(validateAlias('Julebord   2026'), 'julebord-2026');
+    // Æ, ø og å beholdes; andre aksenter fjernes; andre tegn blir bindestrek.
+    assert.equal(normalizeAlias('Bacalao før Qingdao'), 'bacalao-før-qingdao');
+    assert.equal(normalizeAlias('Ålesund Ærfugl'), 'ålesund-ærfugl');
+    assert.equal(normalizeAlias('a\u030Alesund'), 'ålesund', 'å skrevet som a + ring (macOS) blir det samme');
+    assert.equal(normalizeAlias('Café Ünique'), 'cafe-unique');
+    assert.equal(normalizeAlias('Bacalao & venner!'), 'bacalao-venner');
+    assert.equal(normalizeAlias('jule.bord'), 'jule-bord');
+    assert.equal(normalizeAlias('-julebord-'), 'julebord');
+    assert.equal(normalizeAlias('jule--bord'), 'jule-bord');
+    // En innlimt lenke gir stien.
+    assert.equal(normalizeAlias('https://arrangement.example.no/bacalao/'), 'bacalao');
+    assert.equal(normalizeAlias('/julebord?utm=x#topp'), 'julebord');
+  });
+
+  test('flere navn på én gang: komma, semikolon eller linjeskift', () => {
+    assert.deepEqual(splitAliases('bacalao, qingdao;fest\n  jul  ,,'), ['bacalao', 'qingdao', 'fest', 'jul']);
   });
 
   test('avvises med en feil på feltet «alias»', () => {
@@ -49,17 +65,15 @@ describe('navnet', () => {
       }
       return null;
     };
+    // Bare det som ikke kan bli et alias: tomt, bare tegn, for kort/langt, eller reservert.
     assert.equal(errorKey(''), 'aliasRequired');
+    assert.equal(errorKey('   '), 'aliasRequired');
     assert.equal(errorKey(undefined), 'aliasRequired');
+    assert.equal(errorKey('!!!'), 'aliasInvalid');
     assert.equal(errorKey('ab'), 'aliasLength');
     assert.equal(errorKey('a'.repeat(61)), 'aliasLength');
     assert.equal(errorKey('a'.repeat(60)), null);
-    assert.equal(errorKey('sommerfest-på-hytta'), 'aliasInvalid', 'æ, ø og å blir %C3%A5 o.l. i adressen');
-    assert.equal(errorKey('-julebord'), 'aliasInvalid');
-    assert.equal(errorKey('julebord-'), 'aliasInvalid');
-    assert.equal(errorKey('jule--bord'), 'aliasInvalid');
-    assert.equal(errorKey('jule.bord'), 'aliasInvalid');
-    assert.equal(errorKey('jule/bord'), 'aliasInvalid');
+    assert.equal(errorKey('sommerfest-på-hytta'), null, 'æ, ø og å er lov');
     for (const reserved of ['admin', 'api', 'assets', 'dorvakt', 'Admin']) assert.equal(errorKey(reserved), 'aliasReserved', reserved);
   });
 });
@@ -187,15 +201,70 @@ describe('administrasjon', () => {
     assert.equal((await app.request({ path: `/${event.slug}/admin`, headers: onHost(MAIN) })).status, 301);
   });
 
-  test('ugyldig navn gir 400 med feilmelding på feltet', async () => {
+  test('navn som ikke kan bli et alias, gir 400 med feilmelding på feltet', async () => {
     const app = await startApp(SITES);
     const event = await createEvent(app);
-    for (const alias of ['', 'ab', 'blåbær', 'admin', 42, null]) {
+    for (const alias of ['', 'ab', '!!!', 'admin', 42, null]) {
       const res = await addAlias(app, event, alias);
       assert.equal(res.status, 400, String(alias));
       assert.ok(res.json.errors.alias, String(alias));
     }
     assert.match((await addAlias(app, event, 'admin')).json.errors.alias, /reservert/);
+  });
+
+  test('æ, ø og å: lenken virker, også når nettleseren sender den som %C3%B8', async () => {
+    const app = await startApp(SITES);
+    const event = await createEvent(app, { title: 'Bacalao før Qingdao' });
+    const res = await addAlias(app, event, 'Bacalao før Qingdao');
+    assert.equal(res.status, 201);
+    assert.deepEqual(res.json.added, ['bacalao-før-qingdao']);
+    assert.equal(res.json.aliases[0].url, `https://${MAIN}/bacalao-før-qingdao`);
+    const path = `/${encodeURIComponent('bacalao-før-qingdao')}`;
+    assert.equal((await app.request({ path, headers: onHost(MAIN) })).status, 200, 'siden');
+    // Siden henter arrangementet med stien slik nettleseren har den (små bokstaver i %-kodene).
+    const api = await app.request({ path: `/api${'/events'}${path.toLowerCase()}`, headers: onHost(MAIN) });
+    assert.equal(api.status, 200, 'API-et');
+    assert.equal(api.json.slug, event.slug);
+    // Fjerning med kodet navn.
+    assert.equal((await removeAlias(app, event, encodeURIComponent('bacalao-før-qingdao'))).status, 200);
+  });
+
+  test('flere på én gang: hvert navn legges til for seg, og de som ikke går, kommer tilbake med forklaring', async () => {
+    const app = await startApp(SITES);
+    const event = await createEvent(app);
+    const other = await createEvent(app);
+    await addAlias(app, other, 'opptatt');
+    const res = await addAlias(app, event, 'bacalao, Qingdao; https://arrangement.example.no/fest\nopptatt, ab, bacalao');
+    assert.equal(res.status, 201);
+    assert.deepEqual(res.json.added, ['bacalao', 'qingdao', 'fest'], 'samme navn to ganger i lista teller én gang');
+    assert.equal(res.json.alias, 'bacalao');
+    assert.deepEqual(res.json.failed.map((f) => f.input), ['opptatt', 'ab']);
+    assert.match(res.json.failed[0].error, /allerede i bruk/);
+    assert.match(res.json.failed[1].error, /3–60 tegn/);
+    assert.deepEqual(res.json.aliases.map((a) => a.alias), ['bacalao', 'qingdao', 'fest']);
+  });
+
+  test('navn arrangementet allerede har, er ingen feil', async () => {
+    const app = await startApp(SITES);
+    const event = await createEvent(app);
+    await addAlias(app, event, 'bacalao');
+    const again = await addAlias(app, event, 'Bacalao');
+    assert.equal(again.status, 200);
+    assert.deepEqual(again.json.existing, ['bacalao']);
+    assert.deepEqual(again.json.failed, []);
+    const mixed = await addAlias(app, event, 'bacalao, qingdao');
+    assert.equal(mixed.status, 201);
+    assert.deepEqual(mixed.json.added, ['qingdao']);
+    assert.deepEqual(mixed.json.existing, ['bacalao']);
+  });
+
+  test('flere på én gang der ingen går: 400 med hvert navn og hvorfor', async () => {
+    const app = await startApp(SITES);
+    const event = await createEvent(app);
+    const res = await addAlias(app, event, 'ab, admin');
+    assert.equal(res.status, 400);
+    assert.match(res.json.errors.alias, /^«ab»: .*\n«admin»: /);
+    assert.deepEqual(res.json.added, []);
   });
 
   test('et navn kan bare brukes én gang – heller ikke som et annet arrangements hash', async () => {
@@ -207,7 +276,7 @@ describe('administrasjon', () => {
     const taken = await addAlias(app, second, 'julebord');
     assert.equal(taken.status, 409, 'også på et annet nettsted: navnerommet er felles');
     assert.match(taken.json.errors.alias, /allerede i bruk/);
-    assert.equal((await addAlias(app, first, 'julebord')).status, 409, 'det samme arrangementet to ganger');
+    assert.equal((await addAlias(app, first, 'julebord')).status, 200, 'det samme arrangementet to ganger: finnes allerede, ingen feil');
     assert.equal((await addAlias(app, second, first.slug)).status, 409, 'et annet arrangements hash');
     assert.equal((await addAlias(app, first, first.slug)).status, 409, 'sin egen hash');
   });

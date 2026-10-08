@@ -304,7 +304,9 @@ export function validateBooking(input, fields, maxPerBooking = 1) {
 export function validateAlias(input) {
   const alias = normalizeAlias(input);
   let error = null;
-  if (!alias) error = msg('aliasRequired');
+  if (!String(input ?? '').trim()) error = msg('aliasRequired');
+  // Bare tegn som ikke kan stå i en adresse («!!!»): ingenting igjen etter normaliseringen.
+  else if (!alias) error = msg('aliasInvalid');
   else if (alias.length < ALIAS_MIN_LENGTH || alias.length > ALIAS_MAX_LENGTH) {
     error = msg('aliasLength', { min: ALIAS_MIN_LENGTH, max: ALIAS_MAX_LENGTH });
   } else if (!isAlias(alias)) error = msg('aliasInvalid');

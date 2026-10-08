@@ -105,9 +105,11 @@ arrangement.domain.no/julebord        →  (et arrangement kan ha mange alias)
 
 | | |
 |---|---|
-| **Hvordan** | Skriv navnet i feltet etter `https://<domene>/` og trykk «Legg til». Hvert alias har knappene «Kopier», «Åpne» og «Fjern». |
+| **Hvordan** | Skriv navnet i feltet etter `https://<domene>/` og trykk «Legg til». **Flere på én gang:** skill dem med komma, semikolon eller linjeskift. Hvert navn legges til for seg; de som ikke går, blir stående i feltet med forklaringen under, så de kan rettes. Hvert alias har knappene «Kopier», «Åpne» og «Fjern». |
 | **Hvor mange** | Så mange arrangøren vil, opptil 50 per arrangement. |
-| **Gyldige navn** | 3–60 tegn: små bokstaver `a–z`, tall og bindestrek mellom ordene. Store bokstaver gjøres små, og mellomrom og `_` blir bindestrek («Julebord 2026» → `julebord-2026`). Ikke `æ`, `ø` og `å`: de blir til `%C3%A6` o.l. når adressen kopieres, og er vanskelige å taste på et utenlandsk tastatur. `admin`, `api`, `assets` og `dorvakt` er reservert av appen. |
+| **Navnet** | Det du skriver, gjøres om til et alias i stedet for å avvises: store bokstaver blir små, mellomrom og andre tegn blir bindestrek, og bokstaver med aksent blir uten (`é` → `e`). «Bacalao før Qingdao» → `bacalao-før-qingdao`, «Bacalao & venner!» → `bacalao-venner`. En innlimt lenke gir stien: `https://domene.no/julebord` → `julebord`. |
+| **Æ, ø og å** | Går an – ditt valg. Nettlesere viser dem som de er (`domene.no/bacalao-før-qingdao`), men noen steder, f.eks. når lenken limes inn i en e-post eller et chatprogram, kan de vises som `%C3%B8` o.l. Lenken virker uansett. Vil du være sikker på at den alltid ser pen ut, bruk `a–z`. |
+| **Når det sier nei** | Bare når navnet ikke kan bli et alias: under 3 eller over 60 tegn, bare tegn uten bokstaver eller tall («!!!»), et navn appen bruker selv (`admin`, `api`, `assets`, `dorvakt`), eller et navn et **annet** arrangement har. Et navn arrangementet allerede har, er ingen feil – det sies bare fra om. |
 | **Hva aliaset gjør** | Viser arrangementssiden direkte – ingen videresending, så adressefeltet beholder `…/julebord-2026`. Påmelding, avmeldingssiden (`/<alias>/avmelding`) og kalenderfilen (`/<alias>/kalender.ics`) virker også under aliaset. |
 | **Hovedlenken** | Er fortsatt hash-lenken. Den står i e-postene, på billettene og i delingstaggene (`og:url`), og den virker uansett hvilke alias som legges til eller fjernes. |
 | **Ett navnerom** | Hash-er og alias deler ett navnerom, på tvers av alle nettstedene: et navn kan bare peke på ett arrangement. Et alias som allerede er i bruk – som alias eller som hash for et annet arrangement – avvises («allerede i bruk»), og en ny hash trekkes på nytt hvis den skulle falle sammen med et alias. |
@@ -1086,7 +1088,7 @@ test/            Tester (node:test)
 | `POST` / `DELETE` | `/api/admin/events/:slug/registrations/:id/checkin` | Admin-nøkkel. Sjekk inn / angre |
 | `POST` | `/api/admin/events/:slug/scanner/rotate` | Admin-nøkkel. Ny dørvaktlenke |
 | `POST` / `DELETE` | `/api/admin/events/:slug/cancel` | Admin-nøkkel. Avlys (`{ notify, message }`) / opphev |
-| `POST` | `/api/admin/events/:slug/aliases` | Admin-nøkkel. Legg til alias: `{ alias }` (normaliseres). `201` med `alias` og alle `aliases: [{ alias, url }]`; `400` (ugyldig navn eller over 50) eller `409` (i bruk), med feilen i `errors.alias` |
+| `POST` | `/api/admin/events/:slug/aliases` | Admin-nøkkel. Legg til alias: `{ alias }` – ett eller flere navn skilt med komma, semikolon eller linjeskift, hvert normalisert. Svaret har `added`, `existing` (fantes fra før – ingen feil), `failed: [{ input, error }]` og alle `aliases: [{ alias, url }]`. `201` når noe ble lagt til, `200` når alt fantes fra før; ellers `400`, eller `409` når det ene navnet er i bruk av et annet arrangement, med feilen i `errors.alias` |
 | `DELETE` | `/api/admin/events/:slug/aliases/:alias` | Admin-nøkkel. Fjern alias. Svaret har de som er igjen; `404` hvis arrangementet ikke har aliaset |
 | `PUT` / `DELETE` | `/api/admin/events/:slug/image` | Admin-nøkkel. Last opp forsidebilde (selve bildet som body, `Content-Type: image/…`) / fjern. Svaret har `uploadedImage` og `ogImage` (delingsbildet) |
 | `GET` | `/api/tickets/:nøkkel`, `/api/bookings/:nøkkel` | Billettlenken. Billetten(e), lenker og om telefonen er dørvakt |

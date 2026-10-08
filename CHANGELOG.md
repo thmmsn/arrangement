@@ -12,6 +12,29 @@ Hver versjon under har et avsnitt **Oppgradering** når noe må gjøres i tilleg
 
 ---
 
+## 2026.10.8.7 – 8. oktober 2026
+
+### Feilretting: korte lenker ble avvist for vanlige navn
+
+Å legge til korte lenker (alias) feilet for mye av det man naturlig skriver: navn med `æ`, `ø` eller `å` («Bacalao før Qingdao»), flere navn på én gang («bacalao, qingdao»), en innlimt lenke, eller tegn som `&` og `!`. Reglene var strengere enn de trengte å være.
+
+Nå gjøres det du skriver, om til et alias i stedet for å avvises:
+
+- **Æ, ø og å** er lov: «Bacalao før Qingdao» → `/bacalao-før-qingdao`. Nettlesere viser dem som de er; noen steder kan lenken vises som `%C3%B8` o.l., men den virker uansett.
+- **Flere på én gang:** skill navnene med komma, semikolon eller linjeskift. Hvert navn legges til for seg, og de som ikke går, blir stående i feltet med forklaringen – én linje per navn.
+- **Innlimte lenker** gir stien: `https://domene.no/julebord` → `julebord`.
+- **Andre tegn** blir bindestrek, og aksenter forsvinner: «Bacalao & venner!» → `bacalao-venner`, «Café» → `cafe`.
+- **Et navn arrangementet allerede har,** er ingen feil lenger – det sies bare fra om. Før sto det «allerede i bruk. Velg et annet navn».
+- **Rekkefølgen** i lista er den du skrev navnene i (før ble navn lagt til i samme øyeblikk sortert alfabetisk).
+
+Det som fortsatt sier nei: under 3 eller over 60 tegn, bare tegn uten bokstaver eller tall, `admin`/`api`/`assets`/`dorvakt`, og navn et annet arrangement har.
+
+### Oppgradering
+
+- **Ingenting må gjøres.** Eksisterende korte lenker virker som før.
+
+---
+
 ## 2026.10.8.6 – 8. oktober 2026
 
 ### Feilretting: tekstnøkler som «overview.manage» i stedet for teksten

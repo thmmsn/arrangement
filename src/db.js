@@ -306,7 +306,7 @@ export function createRepository(db) {
     eventByAlias: db.prepare('SELECT e.* FROM events e JOIN event_aliases a ON a.event_id = e.id WHERE a.alias = ?'),
     // Hash-er og alias deler ett navnerom: et navn er opptatt hvis det er det ene eller det andre.
     nameTaken: db.prepare('SELECT 1 FROM events WHERE slug = @name UNION ALL SELECT 1 FROM event_aliases WHERE alias = @name'),
-    aliases: db.prepare('SELECT alias FROM event_aliases WHERE event_id = ? ORDER BY created_at, alias'),
+    aliases: db.prepare('SELECT alias FROM event_aliases WHERE event_id = ? ORDER BY created_at, rowid'),
     countAliases: db.prepare('SELECT COUNT(*) AS n FROM event_aliases WHERE event_id = ?'),
     insertAlias: db.prepare('INSERT INTO event_aliases (alias, event_id, created_at) VALUES (?, ?, ?)'),
     deleteAlias: db.prepare('DELETE FROM event_aliases WHERE event_id = ? AND alias = ?'),
@@ -319,7 +319,7 @@ export function createRepository(db) {
         (SELECT COUNT(*) FROM bookings b WHERE b.event_id = e.id) AS booking_count
       FROM events e
       ORDER BY e.starts_at, e.id`),
-    allAliases: db.prepare('SELECT event_id, alias FROM event_aliases ORDER BY created_at, alias'),
+    allAliases: db.prepare('SELECT event_id, alias FROM event_aliases ORDER BY created_at, rowid'),
     insertEvent: db.prepare(`
       INSERT INTO events (slug, admin_key_hash, title, description, location, starts_at, ends_at,
         registration_deadline, capacity, max_per_booking, show_count, is_open, organizer_name,
