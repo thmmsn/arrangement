@@ -24,11 +24,14 @@ export async function api(path, { method = 'GET', body, headers = {} } = {}) {
   return data;
 }
 
-/** Laster opp et forsidebilde til et arrangement (selve bildet som body). */
+/**
+ * Laster opp et forsidebilde til et arrangement (selve bildet som body). Uten nøkkel (admin-siden åpnet
+ * via oversikten) sendes ingen Authorization – tilgangen kommer da fra oversikten.
+ */
 export async function uploadImage(slug, adminKey, blob) {
   const res = await fetch(`/api/admin/events/${slug}/image`, {
     method: 'PUT',
-    headers: { 'Content-Type': blob.type, Authorization: `Bearer ${adminKey}` },
+    headers: { 'Content-Type': blob.type, ...(adminKey && { Authorization: `Bearer ${adminKey}` }) },
     body: blob,
   });
   const data = await res.json().catch(() => ({}));

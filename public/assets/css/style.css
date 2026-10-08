@@ -755,3 +755,6 @@ tr.added td:nth-child(2) { padding-left: 22px; }
 }
 /* Innlogging med passord: et smalt kort, ikke hele bredden. */
 .login-card { max-width: 420px; }
+/* «Administrer» i oversikten, og veien tilbake fra admin-siden. */
+.overview-table .manage { display: block; width: fit-content; margin-top: 8px; }
+.back-link { margin: 0 0 8px; font-size: 14px; }

@@ -6,8 +6,12 @@ import { createEventForm } from './event-form.js';
 
 const app = document.getElementById('app');
 const slug = slugFromPath();
+// Arrangementets admin-nøkkel fra lenken – eller oversiktsnøkkelen, når siden er åpnet med «Administrer»
+// i oversikten. Uten nøkkel kan tilgangen komme fra oversikten (passord, Access, LAN eller ingen innlogging).
 const key = secretFromHash();
-const auth = { Authorization: `Bearer ${key}` };
+const auth = key ? { Authorization: `Bearer ${key}` } : {};
+// 'event' eller 'overview' – hvilken tilgang serveren slapp inn med.
+let access = null;
 
 let event;
 let registrations;
@@ -19,19 +23,20 @@ const openCancel = location.pathname.endsWith('/avlys');
 let flash = null; // Melding som vises øverst etter en handling.
 
 async function load() {
-  if (!key) {
-    app.replaceChildren(h('h1', {}, t('admin.missingKeyTitle')), h('p', {}, t('admin.missingKeyText')));
-    return;
-  }
   try {
     // Alt hentes med admin-nøkkelen til arrangementet – siden trenger ingen annen innlogging.
     const [data, config] = await Promise.all([
       api(`/admin/events/${slug}`, { headers: auth }),
       api(`/admin/events/${slug}/config`, { headers: auth }),
     ]);
-    ({ event, registrations } = data);
+    ({ event, registrations, access } = data);
     ({ sites, wallets = {}, skins = [] } = config);
   } catch (err) {
+    // Uten nøkkel i lenken og uten tilgang via oversikten: lenken mangler sannsynligvis nøkkelen.
+    if (!key && err.status === 401) {
+      app.replaceChildren(h('h1', {}, t('admin.missingKeyTitle')), h('p', {}, t('admin.missingKeyText')));
+      return;
+    }
     app.replaceChildren(h('h1', {}, t('admin.noAccess')), h('p', {}, err.message));
     return;
   }
@@ -71,6 +76,8 @@ function render() {
   const tz = event.timeZone;
   app.replaceChildren(...[
     flash,
+    // Åpnet fra oversikten: vei tilbake, med den samme nøkkelen (hvis det var en).
+    access === 'overview' ? h('p', { class: 'back-link' }, h('a', { href: key ? `/admin#${encodeURIComponent(key)}` : '/admin' }, t('admin.backToOverview'))) : null,
     h('p', { class: 'kicker' }, t('admin.kicker')),
     h('h1', {}, event.title),
     h('p', { class: 'muted' }, formatEventTime(event.startsAt, event.endsAt, tz), event.location ? ` · ${event.location}` : ''),

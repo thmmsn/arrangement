@@ -173,7 +173,9 @@ function table(events, { ended }) {
         h('td', { class: 'title-cell' },
           h('a', { href: e.url, target: '_blank', rel: 'noopener' }, e.title),
           e.location ? h('span', { class: 'by' }, e.location) : null,
-          e.aliases.map((url) => h('a', { class: 'by alias', href: url, target: '_blank', rel: 'noopener' }, url.replace(/^https?:\/\//, '')))),
+          e.aliases.map((url) => h('a', { class: 'by alias', href: url, target: '_blank', rel: 'noopener' }, url.replace(/^https?:\/\//, ''))),
+          // Admin-siden for arrangementet, med den samme tilgangen som oversikten (nøkkelen følger med).
+          h('a', { class: 'btn secondary small manage', href: `/admin/${e.slug}${key ? `#${encodeURIComponent(key)}` : ''}` }, t('overview.manage'))),
         cell('overview.columnTime', { class: 'small' }, formatEventTime(e.startsAt, e.endsAt, tz)),
         manySites ? cell('overview.columnSite', { class: 'small' }, data.sites.find((s) => s.id === e.site)?.label ?? e.site) : null,
         cell('overview.columnRegistered', { class: 'num-cell' },

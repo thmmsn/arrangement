@@ -1,5 +1,8 @@
 // Hvordan oversikten over alle arrangementer (/admin) beskyttes – eieren velger selv.
 //
+// Tilgangen gjelder også admin-siden for hvert arrangement (påmeldte, redigering, sletting): «Administrer»
+// i oversikten åpner den med den samme tilgangen (se eventAdminGate i app.js).
+//
 // OVERVIEW_AUTH er en liste skilt med komma. Én av måtene holder:
 //   key       nøkkelen etter # i lenken: /admin#<OVERVIEW_KEY>
 //   password  brukernavn og passord i et skjema på siden (OVERVIEW_USER, valgfritt, og OVERVIEW_PASSWORD).
@@ -63,7 +66,7 @@ export function loadOverviewAuth(env, { accessEnabled = false, lanPort = null } 
     warnings.push(`OVERVIEW_PASSWORD er bare ${password.length} tegn og kan være lett å gjette.`);
   }
   if (methods.includes('none')) {
-    warnings.push('OVERVIEW_AUTH=none: alle som når /admin, ser alle arrangementene – uten innlogging.');
+    warnings.push('OVERVIEW_AUTH=none: alle som når /admin, ser og kan administrere alle arrangementene (også påmeldte) – uten innlogging.');
   }
   return { methods, key, user, password, sessionDays, warnings };
 }

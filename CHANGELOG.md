@@ -12,6 +12,28 @@ Hver versjon under har et avsnitt **Oppgradering** når noe må gjøres i tilleg
 
 ---
 
+## 2026.10.8.5 – 8. oktober 2026
+
+### Nytt: «Administrer» på hvert arrangement i oversikten
+
+Hvert arrangement i oversikten (`/admin`) har knappen «Administrer», som åpner admin-siden for arrangementet – med påmeldte, CSV, innsjekking, dørvaktlenke, korte lenker, redigering, avlysning og sletting. Admin-siden viser «← Alle arrangementer» som vei tilbake.
+
+Admin-nøklene lagres bare som hash, så arrangørenes lenker kan ikke lages på nytt. I stedet gir **tilgangen til oversikten nå også tilgang til admin-siden for hvert arrangement**, med de måtene du har valgt i `OVERVIEW_AUTH`:
+
+- **Nøkkel:** oversiktsnøkkelen følger med i lenken (`/admin/<hash>#<OVERVIEW_KEY>`).
+- **Passord:** informasjonskapselen fra innloggingen sendes nå til hele `/api/admin` (før bare `/api/admin/overview`). «Logg ut» sletter begge.
+- **Access, LAN og `none`:** virker uten nøkkel i lenken.
+- **Bare der oversikten finnes:** med `ADMIN_HOST` gir oversikts-tilgangen ingenting på de offentlige domenene – der krever admin-siden fortsatt arrangementets egen nøkkel.
+- **Arrangørens egen admin-lenke** virker som før, overalt.
+
+**Merk:** den som har tilgang til oversikten, kan nå se deltakerlistene og endre eller slette alle arrangementene. Med `OVERVIEW_AUTH=none` gjelder det alle som når `/admin`.
+
+### Oppgradering
+
+- **Ingenting må gjøres.** Er du logget inn med passord fra 2026.10.8.4, virker oversikten som før; logg inn på nytt for at «Administrer» skal slippe deg inn med passordet (informasjonskapselen fikk ny sti).
+
+---
+
 ## 2026.10.8.4 – 8. oktober 2026
 
 ### Endret: du velger selv hvordan oversikten beskyttes

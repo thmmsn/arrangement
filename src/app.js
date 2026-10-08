@@ -285,7 +285,10 @@ export function createApp({
   // Innloggingen huskes i en informasjonskapsel: en HMAC av brukernavn og passord med appens hemmelighet.
   // Nytt passord (eller brukernavn) = ny verdi, så alle som er logget inn, må logge inn på nytt.
   const OVERVIEW_COOKIE = 'ov';
-  const OVERVIEW_COOKIE_PATH = '/api/admin/overview';
+  // Hele /api/admin: informasjonskapselen gir også tilgang til hvert arrangements admin-API (se eventAdminGate).
+  // Før 2026.10.8.5 var stien /api/admin/overview – utloggingen sletter den også.
+  const OVERVIEW_COOKIE_PATH = '/api/admin';
+  const OLD_OVERVIEW_COOKIE_PATH = '/api/admin/overview';
   const overviewSession = overviewLoginHash
     ? createHmac('sha256', repo.secret()).update(`overview-session:${overviewLoginHash}`).digest('base64url')
     : null;
@@ -337,17 +340,25 @@ export function createApp({
 
   // Ett arrangement (2). Et ukjent arrangement gir det samme nakne svaret som alt annet uten gyldig lenke,
   // så API-et ikke røper noe på de offentlige domenene. Uten riktig nøkkel: 401.
+  //
+  // Tilgangen til oversikten (3) gir også tilgang hit, til hvert arrangement – det er slik «Administrer» i
+  // oversikten virker, siden admin-nøklene bare lagres som hash og lenkene ikke kan lages på nytt. Det
+  // gjelder bare der oversikten finnes (med ADMIN_HOST: admin-vertsnavnet og LAN-porten), og med de
+  // måtene eieren har valgt i OVERVIEW_AUTH. req.eventAccess sier hvilken tilgang som slapp inn.
   async function eventAdminGate(req, res, next) {
     req.t = adminT;
     req.accessUser = null;
+    req.eventAccess = null;
     const event = findEventBySlug(EVENT_ADMIN_PATH.exec(req.path)[1]);
     if (!event) return notFound(req, res);
-    if (!secretMatches(bearerOf(req), event.adminKeyHash)) {
+    if (secretMatches(bearerOf(req), event.adminKeyHash)) req.eventAccess = 'event';
+    else if (overviewHere(req) && (req.overviewVia = await overviewVia(req))) req.eventAccess = 'overview';
+    if (!req.eventAccess) {
       return res.status(401).set('Cache-Control', 'no-store').json({ error: adminT('errors.invalidAdminLink') });
     }
     // Kom forespørselen gjennom Cloudflare Access, brukes e-postadressen (f.eks. «sjekket inn av»).
     // Access kreves ikke: et manglende eller ugyldig token betyr bare at vi ikke vet hvem det er.
-    const token = accessVerifier && !isLan(req) ? accessTokenFrom(req) : '';
+    const token = !req.accessUser && accessVerifier && !isLan(req) ? accessTokenFrom(req) : '';
     if (token) req.accessUser = await accessVerifier(token).catch(() => null);
     next();
   }
@@ -543,8 +554,9 @@ export function createApp({
 
   // Admin-nøkkelen for et arrangement sendes som «Authorization: Bearer <nøkkel>». eventAdminGate har
   // allerede sjekket den; sjekken gjentas her for hver rute, så en rute aldri kan bli åpen ved en feil.
+  // req.eventAccess === 'overview' settes bare av eventAdminGate, etter at oversikts-tilgangen er sjekket.
   function requireEventAdmin(req, res, next) {
-    if (!secretMatches(bearerOf(req), req.event.adminKeyHash)) {
+    if (req.eventAccess !== 'overview' && !secretMatches(bearerOf(req), req.event.adminKeyHash)) {
       return res.status(401).json({ error: adminT('errors.invalidAdminLink') });
     }
     next();
@@ -1008,6 +1020,7 @@ export function createApp({
 
   adminApi.post('/overview/logout', overviewSameOrigin, (req, res) => {
     res.clearCookie(OVERVIEW_COOKIE, { path: OVERVIEW_COOKIE_PATH });
+    res.clearCookie(OVERVIEW_COOKIE, { path: OLD_OVERVIEW_COOKIE_PATH });
     res.json({ ok: true });
   });
 
@@ -1050,6 +1063,9 @@ export function createApp({
   adminApi.get('/events/:slug', loadAdminEvent, requireEventAdmin, (req, res) => {
     const registrations = repo.listRegistrations(req.event.id);
     res.json({
+      // 'event' (arrangementets egen admin-nøkkel) eller 'overview' (via oversikten – siden viser da
+      // «Alle arrangementer» som vei tilbake).
+      access: req.eventAccess,
       event: adminEvent(req.event, registrations.length),
       registrations: registrations.map(({
         id, bookingId, position, name, email, answers, createdAt, contactName, contactEmail, code, doorCode, checkedInAt, checkedInBy, late,

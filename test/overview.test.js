@@ -262,7 +262,7 @@ describe('brukernavn og passord (OVERVIEW_AUTH=password)', () => {
     assert.deepEqual(loadConfig({ ...ENV, OVERVIEW_KEY: KEY }).overview.methods, ['key', 'password']);
   });
 
-  test('innlogging gir en informasjonskapsel som bare sendes til oversikts-API-et', async () => {
+  test('innlogging gir en informasjonskapsel som bare sendes til admin-API-et', async () => {
     const app = await startApp(ENV);
     const denied = await overview(app);
     assert.equal(denied.status, 401);
@@ -279,7 +279,7 @@ describe('brukernavn og passord (OVERVIEW_AUTH=password)', () => {
     const cookie = cookieOf(ok);
     assert.match(cookie, /HttpOnly/);
     assert.match(cookie, /SameSite=Strict/);
-    assert.match(cookie, /Path=\/api\/admin\/overview/);
+    assert.match(cookie, /Path=\/api\/admin;/, 'oversikten og arrangementenes admin-API – ikke sidene');
     assert.match(cookie, /Max-Age=2592000/, '30 dager');
     assert.match(cookie, /Secure/, 'hovednettstedet er på https');
     assert.ok(!cookie.includes(PASSWORD) && !cookie.includes(encodeURIComponent(PASSWORD)), 'passordet står ikke i informasjonskapselen');
@@ -292,7 +292,10 @@ describe('brukernavn og passord (OVERVIEW_AUTH=password)', () => {
 
     const out = await app.request({ method: 'POST', path: '/api/admin/overview/logout' });
     assert.equal(out.status, 200);
-    assert.match(cookieOf(out), /Expires=Thu, 01 Jan 1970/);
+    // Begge stiene slettes: /api/admin, og /api/admin/overview fra før 2026.10.8.5.
+    const cleared = out.headers['set-cookie'].filter((c) => c.startsWith('ov=;'));
+    assert.deepEqual(cleared.map((c) => /Path=([^;]+)/.exec(c)[1]).sort(), ['/api/admin', '/api/admin/overview']);
+    assert.ok(cleared.every((c) => /Expires=Thu, 01 Jan 1970/.test(c)));
   });
 
   test('uten OVERVIEW_USER spørres det bare om passordet', async () => {
@@ -370,5 +373,74 @@ describe('OVERVIEW_AUTH i konfigurasjonen', () => {
     const config = loadConfig({ DOMAIN: MAIN, OVERVIEW_PASSWORD: 'abc' });
     assert.deepEqual(config.overview.methods, ['password']);
     assert.ok(config.warnings.some((w) => w.startsWith('OVERVIEW_PASSWORD er bare 3 tegn')));
+  });
+});
+
+// «Administrer» i oversikten: tilgangen til oversikten gir også tilgang til hvert arrangements admin-side,
+// fordi admin-nøklene bare lagres som hash og lenkene ikke kan lages på nytt.
+describe('«Administrer»: oversikts-tilgangen åpner admin-siden for hvert arrangement', () => {
+  const PASSWORD = 'riktig hest batteri stift';
+
+  test('med oversiktsnøkkelen: hele admin-API-et for alle arrangementene', async () => {
+    const app = await startApp({ ADMIN_NO_AUTH: 'true', DOMAIN: MAIN, OVERVIEW_KEY: KEY });
+    const event = await createEvent(app, { title: 'Julebord' });
+    await register(app, event.slug, { name: 'Ola Gjest', email: 'ola.gjest@example.com' });
+
+    const view = await app.request({ path: `/api/admin/events/${event.slug}`, headers: bearer(KEY) });
+    assert.equal(view.status, 200);
+    assert.equal(view.json.access, 'overview');
+    assert.equal(view.json.registrations[0].name, 'Ola Gjest');
+    // Med arrangementets egen nøkkel som før – og siden vet forskjellen.
+    assert.equal((await app.request({ path: `/api/admin/events/${event.slug}`, headers: bearer(event.adminKey) })).json.access, 'event');
+
+    // Rutene under (requireEventAdmin) godtar også oversikts-tilgangen: CSV, oppsett og sletting.
+    assert.equal((await app.request({ path: `/api/admin/events/${event.slug}/registrations.csv`, headers: bearer(KEY) })).status, 200);
+    assert.equal((await app.request({ path: `/api/admin/events/${event.slug}/config`, headers: bearer(KEY) })).status, 200);
+    const id = view.json.registrations[0].id;
+    assert.equal((await app.request({ method: 'POST', path: `/api/admin/events/${event.slug}/registrations/${id}/checkin`, headers: bearer(KEY) })).status, 200);
+    assert.equal((await app.request({ method: 'DELETE', path: `/api/admin/events/${event.slug}`, headers: bearer(KEY) })).status, 200);
+    expectNaked404(await app.request({ path: `/api/admin/events/${event.slug}`, headers: bearer(KEY) }), 'slettet');
+  });
+
+  test('uten tilgang: 401 som før', async () => {
+    const app = await startApp({ ADMIN_NO_AUTH: 'true', DOMAIN: MAIN, OVERVIEW_KEY: KEY });
+    const event = await createEvent(app);
+    assert.equal((await app.request({ path: `/api/admin/events/${event.slug}` })).status, 401);
+    assert.equal((await app.request({ path: `/api/admin/events/${event.slug}`, headers: bearer('feil') })).status, 401);
+  });
+
+  test('uten oversikt (ingen OVERVIEW_AUTH) gir ingenting annet enn arrangementets nøkkel tilgang', async () => {
+    const app = await startApp({ ADMIN_NO_AUTH: 'true', DOMAIN: MAIN });
+    const event = await createEvent(app);
+    assert.equal((await app.request({ path: `/api/admin/events/${event.slug}`, headers: bearer(KEY) })).status, 401);
+    assert.equal((await app.request({ path: `/api/admin/events/${event.slug}`, headers: bearer(event.adminKey) })).status, 200);
+  });
+
+  test('med passord: informasjonskapselen fra innloggingen virker også på admin-siden', async () => {
+    const app = await startApp({ ADMIN_NO_AUTH: 'true', DOMAIN: MAIN, OVERVIEW_PASSWORD: PASSWORD });
+    const event = await createEvent(app);
+    const loggedIn = await app.request({ method: 'POST', path: '/api/admin/overview/login', body: { password: PASSWORD } });
+    const cookie = loggedIn.headers['set-cookie'].find((c) => c.startsWith('ov=')).split(';')[0];
+    const res = await app.request({ path: `/api/admin/events/${event.slug}`, headers: { cookie } });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.access, 'overview');
+  });
+
+  test('bare der oversikten finnes: med ADMIN_HOST gir oversikts-tilgangen ingenting på de offentlige domenene', async () => {
+    const app = await startApp({ ADMIN_NO_AUTH: 'true', DOMAIN: MAIN, ADMIN_HOST: ADMIN, OVERVIEW_KEY: KEY });
+    const event = await createEvent(app, {}, onHost(ADMIN));
+    const onAdmin = await app.request({ path: `/api/admin/events/${event.slug}`, headers: { ...onHost(ADMIN), ...bearer(KEY) } });
+    assert.equal(onAdmin.status, 200);
+    const onPublic = await app.request({ path: `/api/admin/events/${event.slug}`, headers: { ...onHost(MAIN), ...bearer(KEY) } });
+    assert.equal(onPublic.status, 401, 'arrangementets egen nøkkel kreves der');
+    // Arrangørens egen lenke virker som før, også på det offentlige domenet.
+    assert.equal((await app.request({ path: `/api/admin/events/${event.slug}`, headers: { ...onHost(MAIN), ...bearer(event.adminKey) } })).status, 200);
+  });
+
+  test('OVERVIEW_AUTH=none: admin-sidene er åpne der oversikten finnes – eierens valg', async () => {
+    const app = await startApp({ ADMIN_NO_AUTH: 'true', DOMAIN: MAIN, ADMIN_HOST: ADMIN, OVERVIEW_AUTH: 'none' });
+    const event = await createEvent(app, {}, onHost(ADMIN));
+    assert.equal((await app.request({ path: `/api/admin/events/${event.slug}`, headers: onHost(ADMIN) })).status, 200);
+    assert.equal((await app.request({ path: `/api/admin/events/${event.slug}`, headers: onHost(MAIN) })).status, 401);
   });
 });
