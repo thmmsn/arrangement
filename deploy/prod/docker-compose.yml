@@ -1,0 +1,103 @@
+# Påmeldingssystemet fra https://github.com/thmmsn/arrangement, driftet som egen
+# stack på prod-verten ved siden av arkitekt-2026 og dataskrap.
+#
+#   deploy/prod/deploy.sh
+#
+# deploy.sh synker arbeidstreet til ./app på verten og legger denne fila og
+# ./branding ved siden av. Denne fila og ./branding er det som er
+# Thommesen-spesifikt. Hemmeligheter står i .env på
+# verten (RESEND_API_KEY), alt annet står her.
+#
+# Cloudflare-tunnelen ruter på containernavn over det delte tunnelnettverket:
+#   arrangement.arkitekt-thommesen.no    → HTTP arrangement:3000  (no-tunnelen)
+#   events.thommesenarchitecture.com     → HTTP arrangement:3000  (com-tunnelen)
+#
+# Admin ligger på arrangement.arkitekt-thommesen.no/admin. Appen slipper bare
+# /admin og /api/admin til når Host er ADMIN_HOST, så på .com gir de 404.
+# Cloudflare Access legges på stiene admin og api/admin på .no-vertsnavnet.
+#
+# På LAN svarer appen på http://172.17.2.19:9067, som går til LAN_PORT 3001.
+# Den porten er betrodd, med admin uten Access og uten rate limiting, og
+# publiseres derfor bare på LAN-adressen. Port 3000 er tunnelens og publiseres
+# aldri. Tunnelen skal aldri peke på 3001.
+name: arrangement
+
+networks:
+  tunnel:
+    external: true
+    name: arkitekt-thommesen-2026_web
+
+services:
+  arrangement:
+    build: ./app
+    container_name: arrangement
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_PATH: /data/arrangement.db
+      PORT: "3000"
+      LAN_PORT: "3001"
+      CLIENT_IP_HEADER: cf-connecting-ip
+      TIME_ZONE: Europe/Oslo
+
+      DOMAIN: arrangement.arkitekt-thommesen.no
+      ADMIN_HOST: arrangement.arkitekt-thommesen.no
+      # Appen kontrollerer selv Access-tokenet på /admin og /api/admin, slik at
+      # en feil i Access-regelen ikke gjør admin åpen. AUD er ID-en til
+      # Access-applikasjonen for arrangement. Ingen av dem er hemmelige.
+      CF_ACCESS_TEAM_DOMAIN: thommesen.cloudflareaccess.com
+      CF_ACCESS_AUD: cd964c89d2f7b08a016ed169c7f72a1e578f9380e8b51f47c61dfd9be9e29af9
+      # Oversikten over alle arrangementer på /admin, beskyttet som resten av admin.
+      OVERVIEW_AUTH: access,lan
+      # Avsenderdomenet må være verifisert i Resend. thommesenarchitecture.com
+      # er det kontaktskjemaet allerede sender fra.
+      EMAIL_FROM: "Thommesen Arkitekter <arrangement@thommesenarchitecture.com>"
+      # Får alle lenkene (admin, dørvakt, avlys) når et arrangement opprettes
+      # eller avlyses.
+      ADMIN_EMAIL: ft@thommesenarchitecture.com
+
+      # Profilen fra felles/data/farger.yaml og nettsidenes typografi.
+      SITE_NAME: Thommesen Arkitekter
+      LOGO_URL: /assets/custom/logo.svg
+      LOGO_HEIGHT: "36"
+      FAVICON_URL: /assets/custom/favicon.svg
+      COLOR_ACCENT: "#1b8fd1"
+      COLOR_ACCENT_TEXT: "#ffffff"
+      COLOR_BACKGROUND: "#ffffff"
+      COLOR_SURFACE: "#ffffff"
+      COLOR_TEXT: "#111314"
+      COLOR_MUTED: "#69737d"
+      COLOR_BORDER: "#dde3e8"
+      COLOR_HIGHLIGHT: "#1b8fd1"
+      FONT_HEADING: "DM Sans:wght@400;500;600"
+      FONT_BODY: "DM Sans:wght@400;500;600"
+      RADIUS: "0"
+      SHOW_BAND: "false"
+      SITE_LANG: nb
+      # Forsiden uten arrangementslenke sendes til nettsidene i stedet for 404.
+      ROOT_REDIRECT: https://arkitekt-thommesen.no/
+
+      # .com-nettstedet. Samme database og admin, og arrangementet velger
+      # nettsted i skjemaet. Farger og typografi arves fra hovednettstedet.
+      SITE_COM_DOMAIN: events.thommesenarchitecture.com
+      SITE_COM_LANG: en
+      SITE_COM_SITE_NAME: Thommesen Architecture
+      SITE_COM_LOGO_URL: /assets/custom/logo-com.svg
+      SITE_COM_FAVICON_URL: /assets/custom/favicon-com.svg
+      SITE_COM_EMAIL_FROM: "Thommesen Architecture <events@thommesenarchitecture.com>"
+      SITE_COM_ROOT_REDIRECT: https://thommesenarchitecture.com/
+    volumes:
+      - arrangement-data:/data
+      - ./branding:/app/branding:ro
+      # Egne skins, og sertifikater og nøkler til Apple og Google Wallet. Begge
+      # ligger bare på verten.
+      - ./skins:/app/skins:ro
+      - ./secrets:/secrets:ro
+    ports:
+      - "172.17.2.19:9067:3001"
+    networks:
+      - default
+      - tunnel
+
+volumes:
+  arrangement-data:
